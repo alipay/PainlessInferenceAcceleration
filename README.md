@@ -1,31 +1,64 @@
-## README的意义
+# Painless Inference Acceleration (PIA)
 
-README 文件通常是项目的第一个入口点。你应该通过 README 明确地告诉大家，为什么他们应该使用你的项目，以及安装和使用的方法。
 
-如果在仅仅看文档而不看代码的情况下就可以使用你的项目，该文档就完成了。 这个非常重要，因为这将使项目的文档接口与其内部实现分开，只要接口保持不变，就可以自由更改项目的内部结构。 
+<p align="center">
+  
+<p align="center">
+   A toolkit for accelerating LLM inference without painness. Currently it only contains LOOKAHEAD, which accelerates LLM without loss of accuracy.
+</p>
 
-**文档，而不是代码定义了项目的使用方式。**
+</p>
 
-一个规范的README文档能减少用户检索信息的时间。
+## News （最近更新）
 
-## 标准 README
 
-一个标准的README文件应当至少包含以下的内容：
 
-- 项目背景：说明创建本项目的背景与动机，创建本项目试图解决的问题 
-- 安装方法：说明如何快速上手使用该项目
-- 使用方法：列出本项目能够提供的功能以及使用这些功能的方法
-- 文档：现阶段antcode鼓励用户使用语雀组织项目文档，在README上应当放入项目的语雀文档链接
+## Introduction （介绍）
 
-## 附加内容
+该代码库简称为PIA，用于LLM推理加速。
 
-视项目的实际情况，同样也应该包含以下内容：
+PIA的目录如下所示：
+- lookahead						# lookahead框架
+- lookahead/common              # lookahead公共代码
+- lookahead/models			    # lookahead支持的模型
+- lookahead/tests			    # 本地测试脚本及数据
+- LEGAL.md 					# 合法性声明
+- README.md					# 使用指南
+- requirements.txt	# 依赖包
 
-- 项目特性：说明本项目相较于其他同类项目所具有的特性
-- 兼容环境：说明本项目能够在什么平台上运行
-- 使用示例：展示一些使用本项目的小demo
-- 主要项目负责人：使用“@”标注出本项目的主要负责人，方便项目的用户沟通
-- 参与贡献的方式：规定好其他用户参与本项目并贡献代码的方式
-- 项目的参与者：列出项目主要的参与人
-- 已知用户：列出已经在生产环境中使用了本项目的全部或部分组件的公司或组织
-- 赞助者：列出为本项目提供赞助的用户
+
+## Lincense （使用协议）
+
+协议为CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/)
+
+使用本项目前，请先阅读LICENSE.txt。如果您不同意该使用协议中列出的条款、法律免责声明和许可，您将不得使用本项目中的这些内容。
+
+## Installation （安装指南）
+
+- PIA的安装步骤如下所示：
+```
+# 新建环境（Python版本3.8）
+conda create -n pia python=3.8
+source activate pia
+
+# clone项目地址
+git clone xxx
+
+# 安装包依赖
+cd pia
+pip install -r requirements.txt
+```
+
+
+## Quick Start （快速启动）
+
+PIA提供了本地测试脚本，可以快速进行安装正确性验证：
+```
+# 终端运行
+cd lookahead/examples
+python usage.python
+```
+
+## FAQ （问答）
+
+## Citations （引用）

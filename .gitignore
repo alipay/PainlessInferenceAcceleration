@@ -1,0 +1,13 @@
+.idea/
+.DS_Store
+*.pyc
+logs/
+runs/
+settings.json
+.vscode/
+pycache/
+__pycache__/
+build/
+dist/
+*.log
+*.txt
