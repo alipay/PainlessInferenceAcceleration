@@ -56,7 +56,7 @@ PIA提供了本地测试脚本，可以快速进行安装正确性验证：
 ```
 # 终端运行
 cd lookahead/examples
-python usage.python
+python usage.py
 ```
 
 ## FAQ （问答）
