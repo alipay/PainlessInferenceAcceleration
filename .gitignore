@@ -2,7 +2,6 @@
 logs/
 runs/
 .vscode/
-pycache/
 __pycache__/
 bin/
 build/
@@ -23,3 +22,4 @@ var/
 settings.json
 .DS_Store
 *.pyc
+__pycache__
