@@ -4,7 +4,7 @@ from queue import Queue
 import torch
 
 
-def build_chat_input(model, tokenizer, messages: List[dict], max_new_tokens: int=0):
+def build_chat_input(model, tokenizer, messages: List[dict], max_new_tokens: int = 0):
     def _parse_messages(messages, split_role="user"):
         system, rounds = "", []
         round = []
@@ -80,4 +80,3 @@ class TextIterStreamer:
             raise StopIteration()
         else:
             return value
-

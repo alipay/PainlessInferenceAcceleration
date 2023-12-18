@@ -836,7 +836,7 @@ class ChatGLMModel(ChatGLMPreTrainedModel):
 
         else:
             # lookahead
-            full_attention_mask = (1-attention_mask).to(torch.bool)
+            full_attention_mask = (1 - attention_mask).to(torch.bool)
             # Rotary positional embeddings
             position_ids = torch.sum(attention_mask, 3).squeeze(1) - 1
             rotary_pos_emb = self.rotary_pos_emb(self.seq_length)
@@ -858,7 +858,6 @@ class ChatGLMModel(ChatGLMPreTrainedModel):
             hidden_states=all_hidden_states,
             attentions=all_self_attentions,
         )
-
 
 
 class ChatGLMForConditionalGeneration(ChatGLMPreTrainedModel):
@@ -987,7 +986,8 @@ class ChatGLMForConditionalGeneration(ChatGLMPreTrainedModel):
             attentions=transformer_outputs.attentions,
         )
 
-    def _update_cache(self, past_key_values, kv_idx, prefix_and_next_count=None, max_match_count=None, max_match_index=None):
+    def _update_cache(self, past_key_values, kv_idx, prefix_and_next_count=None, max_match_count=None,
+                      max_match_index=None):
         output_past_key_values = []
         for k, v in past_key_values:
             if max_match_index + 1 == max_match_count:

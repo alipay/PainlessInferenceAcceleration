@@ -12,6 +12,7 @@ from modelscope.utils.logger import get_logger
 from transformers import AutoModelForCausalLM, AutoTokenizer, GenerationConfig
 from transformers.generation.utils import GenerationConfig
 
+
 @PIPELINES.register_module(Tasks.text_generation, module_name='Baichuan2-7B-text-generation-pipe')
 class Baichuan7BTextGenerationPipeline(TextGenerationPipeline):
     def __init__(
@@ -21,27 +22,27 @@ class Baichuan7BTextGenerationPipeline(TextGenerationPipeline):
             **kwargs):
         self.model = Baichuan7BTextGeneration(model) if isinstance(model, str) else model
         super().__init__(model=self.model, **kwargs)
-    
+
     def preprocess(self, inputs, **preprocess_params) -> Dict[str, Any]:
         return inputs
-    
+
     def _sanitize_parameters(self, **pipeline_parameters):
-        return {},pipeline_parameters,{}
-    
+        return {}, pipeline_parameters, {}
+
     # define the forward pass
     def forward(self, inputs: Dict, **forward_params) -> Dict[str, Any]:
         output = {}
         device = self.model.model.device
         input_ids = self.model.tokenizer(inputs, return_tensors="pt").input_ids.to(device)
-        pred = self.model.model.generate(input_ids,**forward_params)
+        pred = self.model.model.generate(input_ids, **forward_params)
         out = self.model.tokenizer.decode(pred.cpu()[0], skip_special_tokens=True)
         output['text'] = out
         return output
-    
+
     # format the outputs from pipeline
     def postprocess(self, input, **kwargs) -> Dict[str, Any]:
         return input
-    
+
 
 @MODELS.register_module(Tasks.text_generation, module_name='Baichuan2-7B')
 class Baichuan7BTextGeneration(TorchModel):
@@ -50,23 +51,24 @@ class Baichuan7BTextGeneration(TorchModel):
         self.logger = get_logger()
         # loading tokenizer
         self.tokenizer = AutoTokenizer.from_pretrained(model_dir, trust_remote_code=True)
-        self.model = AutoModelForCausalLM.from_pretrained(model_dir, device_map="auto", torch_dtype=torch.float16, trust_remote_code=True)
+        self.model = AutoModelForCausalLM.from_pretrained(model_dir, device_map="auto", torch_dtype=torch.float16,
+                                                          trust_remote_code=True)
         # self.model = AutoModelForCausalLM.from_pretrained(model_dir, device_map="auto",trust_remote_code=True)
         self.model.generation_config = GenerationConfig.from_pretrained(model_dir)
         self.model = self.model.eval()
-    
-    def forward(self,input: Dict, *args, **kwargs) -> Dict[str, Any]:
+
+    def forward(self, input: Dict, *args, **kwargs) -> Dict[str, Any]:
         output = {}
         response = self.model.chat(self.tokenizer, input)
-        return {OutputKeys.RESPONSE:response, OutputKeys.HISTORY: ""}
-    
+        return {OutputKeys.RESPONSE: response, OutputKeys.HISTORY: ""}
+
     def quantize(self, bits: int):
         self.model = self.model.quantize(bits)
         return self
-    
+
     def infer(self, input, **kwargs):
         device = self.model.device
         input_ids = self.tokenizer(input, return_tensors="pt").input_ids.to(device)
-        pred = self.model.generate(input_ids,**kwargs)
+        pred = self.model.generate(input_ids, **kwargs)
         out = self.tokenizer.decode(pred.cpu()[0], skip_special_tokens=True)
         return out
