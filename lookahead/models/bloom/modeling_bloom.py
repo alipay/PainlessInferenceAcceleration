@@ -887,7 +887,18 @@ class BloomModel(BloomPreTrainedModel):
             seq_length_with_past = seq_length_with_past + past_key_values_length
 
         # TODO: adapt for lookahead
-        if attention_mask is None or len(attention_mask.shape) == 2:
+        if attention_mask is not None and len(attention_mask.shape) == 4:
+            # lookahead
+            # TODO: adapt for padding
+            # if past_key_values[0] is not None:
+            #     prefix_attention_mask = torch.ones((batch_size, past_key_values_length), device=hidden_states.device, dtype=torch.long)
+            #     attention_mask_2d = torch.cat([prefix_attention_mask, torch.sum(attention_mask, dim=-1).squeeze(1)], 1)
+            # else:
+            #     attention_mask_2d = torch.sum(attention_mask, dim=-1).squeeze(1)-1
+            alibi = lookahead_build_alibi_tensor(attention_mask, self.num_heads, dtype=hidden_states.dtype)
+            bs, _, q_len, kv_len = attention_mask.shape
+            causal_mask = (1 - attention_mask).to(dtype=torch.bool, device=hidden_states.device)
+        else:
             # no lookahead
             if attention_mask is None:
                 attention_mask = torch.ones((batch_size, seq_length_with_past), device=hidden_states.device)
@@ -901,17 +912,6 @@ class BloomModel(BloomPreTrainedModel):
                 input_shape=(batch_size, seq_length),
                 past_key_values_length=past_key_values_length,
             )
-        else:
-            # lookahead
-            # TODO: adapt for padding
-            # if past_key_values[0] is not None:
-            #     prefix_attention_mask = torch.ones((batch_size, past_key_values_length), device=hidden_states.device, dtype=torch.long)
-            #     attention_mask_2d = torch.cat([prefix_attention_mask, torch.sum(attention_mask, dim=-1).squeeze(1)], 1)
-            # else:
-            #     attention_mask_2d = torch.sum(attention_mask, dim=-1).squeeze(1)-1
-            alibi = lookahead_build_alibi_tensor(attention_mask, self.num_heads, dtype=hidden_states.dtype)
-            bs, _, q_len, kv_len = attention_mask.shape
-            causal_mask = (1 - attention_mask).to(dtype=torch.bool, device=hidden_states.device)
 
         for i, (block, layer_past) in enumerate(zip(self.h, past_key_values)):
             if output_hidden_states:

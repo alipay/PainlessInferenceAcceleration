@@ -597,9 +597,14 @@ class GPTJModel(GPTJPreTrainedModel):
         else:
             past_length = past_key_values[0][0].size(-2)
 
-        # Attention mask.
-        if attention_mask is None or len(attention_mask.shape) == 2:
+        # NOTE: adapt for lookahead
+        if attention_mask is not None and len(attention_mask.shape) == 4:
+            # lookahead
+            position_ids = torch.sum(attention_mask, dim=-1).squeeze(1) - 1
+            attention_mask = (1.0 - attention_mask) * torch.finfo(self.dtype).min
 
+        else:
+            # no lookahead
             if position_ids is not None:
                 position_ids = position_ids.view(-1, input_shape[-1]).long()
             else:
@@ -624,10 +629,6 @@ class GPTJModel(GPTJPreTrainedModel):
             attention_mask = attention_mask.to(dtype=self.dtype)  # fp16 compatibility
             attention_mask = (1.0 - attention_mask) * torch.finfo(self.dtype).min
 
-        elif len(attention_mask.shape) == 4:
-            # TODO: lookahead
-            position_ids = torch.sum(attention_mask, dim=-1).squeeze(1) - 1
-            attention_mask = (1.0 - attention_mask) * torch.finfo(self.dtype).min
 
         # Prepare head mask if needed
         # 1.0 in head_mask indicate we keep the head

@@ -74,8 +74,8 @@ worker.load_prompts(prompt_dir=prompt_dir)
 
 prompt = '杭州在哪里？'
 max_length = 256
-chat_count = 100
-warmup_count = 1000
+chat_count = 1000
+warmup_count = 10000
 
 # runable check
 worker.chat(prompt,
@@ -97,7 +97,5 @@ worker.batch_chat(worker.prompts[:10],
 # performance check
 worker.perf_check(worker.prompts[:chat_count], warmup_ids=worker.ids[chat_count:chat_count + warmup_count],
                   sizes=[64], lens=[0], max_length=max_length)
-worker.perf_check(worker.prompts[:chat_count], warmup_ids=worker.ids[chat_count:chat_count + warmup_count],
-                  sizes=[64], lens=[12], max_length=max_length)
 worker.perf_check(worker.prompts[:chat_count], warmup_ids=worker.ids[chat_count:chat_count + warmup_count],
                   sizes=[64], lens=[12], max_length=max_length)

@@ -31,7 +31,6 @@ import torch.utils.checkpoint
 from torch import nn
 from torch.nn import CrossEntropyLoss
 from torch.nn import functional as F
-# from transformers import PreTrainedModel, PretrainedConfig
 from transformers import PretrainedConfig
 from transformers.activations import ACT2FN
 from transformers.generation.utils import GenerationConfig
@@ -411,17 +410,13 @@ class BaichuanModel(BaichuanPreTrainedModel):
             inputs_embeds = self.embed_tokens(input_ids)
         # embed positions
 
-        # TODO: adapt for lookahead
-        # # embed positions
-        # if attention_mask is None:
-        #     attention_mask = torch.ones(
-        #         (batch_size, seq_length_with_past), dtype=torch.bool, device=inputs_embeds.device
-        #     )
-        # attention_mask = self._prepare_decoder_attention_mask(
-        #     attention_mask, (batch_size, seq_length), inputs_embeds, past_key_values_length
-        # )
-
-        if attention_mask is None or len(attention_mask.shape) == 2:
+        # Note: adapt for lookahead
+        if attention_mask is not None and len(attention_mask.shape) == 4:
+            # lookahead
+            # attention_mask:  [bs, 1, src_len, tgt_len]
+            position_ids = torch.sum(attention_mask, dim=-1).squeeze(1) - 1
+            attention_mask = (1.0-attention_mask.to(inputs_embeds.dtype)) * torch.finfo(inputs_embeds.dtype).min
+        else:
             # non-lookahead
             if attention_mask is None:
                 attention_mask = torch.ones(
@@ -440,11 +435,6 @@ class BaichuanModel(BaichuanPreTrainedModel):
             else:
                 position_ids = position_ids.view(-1, seq_length).long()
 
-        else:
-            # lookahead
-            # attention_mask:  [bs, 1, src_len, tgt_len]
-            position_ids = torch.sum(attention_mask, dim=-1).squeeze(1) - 1
-            attention_mask = (attention_mask.to(inputs_embeds.dtype) - 1.0) * 10000.0
 
         hidden_states = inputs_embeds
 

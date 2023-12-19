@@ -5,7 +5,7 @@ Copyright (c) Ant Financial Service Group and its affiliates.
 
 import sys
 
-sys.path.append('..')
+sys.path.append('../../lookahead')
 import unittest
 import numpy as np
 

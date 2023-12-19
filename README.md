@@ -4,7 +4,7 @@
 
   
 <p align="center">
-   A toolkit for accelerating LLM inference without painness. Currently it only contains `lookahead`, a framework which accelerates LLM inference without loss of accuracy, other works will release soon.
+   A toolkit for LLM inference without painness. Currently it only contains `lookahead`, a framework which accelerates LLM inference without loss of accuracy, other works will release soon.
 </p>
 
 ## News or Update
@@ -90,7 +90,7 @@ cd lookahead/examples
 python llama_example.py
 ```
 
-To evaluation speedup of `lookahead`, we can run the scrips in the path `benchmarks/`,
+To evaluation speedup of `lookahead`, we can run the scripts in the path `benchmarks/`,
 
 
 

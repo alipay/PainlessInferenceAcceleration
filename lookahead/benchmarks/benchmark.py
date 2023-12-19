@@ -21,7 +21,6 @@ sys.path.append('..')
 # os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 # os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
 
-
 class Benchmark():
     def __init__(self,
                  log_dir=None,
@@ -106,7 +105,7 @@ class Benchmark():
 
     def chat(self, prompt, max_length=256, use_lookahead=False, decoding_length=64, branch_length=8,
              decoding_mode='hier', debug_lookahead=False):
-        if use_lookahead and decoding_length > 1 and branch_length > 1:
+        if use_lookahead and decoding_length > 1 and branch_length > 0:
             token_max_length = max_length + decoding_length + 1
         else:
             token_max_length = max_length
@@ -244,7 +243,7 @@ class Benchmark():
             for j, branch_length in enumerate(lens):
                 if decoding_length < branch_length * batch_size:
                     continue
-                use_lookahead = decoding_length > 1 and branch_length > 1
+                use_lookahead = decoding_length > 1 and branch_length > 0
                 in_char = 0
                 in_token = 0
                 out_char = 0
@@ -316,7 +315,7 @@ class Benchmark():
                 speedup = speeds[-1] / speeds[0]
                 times = [round(x, 3) for x in times]
                 log_str = f"mode:{decoding_mode} bs:{batch_size} " \
-                          f"decoding:{decoding_length}/{branch_length} " \
+                          f"decoding_length:{decoding_length} branch_length:{branch_length} " \
                           f"query:{len(queries)} warmup:{wc} " \
                           f"input:{in_token:.1f} output:{out_token:.1f} " \
                           f"edl:{edl:.3f}/{dl:.3f}/{ft:.3f} time:{t:.3f} " \

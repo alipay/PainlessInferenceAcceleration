@@ -682,11 +682,11 @@ class QWenModel(QWenPreTrainedModel):
         if inputs_embeds is None:
             inputs_embeds = self.wte(input_ids)
 
-        # adapt for lookahead
+        # NOTE: adapt for lookahead
         if attention_mask is not None and len(attention_mask.shape) == 4:
             # with lookahead
             position_ids = torch.sum(attention_mask, dim=-1).squeeze(1) - 1
-            attention_mask = (1.0 - attention_mask.to(inputs_embeds.dtype)) * torch.finfo(self.dtype).min
+            attention_mask = (1.0 - attention_mask.to(inputs_embeds.dtype)) * torch.finfo(inputs_embeds.dtype).min
         else:
             # without lookahead
             if position_ids is None:

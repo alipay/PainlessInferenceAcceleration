@@ -642,20 +642,12 @@ class OPTDecoder(OPTPreTrainedModel):
         mask_seq_length = past_key_values_length + seq_length
 
         # TODO: adapt for lookahead
-        # embed positions
-        # if attention_mask is None:
-        #     attention_mask = torch.ones(batch_size, mask_seq_length, device=inputs_embeds.device)
-        # elif attention_mask.shape[1] != mask_seq_length:
-        #     raise ValueError(
-        #         f"The provided attention mask has length {attention_mask.shape[1]}, but its length should be "
-        #         f"{mask_seq_length} (sum of the lengths of current and past inputs)"
-        #     )
-        # causal_attention_mask = self._prepare_decoder_attention_mask(
-        #     attention_mask, input_shape, inputs_embeds, past_key_values_length
-        # )
-        # pos_embeds = self.embed_positions(attention_mask, past_key_values_length)
-
-        if attention_mask is None or len(attention_mask.shape) == 2:
+        if attention_mask is not None and len(attention_mask.shape) == 4:
+            # lookahead
+            # attention_mask:  [bs, 1, src_len, tgt_len]
+            causal_attention_mask = (1.0 - attention_mask.to(inputs_embeds.dtype)) * torch.finfo(inputs_embeds.dtype).min
+            pos_embeds = self.embed_positions(attention_mask, past_key_values_length)
+        else:
             # non-lookahead
             if attention_mask is None:
                 attention_mask = torch.ones(batch_size, mask_seq_length, device=inputs_embeds.device)
@@ -663,11 +655,6 @@ class OPTDecoder(OPTPreTrainedModel):
             causal_attention_mask = self._prepare_decoder_attention_mask(
                 attention_mask, input_shape, inputs_embeds, past_key_values_length
             )
-            pos_embeds = self.embed_positions(attention_mask, past_key_values_length)
-        else:
-            # lookahead
-            # attention_mask:  [bs, 1, src_len, tgt_len]
-            causal_attention_mask = (attention_mask.to(inputs_embeds.dtype) - 1.0) * 10000.0
             pos_embeds = self.embed_positions(attention_mask, past_key_values_length)
 
         if self.project_in is not None:

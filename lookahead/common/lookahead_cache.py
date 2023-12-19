@@ -68,8 +68,8 @@ class Tree():
             ps = {token: p}
         return ps
 
-    def get(self, token_ids, max_size=64, max_length=8, min_input_size=0, min_output_size=0, output_weight=1e-4,
-            mode='mix', idx=0):
+    def get(self, token_ids, max_size=64, max_length=8, min_input_size=0,
+            min_output_size=0, output_weight=1e-4, mode='mix', idx=0):
         assert mode in ('input', 'output', 'mix')
 
         match_token_id, pairs = self._match(token_ids, mode=mode, idx=idx)
@@ -135,7 +135,7 @@ class Tree():
         sizes = [0, 0]
         self._ravel(pairs, ids, mask, -1,
                     max_size=max_size,
-                    max_length=max_length - 1,
+                    max_length=max_length,
                     min_output_freq=min_output_freq,
                     min_input_freq=min_input_freq,
                     min_mix_freq=min_mix_freq,
@@ -237,8 +237,7 @@ class Tree():
 
     def _ravel(self, pairs, ids, mask, pid, max_size=64, max_length=8,
                min_output_freq=1.0, min_input_freq=1.0, min_mix_freq=1.0,
-               output_weight=1e-4,
-               sizes=None, mode='mix', idx=0):
+               output_weight=1e-4, sizes=None, mode='mix', idx=0):
         if len(ids) >= max_size or max_length <= 0:
             return
 
@@ -399,7 +398,7 @@ class LookaheadCache():
         assert mode in ('input', 'output', 'mix')
 
         decoding_masks = self.default_mask
-        if decoding_length <= 1 or branch_length <= 1:
+        if decoding_length <= 1 or branch_length == 0:
             return token_ids[-1:], decoding_masks, []
 
         decoding_ids = None
@@ -485,7 +484,7 @@ class LookaheadCache():
         assert mode in ('input', 'output', 'mix')
 
         decoding_masks = self.default_mask
-        if decoding_length <= 1 or branch_length <= 1:
+        if decoding_length <= 1 or branch_length == 0:
             return token_ids[-1:], decoding_masks, []
 
         decoding_ids = []

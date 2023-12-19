@@ -295,7 +295,7 @@ class GLMStack(torch.nn.Module):
 
         use_cache = use_cache if use_cache is not None else self.config.use_cache
 
-        attention_mask = -10000 * (1.0 - attention_mask.to(hidden_states.dtype))
+        attention_mask =  (1.0 - attention_mask.to(hidden_states.dtype)) * torch.finfo(hidden_states.dtype).min
 
         position_item_ids, position_block_ids = position_ids[:, :, :hidden_states.size(1)].unbind(1)
         position_embeds = self.position_embeddings(position_item_ids)
@@ -500,19 +500,6 @@ class GLMModel(GLMPreTrainedModel):
             attentions=transformer_outputs.attentions,
             cross_attentions=transformer_outputs.cross_attentions,
         )
-
-    # def get_output_embeddings(self):
-    #     return self.lm_head
-
-    # def set_output_embeddings(self, new_embeddings):
-    #     self.lm_head = new_embeddings
-
-    # def get_input_embeddings(self):
-    #     return self.word_embeddings
-
-    # def set_input_embeddings(self, new_embeddings):
-    #     self.word_embeddings = new_embeddings
-
 
 class GLMForConditionalGeneration(GLMPreTrainedModel):
     _keys_to_ignore_on_load_missing = ['glm.lm_head.weight']
