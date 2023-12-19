@@ -10,20 +10,18 @@ import time
 
 import torch
 
-sys.path.append('../..')
+sys.path.append('..')
+sys.path.append('/ossfs/workspace/lookahead')
 from common.pretrained_model import LookaheadCache
 
 # os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 # os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
 
-# should install dq_gemm at first
-# cd lookahead/csrc/kernel
-# python setup.py install
+from models.glm.modeling_glm import GLMForConditionalGeneration
+from models.glm.tokenization_glm import GLMChineseTokenizer
 
-from models.antglm.tokenization_glm_ext import GLMChineseTokenizer
-from models.antglm.modeling_glm import GLMForConditionalGeneration
 
-model_dir = '/mntnlp/nanxiao/searchx_ext'
+model_dir = '/mntnlp/nanxiao/lookahead_benchmark/antrag'
 model = GLMForConditionalGeneration.from_pretrained(model_dir
                                                     , cache_dir='../'
                                                     , offload_folder='./'
@@ -44,7 +42,7 @@ prompt = "杭州在哪里？[gMASK]"
 inputs = tokenizer(prompt, return_tensors="pt", padding=True, truncation=False, )
 
 device = model.device
-debug_lookahead = False
+debug_lookahead = True
 decoding_length = 64
 branch_length = 12
 max_new_tokens = 128
@@ -53,7 +51,7 @@ input_ids = inputs['input_ids'].to(device)
 attention_mask = inputs['generation_attention_mask'].to(device)
 position_ids = inputs['position_ids'].to(device)
 
-for use_lookahead in [False, False, True, True]:
+for use_lookahead in [False,False,True,True]:
     ts = time.time()
     decoding_kwargs = {"use_lookahead": use_lookahead,
                        "debug_lookahead": debug_lookahead,
@@ -71,8 +69,7 @@ for use_lookahead in [False, False, True, True]:
                              do_sample=False,
                              decoding_kwargs=decoding_kwargs
                              )
-    output_ids = outputs.sequences
-    kwargs = outputs.scores if outputs.scores is not None else {}
+    output_ids = outputs
     input_length = input_ids.size(-1)
     output_ids = output_ids[:, input_length:].tolist()
     # output_ids = output_ids.tolist()
@@ -84,5 +81,4 @@ for use_lookahead in [False, False, True, True]:
         output_texts.append(text)
     input_id_list = input_ids.tolist()
     te = time.time()
-    print('output:', output_texts)
-    print(f'time:{te - ts:.3f}')
+    print(f'use_lookahead:{use_lookahead} time:{te - ts:.3f} output:{output_texts}')

@@ -74,7 +74,8 @@ class Tree():
 
         match_token_id, pairs = self._match(token_ids, mode=mode, idx=idx)
         if len(pairs) == 0:
-            return [], np.ones((1, 1), dtype=np.int64), []
+            token_id = token_ids[-1] if len(token_ids) > 0 else self.token_id
+            return [token_id], np.ones((1, 1), dtype=np.int64), [0,0]
 
         freqs = []
         self._get_freqs(pairs, freqs, idx, output_weight)
@@ -162,7 +163,8 @@ class Tree():
 
         match_token_id, pairs = self._match(token_ids, mode=mode)
         if len(pairs) == 0:
-            return [], np.ones((1, 1), dtype=np.int64), []
+            token_id = token_ids[-1] if len(token_ids) > 0 else self.token_id
+            return [token_id], np.ones((1, 1), dtype=np.int64), [0,0]
 
         ids = [match_token_id]
         length = 0
@@ -340,15 +342,9 @@ class LookaheadCache():
         self.stop_words = stop_words if stop_words is not None else {}
         self.default_mask = np.ones((1, 1), dtype=np.int64)
 
-        # self.tot_freq = 0.0
-        # self.freq_dict = {}
-
     def put(self, token_ids, branch_length=8, final=False, mode='output', idx=-1):
         if len(token_ids) >= 2:
-            ts = len(token_ids)  # ts: token_ids size
-            # self.tot_freq += ts
-            # for t in token_ids:
-            #     self.freq_dict[t] = self.freq_dict.get(t, 0)+1
+            ts = len(token_ids)   # ts: token_ids size
 
             for i in range(ts - 1):
                 token_id = token_ids[i]
@@ -376,10 +372,9 @@ class LookaheadCache():
         self._output_ids[idx].extend(token_ids)
         output_ids = self._output_ids[idx]
         ts = len(output_ids)
-        if final:
-            branch_length = 1
-        if ts > branch_length:
-            for i in range(ts - branch_length):
+        min_branch_length = 1 if final else branch_length
+        if ts > min_branch_length:
+            for i in range(ts - min_branch_length):
                 token_id = output_ids[i]
                 tup = output_ids[i + 1:i + branch_length + 1]
                 if self.debug:
@@ -399,40 +394,39 @@ class LookaheadCache():
             self.reset_input_freqs()
             self.squeeze_branch_counts()
 
-    def trie_get(self, token_ids, decoding_length=64, branch_length=8, min_input_size=0, min_output_size=0, mode='mix',
+    def hier_get(self, token_ids, decoding_length=64, branch_length=8, min_input_size=0, min_output_size=0, mode='mix',
                  idx=0):
         assert mode in ('input', 'output', 'mix')
 
         decoding_masks = self.default_mask
-        if decoding_length == 0 or branch_length == 0:
+        if decoding_length <= 1 or branch_length <= 1:
             return token_ids[-1:], decoding_masks, []
 
-        decoding_ids = []
-        sizes = [[0, 0] for _ in range(len(token_ids))]
+        decoding_ids = None
+        sizes = [0, 0]
+        match_count = len(token_ids)
         for i, t in enumerate(token_ids):
             tree = self.mem.get(t, None)
             if tree is not None:
                 ids = token_ids[i + 1:]
                 if t in self.stop_words and len(ids) == 0:
                     continue
-                decoding_ids, decoding_masks, decoding_lengths = tree.get(ids,
+                decoding_ids, decoding_masks, sizes = tree.get(ids,
                                                                           max_size=decoding_length,
                                                                           max_length=branch_length,
                                                                           min_input_size=min_input_size,
                                                                           min_output_size=min_output_size,
                                                                           mode=mode,
                                                                           idx=idx)
-                sizes[i] = decoding_lengths
                 s = len(decoding_ids)
-                # if s > 0:
-                #     break
-                # too few tokens, retrieve again  # TODO
+                match_count = len(token_ids) - i
                 if s >= branch_length or self.eos in decoding_ids:
                     break
-        decoding_lengths = reduce(lambda x, y: x + y, sizes)
-        # print(f'{token_ids=} {decoding_ids=} {output_ids=} {decoding_masks=} {decoding_lengths=}')
 
-        return decoding_ids, decoding_masks, decoding_lengths
+        if decoding_ids is None:
+            decoding_ids = token_ids[-1:]
+
+        return decoding_ids, decoding_masks, sizes
 
     def block_get(self, token_ids, decoding_length=16, branch_length=8, min_input_size=0, min_output_size=0, mode='mix',
                   idx=0):
@@ -459,8 +453,6 @@ class LookaheadCache():
 
         sets.reverse()
         count = 0
-        # TODO
-        # max_decoding_length = decoding_length
         max_decoding_length = true_decoding_length
         branches = []
         for indices in sets:
@@ -493,32 +485,27 @@ class LookaheadCache():
         assert mode in ('input', 'output', 'mix')
 
         decoding_masks = self.default_mask
-        if decoding_length == 0 or branch_length == 0:
+        if decoding_length <= 1 or branch_length <= 1:
             return token_ids[-1:], decoding_masks, []
 
         decoding_ids = []
-        sizes = [[0, 0] for _ in range(len(token_ids))]
+        sizes = [0, 0]
         for i, t in enumerate(token_ids):
             tree = self.mem.get(t, None)
             if tree is not None:
                 ids = token_ids[i + 1:]
                 if t in self.stop_words and len(ids) == 0:
                     continue
-                decoding_ids, decoding_masks, decoding_lengths = tree.get_one_branch(ids,
+                decoding_ids, decoding_masks, sizes = tree.get_one_branch(ids,
                                                                                      max_length=branch_length,
                                                                                      mode=mode,
                                                                                      idx=idx)
-                sizes[i] = decoding_lengths
                 s = len(decoding_ids)
-                # if s > 0:
-                #     break
-                # too few tokens, retrieve again  # TODO
+                # too few tokens, retrieve again
                 if s >= branch_length // 2 or self.eos in decoding_ids:
                     break
-        decoding_lengths = reduce(lambda x, y: x + y, sizes)
-        # print(f'{token_ids=} {decoding_ids=} {output_ids=} {decoding_masks=} {decoding_lengths=}')
 
-        return decoding_ids, decoding_masks, decoding_lengths
+        return decoding_ids, decoding_masks, sizes
 
     def bat_get(self, token_id_list, decoding_length=64, branch_length=8, decoding_cursors=None, mode='output',
                 indices=None, decoding_mode='hier'):
@@ -529,7 +516,7 @@ class LookaheadCache():
 
         decoding_id_list = []
         decoding_mask_list = []
-        decoding_length_list = []
+        size_list = []
 
         min_cur = min(decoding_cursors)
         max_cur = max(decoding_cursors)
@@ -539,7 +526,7 @@ class LookaheadCache():
             min_input_size = 0
             min_output_size = max(update_decoding_length // 2, 1)
             method_name = decoding_mode + '_get'
-            decoding_ids, decoding_masks, decoding_lengths = getattr(self, method_name)(token_ids,
+            decoding_ids, decoding_masks, sizes = getattr(self, method_name)(token_ids,
                                                                                         decoding_length=update_decoding_length,
                                                                                         branch_length=branch_length,
                                                                                         min_input_size=min_input_size,
@@ -548,7 +535,7 @@ class LookaheadCache():
                                                                                         idx=indices[sub_idx])
             decoding_id_list.append(decoding_ids)
             decoding_mask_list.append(decoding_masks)
-            decoding_length_list.append(decoding_lengths)
+            size_list.append(sizes)
 
         bs = len(token_id_list)
         max_size = max([len(x) for x in decoding_id_list])
@@ -562,7 +549,7 @@ class LookaheadCache():
             cur = decoding_cursors[i]
             decoding_masks[i, :org_size, cur - min_cur:cur - min_cur + org_size] = decoding_mask_list[i]
             decoding_masks[i, :, :cur - min_cur + 1] = 1
-        return decoding_id_list, decoding_masks, decoding_length_list
+        return decoding_id_list, decoding_masks, size_list
 
     def fresh(self):
         self.mem = {}

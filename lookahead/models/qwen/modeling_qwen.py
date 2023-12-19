@@ -5,20 +5,18 @@
 
 import importlib
 import math
-from typing import TYPE_CHECKING, Optional, Tuple, Union, Callable, List, Any, Generator
+from typing import TYPE_CHECKING, Optional, Tuple, Union, List, Any, Generator
 
 import torch
 import torch.nn.functional as F
 import torch.utils.checkpoint
 from torch.cuda.amp import autocast
-
 from torch.nn import CrossEntropyLoss
-from transformers import PreTrainedTokenizer, GenerationConfig, StoppingCriteriaList
+from transformers import PreTrainedTokenizer, GenerationConfig
 from transformers.generation.logits_process import LogitsProcessorList
 
 if TYPE_CHECKING:
-    from transformers.generation.streamers import BaseStreamer
-from transformers.generation.utils import GenerateOutput
+    pass
 from transformers.modeling_outputs import (
     BaseModelOutputWithPast,
     CausalLMOutputWithPast,
@@ -192,7 +190,8 @@ class QWenAttention(nn.Module):
         self.num_heads = config.num_attention_heads
         self.head_dim = self.hidden_size // self.num_heads
 
-        self.use_flash_attn = config.use_flash_attn
+        # self.use_flash_attn = config.use_flash_attn
+        self.use_flash_attn = False
         self.scale_attn_weights = True
 
         self.projection_size = config.kv_channels * config.num_attention_heads
@@ -581,7 +580,8 @@ class QWenModel(QWenPreTrainedModel):
         )
         self.rotary_emb = RotaryEmbedding(dim, base=config.rotary_emb_base)
 
-        self.use_flash_attn = config.use_flash_attn
+        # self.use_flash_attn = config.use_flash_attn
+        self.use_flash_attn = False
         self.is_fp32 = not (config.bf16 or config.fp16)
         if (
                 self.use_flash_attn
@@ -683,8 +683,12 @@ class QWenModel(QWenPreTrainedModel):
             inputs_embeds = self.wte(input_ids)
 
         # adapt for lookahead
-        if attention_mask is None or len(attention_mask.shape) == 2:
-
+        if attention_mask is not None and len(attention_mask.shape) == 4:
+            # with lookahead
+            position_ids = torch.sum(attention_mask, dim=-1).squeeze(1) - 1
+            attention_mask = (1.0 - attention_mask.to(inputs_embeds.dtype)) * torch.finfo(self.dtype).min
+        else:
+            # without lookahead
             if position_ids is None:
                 position_ids = torch.arange(
                     past_length,
@@ -701,11 +705,6 @@ class QWenModel(QWenPreTrainedModel):
                 attention_mask = attention_mask[:, None, None, :]
                 attention_mask = attention_mask.to(dtype=self.dtype)
                 attention_mask = (1.0 - attention_mask) * torch.finfo(self.dtype).min
-
-        else:
-            # lookahead
-            position_ids = torch.sum(attention_mask, dim=-1).squeeze(1) - 1
-            attention_mask = (attention_mask.to(inputs_embeds.dtype) - 1.0) * 10000.0
 
         encoder_attention_mask = None
         head_mask = self.get_head_mask(head_mask, self.config.num_hidden_layers)
@@ -1116,6 +1115,19 @@ class QWenLMHeadModel(QWenPreTrainedModel):
                 yield tokenizer.decode(outputs, skip_special_tokens=True, errors='ignore')
 
         return stream_generator()
+
+    def _update_cache(self, past_key_values, kv_idx, prefix_and_next_count=None, max_match_count=None,
+                      max_match_index=None):
+        update_past_key_values = []
+        for k, v in past_key_values:
+            if max_match_index + 1 == max_match_count:
+                k = k[:, :prefix_and_next_count + max_match_count]
+                v = v[:, :prefix_and_next_count + max_match_count]
+            else:
+                k = torch.concat([k[:, :prefix_and_next_count], k[:, kv_idx]], 1)
+                v = torch.concat([v[:, :prefix_and_next_count], v[:, kv_idx]], 1)
+            update_past_key_values.append((k, v))
+        return tuple(update_past_key_values)
 
     # def generate(
     #     self,

@@ -23,7 +23,6 @@ import torch.utils.checkpoint
 from torch import nn
 from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, LayerNorm, MSELoss
 from torch.nn import functional as F
-
 from transformers.file_utils import add_code_sample_docstrings, add_start_docstrings, \
     add_start_docstrings_to_model_forward
 from transformers.modeling_outputs import (
@@ -33,10 +32,11 @@ from transformers.modeling_outputs import (
     SequenceClassifierOutputWithPast,
     TokenClassifierOutput,
 )
+from transformers.models.bloom.configuration_bloom import BloomConfig
+from transformers.utils import logging
+
 # from transformers.modeling_utils import PreTrainedModel
 from common.pretrained_model import LookaheadPreTrainedModel
-from transformers.utils import logging
-from transformers.models.bloom.configuration_bloom import BloomConfig
 
 logger = logging.get_logger(__name__)
 

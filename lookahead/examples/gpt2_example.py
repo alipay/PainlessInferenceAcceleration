@@ -11,21 +11,21 @@ import time
 
 import torch
 
-sys.path.append('../..')
+sys.path.append('..')
 sys.path.append('/ossfs/workspace/lookahead')
 from common.pretrained_model import LookaheadCache
 
 # os.environ['CUDA_VISIBLE_DEVICES'] = '0'
-os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
-os.environ['TOKENIZERS_PARALLELISM'] = 'false'
+# os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
+# os.environ['TOKENIZERS_PARALLELISM'] = 'false'
 
 from transformers import AutoTokenizer
 
-from models.opt.modeling_opt import OPTForCausalLM
+from models.gpt2.modeling_gpt2 import GPT2LMHeadModel
 
-model_dir = '/Users/yaozhao/dataset/models/opt-125m'
+model_dir = '/mntnlp/common_base_model/gpt2'
 dtype = torch.float16 if torch.cuda.is_available() else torch.float32
-model = OPTForCausalLM.from_pretrained(model_dir
+model = GPT2LMHeadModel.from_pretrained(model_dir
                                        , cache_dir='../'
                                        , torch_dtype=dtype
                                        , low_cpu_mem_usage=True
@@ -45,9 +45,8 @@ input_ids = inputs.input_ids.to(device)
 attention_mask = inputs.attention_mask.to(device)
 position_ids = None
 
-# first time without lookahead
-for use_lookahead in [False, True]:
-    debug_lookahead = False
+for use_lookahead in [False, False, True, True]:
+    debug_lookahead = True
     decoding_length = 64
     branch_length = 12
     ts = time.time()
@@ -68,7 +67,7 @@ for use_lookahead in [False, True]:
                              do_sample=False,
                              decoding_kwargs=decoding_kwargs,
                              )
-    output_ids = outputs.sequences
+    output_ids = outputs
     input_length = input_ids.size(-1)
     output_ids = output_ids[0, input_length:].tolist()
     output_text = tokenizer.decode(output_ids)

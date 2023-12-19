@@ -1,6 +1,5 @@
 # coding=utf-8
-# Copyright 2018 The OpenAI Team Authors and HuggingFace Inc. team.
-# Copyright (c) 2018, NVIDIA CORPORATION.  All rights reserved.
+# Copyright 2022 shunxing1234 The HuggingFace Inc. team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -14,64 +13,30 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import math
-import os
-import time
-import copy
-import json
-import pickle
-
-import warnings
-from functools import reduce
-from collections import defaultdict
-from itertools import accumulate
 import inspect
-import random
-from dataclasses import dataclass
-from typing import Optional, Tuple, Union
-import sys
+from typing import Any, Dict, Optional, Tuple, Union
 
-import numpy as np
 import torch
-import torch.utils.checkpoint
-from torch.nn.utils import skip_init
-from torch import nn
-from torch.cuda.amp import autocast
-from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss
-from torch.nn import init
 import torch.nn.functional as F
-from torch.nn.parameter import Parameter
-
+import torch.utils.checkpoint
+from torch import nn
+from torch.nn import CrossEntropyLoss
+from torch.nn import init
 # from transformers.activations import gelu
 from torch.nn.functional import gelu
+from torch.nn.parameter import Parameter
+from transformers.generation.utils import ModelOutput
 from transformers.modeling_outputs import (
     BaseModelOutputWithPastAndCrossAttentions,
     CausalLMOutputWithCrossAttentions,
-    SequenceClassifierOutputWithPast,
-    TokenClassifierOutput,
 )
-# from transformers.modeling_utils import PreTrainedModel, SequenceSummary
-from transformers.modeling_utils import SequenceSummary
-from common.pretrained_model import LookaheadPreTrainedModel, decodingCache
-
-from transformers.pytorch_utils import Conv1D, find_pruneable_heads_and_indices, prune_conv1d_layer
 from transformers.utils import (
-    ModelOutput,
-    add_code_sample_docstrings,
-    add_start_docstrings,
-    add_start_docstrings_to_model_forward,
     logging,
-    replace_return_docstrings,
 )
-from transformers.utils.model_parallel_utils import assert_device_map, get_device_map
 
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
-from transformers.generation.logits_process import LogitsProcessorList
-from transformers.generation.stopping_criteria import StoppingCriteriaList
-from transformers.generation.utils import GreedySearchOutput, ModelOutput, \
-    validate_stopping_criteria, GreedySearchDecoderOnlyOutput
-
-from models.antglm.configuration_glm import GLMConfig
+# from transformers.modeling_utils import PreTrainedModel, SequenceSummary
+from common.pretrained_model import LookaheadPreTrainedModel, LookaheadCache
+from models.glm.configuration_glm import GLMConfig
 
 logger = logging.get_logger(__name__)
 
@@ -536,6 +501,18 @@ class GLMModel(GLMPreTrainedModel):
             cross_attentions=transformer_outputs.cross_attentions,
         )
 
+    # def get_output_embeddings(self):
+    #     return self.lm_head
+
+    # def set_output_embeddings(self, new_embeddings):
+    #     self.lm_head = new_embeddings
+
+    # def get_input_embeddings(self):
+    #     return self.word_embeddings
+
+    # def set_input_embeddings(self, new_embeddings):
+    #     self.word_embeddings = new_embeddings
+
 
 class GLMForConditionalGeneration(GLMPreTrainedModel):
     _keys_to_ignore_on_load_missing = ['glm.lm_head.weight']
@@ -547,7 +524,7 @@ class GLMForConditionalGeneration(GLMPreTrainedModel):
         super().__init__(config)
         self.glm = GLMModel(config)
         self.post_init()
-        self.decoding_cache = decodingCache()
+        self.lookahead_cache = LookaheadCache()
 
     def forward(
             self,
@@ -649,9 +626,7 @@ class GLMForConditionalGeneration(GLMPreTrainedModel):
         if "kwargs" in model_args or "model_kwargs" in model_args:
             model_args |= set(inspect.signature(self.forward).parameters)
         for key, value in model_kwargs.items():
-            if value is not None and key not in model_args and key not in (
-                    'use_decoding', 'decoding_length', 'branch_length', 'debug_decoding', 'decoding_kwargs',
-                    'inputs_embeds_position'):
+            if value is not None and key not in model_args and key not in ('decoding_kwargs', ):
                 unused_model_args.append(key)
 
         if unused_model_args:

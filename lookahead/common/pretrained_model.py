@@ -34,39 +34,13 @@ from transformers.generation.utils import (
 from transformers.generation.utils import (
     GreedySearchOutput,
     GenerateOutput)
-from transformers.utils import ExplicitEnum, ModelOutput, logging
+from transformers.utils import ModelOutput, logging
 
 logger = logging.get_logger(__name__)
 
 from transformers.generation.configuration_utils import GenerationConfig
-# from common.generation_config import LookaheadGenerationConfig
 from common.lookahead_cache import LookaheadCache
-
-
-class GenerationMode(ExplicitEnum):
-    """
-    Possible generation modes, downstream of the [`~generation.GenerationMixin.generate`] method.
-    """
-
-    # Non-beam methods
-    CONTRASTIVE_SEARCH = "contrastive_search"
-    GREEDY_SEARCH = "greedy_search"
-    LOOKAHEAD_GENERATION = "lookahead_generation"
-    SAMPLE = "sample"
-    ASSISTED_GENERATION = "assisted_generation"
-    # Beam methods
-    BEAM_SEARCH = "beam_search"
-    BEAM_SAMPLE = "beam_sample"
-    CONSTRAINED_BEAM_SEARCH = "constrained_beam_search"
-    GROUP_BEAM_SEARCH = "group_beam_search"
-
-
-class LookaheadDecoderOnlyOutput(GreedySearchDecoderOnlyOutput):
-    sequences: torch.LongTensor = None
-    scores: Optional[Tuple[torch.FloatTensor]] = None
-    attentions: Optional[Tuple[Tuple[torch.FloatTensor]]] = None
-    hidden_states: Optional[Tuple[Tuple[torch.FloatTensor]]] = None
-    kwargs: Optional[Dict] = None
+from common.lookahead_generation_utils import GenerationMode, LookaheadDecoderOnlyOutput
 
 
 class LookaheadPreTrainedModel(PreTrainedModel):
@@ -253,6 +227,8 @@ class LookaheadPreTrainedModel(PreTrainedModel):
         model_kwargs = generation_config.update(**kwargs)  # All unused kwargs must be model kwargs
         generation_config.validate()
         self._validate_model_kwargs(model_kwargs.copy())
+        if not hasattr(generation_config, 'decoding_kwargs'):
+            generation_config.decoding_kwargs = model_kwargs.get('decoding_kwargs', {})
 
         # 2. Set generation parameters if not already defined
         logits_processor = logits_processor if logits_processor is not None else LogitsProcessorList()
@@ -384,7 +360,8 @@ class LookaheadPreTrainedModel(PreTrainedModel):
         decoding_kwargs = generation_config.decoding_kwargs if hasattr(generation_config, 'decoding_kwargs') else {}
         decoding_kwargs['generation_mode'] = generation_mode
         decoding_kwargs['do_sample'] = generation_config.do_sample
-
+        decoding_kwargs['inputs_embeds_position'] = generation_config.inputs_embeds_position if hasattr(generation_config, 'inputs_embeds_position') else 0
+        decoding_kwargs['max_length'] = generation_config.max_length
         if generation_mode == GenerationMode.LOOKAHEAD_GENERATION:
             decoding_length = decoding_kwargs.get('decoding_length', 64)
             decoding_kwargs['decoding_max_length'] = generation_config.max_length + decoding_length + 1
@@ -690,16 +667,15 @@ class LookaheadPreTrainedModel(PreTrainedModel):
                                                 attention_mask=None,
                                                 inputs_embeds=None,
                                                 **kwargs):
-
         position_ids = kwargs.get("position_ids", None)
 
         decoding_kwargs = kwargs.get('decoding_kwargs', {})
         decoding_length = decoding_kwargs.get('decoding_length', 64)
         branch_length = decoding_kwargs.get('branch_length', 12)
-        decoding_mode = decoding_kwargs.get('decoding_mode', 'trie_mix')
+        decoding_mode = decoding_kwargs.get('decoding_mode', 'hier')
         max_length = decoding_kwargs.get('max_length', 2048)
         update_branch_length = min(branch_length, max_length - input_ids.size(-1))
-        assert update_branch_length > 1, f'{branch_length=} {max_length=} {input_ids.size(-1)=} {update_branch_length=}'
+        assert update_branch_length > 0, f'{branch_length=} {max_length=} {input_ids.size(-1)=} {update_branch_length=}'
 
         if past_key_values is None:
             if inputs_embeds is not None and input_ids is not None:
@@ -725,10 +701,9 @@ class LookaheadPreTrainedModel(PreTrainedModel):
             if position_ids is not None:
                 model_inputs["position_ids"] = self._get_position_ids(position_ids, encoding=True, length=length)
 
-
         else:
-            # decoding_qids = input_ids[0, -2:].tolist()
-            decoding_qids = decoding_kwargs['input_id_list'][0][-2:]
+            decoding_qids = input_ids[0, -2:].tolist()
+            # decoding_qids = decoding_kwargs['input_id_list'][0][-2:]
             min_input_size = 0
             min_output_size = max(decoding_length // 2, 1)
 
@@ -737,7 +712,7 @@ class LookaheadPreTrainedModel(PreTrainedModel):
             fmt, mode = decoding_mode.split('_')
             method_name = fmt + '_get'
 
-            decoding_ids, decoding_masks, decoding_lengths = getattr(self.lookahead_cache, method_name)(decoding_qids,
+            decoding_ids, decoding_masks, sizes = getattr(self.lookahead_cache, method_name)(decoding_qids,
                                                                                                         decoding_length=decoding_length,
                                                                                                         branch_length=update_branch_length,
                                                                                                         min_input_size=min_input_size,
@@ -756,13 +731,10 @@ class LookaheadPreTrainedModel(PreTrainedModel):
                 dtype=attention_mask.dtype, device=attention_mask.device)
             decoding_attention_mask = torch.cat([prefix_mask_tensor, decoding_mask_tensor], dim=3)
 
-            # te = time.time()
-            # print(f'decoding.get:{round((te-ts)*1000)}ms')
-
             decoding_kwargs.update({'decoding_qids': decoding_qids,
                                     'decoding_ids': decoding_ids,
                                     'decoding_masks': decoding_masks,
-                                    'decoding_lengths': decoding_lengths,
+                                    'sizes': sizes,
                                     })
             model_inputs = {'decoding_kwargs': decoding_kwargs}
 
@@ -823,11 +795,10 @@ class LookaheadPreTrainedModel(PreTrainedModel):
             decoding_kwargs['edls'].append(1)
             if decoding_kwargs.get('debug_lookahead', False):
                 decoding_qids = decoding_kwargs.get('decoding_qids', [])
-                print(f'size:0 query:{decoding_qids} next:{next_token_list[0]}')
+                print(f'size:0 query:{decoding_qids} next_token:{next_token_list[0]}')
         else:
             # TODO: accurate logit_processor
             # next_tokens_scores = logits_processor(input_ids, outputs.logits)
-
             bs, nt, nv = outputs.logits.shape
             next_tokens_scores = logits_processor(input_ids.repeat(1, nt).view(bs * nt, -1),
                                                   outputs.logits.view(bs * nt, -1)).view(bs, nt, -1)
@@ -842,7 +813,7 @@ class LookaheadPreTrainedModel(PreTrainedModel):
             next_token_list = next_tokens.tolist()[0]
             decoding_ids = decoding_kwargs['decoding_ids'][1:]
             decoding_mask = decoding_kwargs['decoding_masks']
-            decoding_lengths = decoding_kwargs['decoding_lengths']
+            sizes = decoding_kwargs['sizes']
 
             max_match_index = 0
             max_match_count = 0
@@ -889,11 +860,11 @@ class LookaheadPreTrainedModel(PreTrainedModel):
                 l = np.concatenate([lengths[:-1][(lengths[1:] - lengths[:-1]) <= 0], lengths[-1:]], axis=0)
                 ls = ','.join(l.astype(np.str_))
                 decoding_qids = decoding_kwargs['decoding_qids']
-                size_str = ','.join([str(x) for x in decoding_lengths])
+                size_str = ','.join([str(x) for x in sizes])
                 print(
-                    f'size:{max_match_count}/{len(decoding_ids)} from:{size_str} length:{ls} '
-                    f'index:{max_match_index} query:{decoding_qids} '
-                    f'decoding:{max_decoding_ids_slice} next:{max_next_token_slice}')
+                    f'decoding_length:{len(decoding_ids)+1} accept_length:{max_match_count+1} '
+                    f'query:{decoding_qids} source:{size_str} lengths:{ls} index:{max_match_index} '
+                    f'branch_token:{max_decoding_ids_slice} next_token:{max_next_token_slice}')
 
         return model_kwargs
 
@@ -1280,7 +1251,7 @@ class LookaheadPreTrainedModel(PreTrainedModel):
                 decoder_model_args = set(inspect.signature(decoder.forward).parameters)
                 model_args |= {f"decoder_{x}" for x in decoder_model_args}
 
-        decoding_kwargs = ['decoding_kwargs']
+        decoding_kwargs = ['decoding_kwargs','stop_words_ids']
         for key, value in model_kwargs.items():
             if value is not None and key not in model_args and key not in decoding_kwargs:
                 unused_model_args.append(key)

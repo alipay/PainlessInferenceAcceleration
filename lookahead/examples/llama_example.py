@@ -11,13 +11,13 @@ import time
 
 import torch
 
-sys.path.append('../..')
+sys.path.append('..')
 sys.path.append('/ossfs/workspace/lookahead')
 from common.lookahead_cache import LookaheadCache
 
 # os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 # os.environ['CUDA_LAUNCH_BLOCKING'] = '0'
-os.environ['TOKENIZERS_PARALLELISM'] = 'false'
+# os.environ['TOKENIZERS_PARALLELISM'] = 'false'
 
 from transformers import AutoTokenizer
 
@@ -67,7 +67,7 @@ for use_lookahead in [False, True]:
                              do_sample=False,
                              decoding_kwargs=decoding_kwargs
                              )
-    output_ids = outputs.sequences
+    output_ids = outputs
     input_length = input_ids.size(-1)
     output_ids = output_ids[0, input_length:].tolist()
     output_text = tokenizer.decode(output_ids)

@@ -9,7 +9,7 @@ import copy
 import inspect
 import time
 import warnings
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import torch
@@ -39,12 +39,12 @@ from transformers.utils import ModelOutput, logging
 logger = logging.get_logger(__name__)
 
 from transformers.generation.configuration_utils import GenerationConfig
-from common.pretrained_model import GenerationMode
 from common.lookahead_cache import LookaheadCache
+from common.lookahead_generation_utils import GenerationMode, LookaheadDecoderOnlyOutput
 
 
 class LookaheadPreTrainedModel(PreTrainedModel):
-    _batch_decoding = True
+    _batch_generate = True
     _stream_generate = False
 
     def __init__(self, config):
@@ -67,12 +67,20 @@ class LookaheadPreTrainedModel(PreTrainedModel):
                         and generation_config.penalty_alpha > 0
                 ):
                     generation_mode = GenerationMode.CONTRASTIVE_SEARCH
-                elif generation_config.use_lookahead and generation_config.decoding_length > 1 and generation_config.branch_length > 1 and generation_config.use_cache:
+                elif generation_config.use_cache \
+                        and hasattr(generation_config, 'decoding_kwargs') \
+                        and generation_config.decoding_kwargs.get('use_lookahead', False) \
+                        and generation_config.decoding_kwargs.get('decoding_length', 64) > 1 \
+                        and generation_config.decoding_kwargs.get('branch_length', 12) > 1:
                     generation_mode = GenerationMode.LOOKAHEAD_GENERATION
                 else:
                     generation_mode = GenerationMode.GREEDY_SEARCH
             else:
-                if generation_config.use_lookahead and generation_config.decoding_length > 1 and generation_config.branch_length > 1 and generation_config.use_cache:
+                if generation_config.use_cache \
+                        and hasattr(generation_config, 'decoding_kwargs') \
+                        and generation_config.decoding_kwargs.get('use_lookahead', False) \
+                        and generation_config.decoding_kwargs.get('decoding_length', 64) > 1 \
+                        and generation_config.decoding_kwargs.get('branch_length', 12) > 1:
                     generation_mode = GenerationMode.LOOKAHEAD_GENERATION
                 else:
                     generation_mode = GenerationMode.SAMPLE
@@ -219,6 +227,7 @@ class LookaheadPreTrainedModel(PreTrainedModel):
         model_kwargs = generation_config.update(**kwargs)  # All unused kwargs must be model kwargs
         generation_config.validate()
         self._validate_model_kwargs(model_kwargs.copy())
+        generation_config.decoding_kwargs = model_kwargs.get('decoding_kwargs', {})
 
         # 2. Set generation parameters if not already defined
         logits_processor = logits_processor if logits_processor is not None else LogitsProcessorList()
@@ -347,17 +356,16 @@ class LookaheadPreTrainedModel(PreTrainedModel):
             generation_config=generation_config, stopping_criteria=stopping_criteria
         )
 
-        decoding_kwargs = {}
+        decoding_kwargs = generation_config.decoding_kwargs if hasattr(generation_config, 'decoding_kwargs') else {}
         decoding_kwargs['generation_mode'] = generation_mode
-        decoding_kwargs['use_lookahead'] = generation_config.use_lookahead
-        decoding_kwargs['debug_lookahead'] = generation_config.debug_lookahead
-        decoding_kwargs['decoding_length'] = generation_config.decoding_length
-        decoding_kwargs['branch_length'] = generation_config.branch_length
-        decoding_kwargs['decoding_mode'] = generation_config.decoding_mode
         decoding_kwargs['do_sample'] = generation_config.do_sample
-        decoding_kwargs['inputs_embeds_position'] = generation_config.inputs_embeds_position
-        decoding_kwargs[
-            'decoding_max_length'] = generation_config.max_length + generation_config.decoding_length + 1 if generation_mode == GenerationMode.LOOKAHEAD_GENERATION else generation_config.max_length
+        decoding_kwargs['inputs_embeds_position'] = generation_config.inputs_embeds_position if hasattr(generation_config, 'inputs_embeds_position') else 0
+        decoding_kwargs['max_length'] = generation_config.max_length
+        if generation_mode == GenerationMode.LOOKAHEAD_GENERATION:
+            decoding_length = decoding_kwargs.get('decoding_length', 64)
+            decoding_kwargs['decoding_max_length'] = generation_config.max_length + decoding_length + 1
+        else:
+            decoding_kwargs['decoding_max_length'] = generation_config.max_length
         model_kwargs['decoding_kwargs'] = decoding_kwargs
 
         # 10. go into different generation modes
@@ -661,11 +669,13 @@ class LookaheadPreTrainedModel(PreTrainedModel):
         position_ids = kwargs.get("position_ids", None)
 
         decoding_kwargs = kwargs.get('decoding_kwargs', {})
-        decoding_cursors = decoding_kwargs.get('decoding_cursors', None)
-        decoding_length = decoding_kwargs.get('decoding_length', 63)
+        decoding_length = decoding_kwargs.get('decoding_length', 64)
         branch_length = decoding_kwargs.get('branch_length', 12)
         decoding_mode = decoding_kwargs.get('decoding_mode', 'hier')
+        max_length = decoding_kwargs.get('max_length', 2048)
         batch_indices = decoding_kwargs.get('batch_indices', None)
+        decoding_cursors = decoding_kwargs.get('decoding_cursors', None)
+        device = input_ids.device
 
         if past_key_values is None:
             if inputs_embeds is not None and input_ids is not None:
@@ -689,37 +699,25 @@ class LookaheadPreTrainedModel(PreTrainedModel):
                  })
 
             if position_ids is not None:
-                # full position_ids, truncate in forward call
-                model_inputs["position_ids"] = position_ids
+                model_inputs["position_ids"] = self._get_position_ids(position_ids, encoding=True, length=length)
 
         else:
-            if decoding_mode == 'llma':
-                cs = []
-                for x in decoding_cursors:
-                    xs = list(range(x - 7, x + 1))
-                    xs = [0] * (8 - len(xs)) + xs
-                    cs.append(xs)
-                cs = torch.tensor(cs, device=input_ids.device)
-            else:
-                cs = torch.tensor([[x - 1, x] for x in decoding_cursors], device=input_ids.device)
+
+            cs = torch.tensor([[x - 1, x] for x in decoding_cursors], device=input_ids.device)
             qids = torch.gather(input_ids, 1, cs)
             decoding_qids = qids.tolist()
 
-            if decoding_mode in ('input', 'output'):
-                mode = decoding_mode
-                decoding_mode = 'hier'
-            elif decoding_mode == 'llma':
-                mode = 'input'
-            else:
-                mode = 'mix'
+            if decoding_mode in ('hier', 'par', 'one'):
+                decoding_mode = decoding_mode + '_mix'
+            fmt, mode = decoding_mode.split('_')
             sub_decoding_length = max(decoding_length // len(decoding_qids), 1)
-            decoding_ids, decoding_masks, decoding_lengths = self.decoding_cache.bat_get(decoding_qids,
+            decoding_ids, decoding_masks, decoding_lengths = self.lookahead_cache.bat_get(decoding_qids,
                                                                                          decoding_length=sub_decoding_length,
                                                                                          branch_length=branch_length,
                                                                                          decoding_cursors=decoding_cursors,
                                                                                          mode=mode,
                                                                                          indices=batch_indices,
-                                                                                         decoding_mode=decoding_mode)
+                                                                                         decoding_mode=fmt)
             sizes = list(set([len(x) for x in decoding_ids]))
             assert len(sizes) == 1
             decodinged = True if sizes[0] > 1 else False
@@ -737,7 +735,9 @@ class LookaheadPreTrainedModel(PreTrainedModel):
                                     'decoding_lengths': decoding_lengths,
                                     'decoding_qids': decoding_qids,
                                     'decoding_cursors': decoding_cursors,
-                                    #    'decoding_cursors_tensor': torch.tensor(decoding_cursors, dtype=torch.int32, device=input_ids.device),
+                                    'decoding_cursors_tensor': torch.tensor(decoding_cursors, 
+                                                                            dtype=torch.int32,
+                                                                            device=device),
                                     'batch_indices': batch_indices,
                                     })
 
@@ -752,15 +752,16 @@ class LookaheadPreTrainedModel(PreTrainedModel):
                 }
             )
             if position_ids is not None:
-                positions = torch.sum(decoding_attention_mask, 3).squeeze(1)[0]
-                model_inputs["position_ids"] = self._get_position_ids(position_ids, positions)
-
-        # print(f"{input_ids.shape=} {input_id_slice.shape=} {position_ids.shape=} {attention_mask.shape=} {attention_mask_cache.shape=}")
+                indices = torch.sum(decoding_attention_mask, dim=3).squeeze(1)[0]
+                model_inputs["position_ids"] = self._get_position_ids(position_ids, indices=indices, encoding=False)
 
         return model_inputs
 
-    def _get_position_ids(self, full_position_ids, positions):
-        return full_position_ids[..., positions]
+    def _get_position_ids(self, full_position_ids, indices=None, length=None, encoding=True):
+        if encoding:
+            return full_position_ids[..., :length]
+        else:
+            return full_position_ids[..., indices]
 
     def _lookahead_update_model_kwargs_for_generation(
             self,
@@ -774,7 +775,7 @@ class LookaheadPreTrainedModel(PreTrainedModel):
         bs, input_length = input_ids.shape
         decoding_kwargs = model_kwargs['decoding_kwargs']
         decoding_ids = decoding_kwargs.get('decoding_ids', [])
-        eos = decoding_kwargs.get('eos', 50005)
+        eos = decoding_kwargs.get('eos', 2)
         max_length = decoding_kwargs.get('max_length', 1024)
         device = outputs.logits.device
         dtype = outputs.logits.dtype
@@ -902,9 +903,9 @@ class LookaheadPreTrainedModel(PreTrainedModel):
                     decoding_qids = decoding_kwargs['decoding_qids'][ib]
                     size_str = ','.join([str(x) for x in decoding_lengths[ib]])
                     print(
-                        f'ib:{ib}/{bs} size:{max_match_count}/{len(decoding_ids_)} from:{size_str} '
-                        f'length:{ls} index:{max_match_index} query:{decoding_qids} '
-                        f'decoding:{max_decoding_ids_slice} next:{max_next_token_slice}')
+                        f'batch_index:{ib}/{bs} decoding_length:{len(decoding_ids_)} accept_length:{max_match_count} '
+                        f'query:{decoding_qids} source:{size_str} lengths:{ls} index:{max_match_index} '
+                        f'branch_token:{max_decoding_ids_slice} next_token:{max_next_token_slice}')
             model_kwargs['next_tokens'] = torch.tensor(update_next_token_list, device=device)
             model_kwargs['next_token_list'] = update_next_token_list
             model_kwargs['next_tokens_scores'] = []
@@ -1178,10 +1179,7 @@ class LookaheadPreTrainedModel(PreTrainedModel):
         input_id_list = input_ids.tolist()
         for i, ids in enumerate(input_id_list):
             ids = ids[1:-1]
-            if decoding_mode == 'llma':
-                self.decoding_cache.llma_put(ids, mode='input', idx=i)
-            else:
-                self.decoding_cache.put(ids, branch_length=branch_length + 1, mode='input', idx=i)
+            self.lookahead_cache.put(ids, branch_length=branch_length + 1, mode='input', idx=i)
         # pitv = time.time()-pts
         # print(f'decoding_1:{round(pitv*1000,3)}ms')
 
@@ -1259,7 +1257,7 @@ class LookaheadPreTrainedModel(PreTrainedModel):
                 #     batch_index = batch_indices[k]
                 #     yield_output[batch_index] = tids
                 #     if decoding_mode != 'llma':
-                #         decoding_cache.stream_put(tids, branch_length=branch_length + 1, final=False, mode='output',
+                #         lookahead_cache.stream_put(tids, branch_length=branch_length + 1, final=False, mode='output',
                 #                                 idx=batch_index)
                 # yield yield_output
 
@@ -1267,8 +1265,7 @@ class LookaheadPreTrainedModel(PreTrainedModel):
             for k, tids in enumerate(next_token_list):
                 tids = [x for x in tids if x != -1]
                 batch_index = batch_indices[k]
-                if decoding_mode != 'llma':
-                    self.decoding_cache.stream_put(tids, branch_length=branch_length + 1, final=False, mode='output',
+                self.lookahead_cache.stream_put(tids, branch_length=branch_length + 1, final=False, mode='output',
                                                    idx=batch_index)
 
             # Store scores, attentions and hidden_states when required
@@ -1316,8 +1313,7 @@ class LookaheadPreTrainedModel(PreTrainedModel):
             ts = te
             if len(batch_indices) == 0:
                 for i in range(input_bs):
-                    if decoding_mode != 'llma':
-                        self.decoding_cache.stream_put([], branch_length=branch_length + 1, final=True, mode='output',
+                    self.lookahead_cache.stream_put([], branch_length=branch_length + 1, final=True, mode='output',
                                                        idx=i)
                 max_cur = max(decoding_cursors)
                 input_ids = output_ids[:, :max_cur + 1]
@@ -1338,14 +1334,15 @@ class LookaheadPreTrainedModel(PreTrainedModel):
                     decoder_hidden_states=decoder_hidden_states,
                 )
             else:
-                scores = {'dls': model_kwargs['decoding_kwargs']['dls'],
+                kwargs = {'dls': model_kwargs['decoding_kwargs']['dls'],
                           'edls': model_kwargs['decoding_kwargs']['edls'],
                           'fts': model_kwargs['decoding_kwargs']['fts']}
-                return GreedySearchDecoderOnlyOutput(
+                return LookaheadDecoderOnlyOutput(
                     sequences=input_ids,
                     scores=scores,
                     attentions=decoder_attentions,
                     hidden_states=decoder_hidden_states,
+                    kwargs=kwargs
                 )
         else:
             return input_ids
@@ -1389,9 +1386,7 @@ class LookaheadPreTrainedModel(PreTrainedModel):
                 decoder_model_args = set(inspect.signature(decoder.forward).parameters)
                 model_args |= {f"decoder_{x}" for x in decoder_model_args}
 
-        decoding_kwargs = ['use_lookahead', 'decoding_length', 'branch_length', 'decoding_mode', 'debug_lookahead',
-                           'decoding_kwargs',
-                           ]
+        decoding_kwargs = ['decoding_kwargs']
         for key, value in model_kwargs.items():
             if value is not None and key not in model_args and key not in decoding_kwargs:
                 unused_model_args.append(key)

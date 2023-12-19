@@ -25,15 +25,15 @@ import torch
 import torch.utils.checkpoint
 from torch import nn
 from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss
-
 from transformers.activations import ACT2FN
 from transformers.modeling_outputs import BaseModelOutputWithPast, CausalLMOutputWithPast, \
     SequenceClassifierOutputWithPast
-# from transformers.modeling_utils import PreTrainedModel
-from common.pretrained_model import LookaheadPreTrainedModel
+from transformers.models.llama.configuration_llama import LlamaConfig
 from transformers.utils import add_start_docstrings, add_start_docstrings_to_model_forward, logging, \
     replace_return_docstrings
-from transformers.models.llama.configuration_llama import LlamaConfig
+
+# from transformers.modeling_utils import PreTrainedModel
+from common.pretrained_model import LookaheadPreTrainedModel
 
 logger = logging.get_logger(__name__)
 
@@ -525,11 +525,11 @@ class LlamaModel(LlamaPreTrainedModel):
 
         # NOTE: adapt for lookahead
         if attention_mask is not None and len(attention_mask.shape) == 4:
-            # lookahead
+            # with lookahead
             position_ids = torch.sum(attention_mask, dim=-1).squeeze(1) - 1
-            attention_mask = (attention_mask.to(inputs_embeds.dtype) - 1.0) * torch.finfo(inputs_embeds.dtype).min
-
+            attention_mask = (1.0-attention_mask.to(inputs_embeds.dtype)) * torch.finfo(inputs_embeds.dtype).min
         else:
+            # without lookahead
             if position_ids is None:
                 device = input_ids.device if input_ids is not None else inputs_embeds.device
                 position_ids = torch.arange(

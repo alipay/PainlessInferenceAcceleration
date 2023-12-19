@@ -1,31 +1,27 @@
 """ PyTorch ChatGLM model. """
 
-import math
 import copy
+import math
 import warnings
-import re
-import sys
+from typing import Optional, Tuple, List, Callable, Dict, Any
 
 import torch
-import torch.utils.checkpoint
 import torch.nn.functional as F
+import torch.utils.checkpoint
+from models.chatglm.configuration_chatglm import ChatGLMConfig
 from torch import nn
 from torch.nn import CrossEntropyLoss, LayerNorm
 from torch.nn.utils import skip_init
-from typing import Optional, Tuple, Union, List, Callable, Dict, Any
-
+from transformers.generation.logits_process import LogitsProcessor
+from transformers.generation.utils import LogitsProcessorList, StoppingCriteriaList, GenerationConfig, ModelOutput
 from transformers.modeling_outputs import (
     BaseModelOutputWithPast,
     CausalLMOutputWithPast,
 )
+from transformers.utils import logging
+
 # from transformers.modeling_utils import PreTrainedModel
 from common.pretrained_model import LookaheadPreTrainedModel
-
-from transformers.utils import logging
-from transformers.generation.logits_process import LogitsProcessor
-from transformers.generation.utils import LogitsProcessorList, StoppingCriteriaList, GenerationConfig, ModelOutput
-
-from models.chatglm2.configuration_chatglm import ChatGLMConfig
 
 # flags required to enable jit fusion kernels
 

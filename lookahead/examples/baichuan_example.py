@@ -11,20 +11,21 @@ import time
 
 import torch
 
-sys.path.append('../..')
+sys.path.append('..')
 sys.path.append('/ossfs/workspace/lookahead')
 from common.lookahead_cache import LookaheadCache
 
 # os.environ['CUDA_VISIBLE_DEVICES'] = '0'
-# os.environ['CUDA_LAUNCH_BLOCKING'] = '0'
-os.environ['TOKENIZERS_PARALLELISM'] = 'false'
+# os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
+# os.environ['TOKENIZERS_PARALLELISM'] = 'false'
 
 from transformers import AutoTokenizer
 
 from models.baichuan.modeling_baichuan import BaichuanForCausalLM
+from models.baichuan.tokenization_baichuan import BaichuanTokenizer
 from transformers.generation.utils import GenerationConfig
 
-model_dir = '/mntnlp/common_base_model/llama2-7b-chat'
+model_dir = '/mntnlp/common_base_model/Baichuan2-7B-Chat'
 dtype = torch.float16 if torch.cuda.is_available() else torch.float32
 model = BaichuanForCausalLM.from_pretrained(model_dir
                                             , cache_dir='../'
@@ -32,7 +33,7 @@ model = BaichuanForCausalLM.from_pretrained(model_dir
                                             , low_cpu_mem_usage=True
                                             , device_map='auto'
                                             )
-tokenizer = AutoTokenizer.from_pretrained(model_dir)
+tokenizer = BaichuanTokenizer.from_pretrained(model_dir)
 tokenizer.pad_token = tokenizer.eos_token
 tokenizer.padding_side = 'left'
 stop_ids = set(tokenizer.convert_tokens_to_ids([',', '.', ' ']))
@@ -42,9 +43,9 @@ model.lookahead_cache = lookahead_cache
 prompt = "Hello, I'm am conscious and"
 
 # first time without lookahead
-for use_lookahead in [False, True]:
+for use_lookahead in [False, False, True, True]:
     debug_lookahead = False
-    decoding_length = 63
+    decoding_length = 64
     branch_length = 12
     ts = time.time()
     max_new_tokens = 256

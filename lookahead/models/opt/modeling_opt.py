@@ -19,7 +19,6 @@ import torch
 import torch.utils.checkpoint
 from torch import nn
 from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss
-
 from transformers.activations import ACT2FN
 from transformers.modeling_outputs import (
     BaseModelOutputWithPast,
@@ -27,8 +26,7 @@ from transformers.modeling_outputs import (
     QuestionAnsweringModelOutput,
     SequenceClassifierOutputWithPast,
 )
-# from transformers.modeling_utils import PreTrainedModel
-from common.pretrained_model import LookaheadPreTrainedModel
+from transformers.models.opt.configuration_opt import OPTConfig
 from transformers.utils import (
     add_code_sample_docstrings,
     add_start_docstrings,
@@ -36,7 +34,9 @@ from transformers.utils import (
     logging,
     replace_return_docstrings,
 )
-from transformers.models.opt.configuration_opt import OPTConfig
+
+# from transformers.modeling_utils import PreTrainedModel
+from common.pretrained_model import LookaheadPreTrainedModel
 
 logger = logging.get_logger(__name__)
 

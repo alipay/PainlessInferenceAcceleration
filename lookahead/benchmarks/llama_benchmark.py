@@ -9,7 +9,7 @@ import sys
 
 import torch
 
-sys.path.append('../..')
+sys.path.append('..')
 from common.lookahead_cache import LookaheadCache
 
 # os.environ['CUDA_VISIBLE_DEVICES'] = '0'
@@ -17,13 +17,13 @@ from common.lookahead_cache import LookaheadCache
 
 from transformers import AutoTokenizer
 
-from .benchmark import Benchmark
+from benchmark import Benchmark
 
 
 class LlameBenchmark(Benchmark):
 
     def initialize(self, model_dir=None, token_dir=None, **kwargs):
-        from models.llama.modeling_llama_flash_triton import LlamaForCausalLM
+        from models.llama.modeling_llama import LlamaForCausalLM
         model = LlamaForCausalLM.from_pretrained(model_dir
                                                  , cache_dir='../'
                                                  , torch_dtype=torch.float16
@@ -50,14 +50,15 @@ worker.load_prompts(prompt_dir=prompt_dir)
 
 # runable check
 prompt = '杭州在哪里？'
-decoding_mode = 'hier'
 max_length = 256
+chat_count = 100
+warmup_count = 1000
+
 worker.chat(prompt,
             max_length=max_length,
             use_lookahead=False,
             decoding_length=15,
             branch_length=4,
-            decoding_mode=decoding_mode,
             debug_lookahead=False)
 
 # test correctness with lookahead decoding
@@ -65,16 +66,14 @@ worker.batch_chat(worker.prompts[:10],
                   max_length=max_length,
                   decoding_length=15,
                   branch_length=4,
-                  decoding_mode=decoding_mode,
                   debug_lookahead=False,
                   erase=True,
                   batch_size=1)
 
-chat_count = 100
-warmup_count = 1000
+
 worker.perf_check(worker.prompts[:chat_count], warmup_ids=worker.ids[chat_count:chat_count + warmup_count],
-                  decoding_mode=decoding_mode, sizes=[64], lens=[0], max_length=max_length)
+                  sizes=[64], lens=[0], max_length=max_length)
 worker.perf_check(worker.prompts[:chat_count], warmup_ids=worker.ids[chat_count:chat_count + warmup_count],
-                  decoding_mode=decoding_mode, sizes=[64], lens=[12], max_length=max_length)
+                  sizes=[64], lens=[12], max_length=max_length)
 worker.perf_check(worker.prompts[:chat_count], warmup_ids=worker.ids[chat_count:chat_count + warmup_count],
-                  decoding_mode=decoding_mode, sizes=[64], lens=[12], max_length=max_length)
+                  sizes=[64], lens=[12], max_length=max_length)

@@ -19,6 +19,7 @@
 # limitations under the License.
 """ PyTorch LLaMA model."""
 import math
+import os
 from typing import List, Optional, Tuple, Union
 
 import torch
@@ -26,22 +27,19 @@ import torch.nn.functional as F
 import torch.utils.checkpoint
 from torch import nn
 from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss
-
 from transformers.activations import ACT2FN
 from transformers.modeling_outputs import BaseModelOutputWithPast, CausalLMOutputWithPast, \
     SequenceClassifierOutputWithPast
-# from transformers.modeling_utils import PreTrainedModel
-from common.pretrained_model_flash import LookaheadPreTrainedModel
+from transformers.models.llama.configuration_llama import LlamaConfig
 from transformers.utils import add_start_docstrings, add_start_docstrings_to_model_forward, logging, \
     replace_return_docstrings
-from transformers.models.llama.configuration_llama import LlamaConfig
+
+# from transformers.modeling_utils import PreTrainedModel
+from common.pretrained_model_batch import LookaheadPreTrainedModel
 # from flash_attn import flash_attn_qkvpacked_func, flash_attn_func, flash_attn_with_kvcache
 # from atorch.modules.transformer.layers import flash_attn_with_mask_bias
 # from flash_attn.flash_attn_triton import _flash_attn_forward
-from csrc.triton.flash_attn_v2_warps import _flash_attn_forward
 from csrc.triton.rms_norm import rmsnorm_wrapper
-
-import os
 
 os.environ['TOKENIZERS_PARALLELISM'] = 'false'
 
@@ -255,6 +253,8 @@ class LlamaAttention(nn.Module):
         self.o_proj = nn.Linear(self.num_heads * self.head_dim, self.hidden_size, bias=False)
         self._init_rope()
 
+        self.norming = True
+        self.normed = False
         self.query_key_value = None
         self.cache_seqlens = None
 
@@ -284,7 +284,6 @@ class LlamaAttention(nn.Module):
                 )
             else:
                 raise ValueError(f"Unknown RoPE scaling type {scaling_type}")
-
 
     def _attn(self, query, key, value, attention_mask=None, head_mask=None):
 
@@ -316,7 +315,7 @@ class LlamaAttention(nn.Module):
 
     def _sdp_attn(self, query, key, value, attention_mask=None, head_mask=None):
         with torch.backends.cuda.sdp_kernel(enable_math=False):
-            return F.scaled_dot_product_attention(query, key, value, attn_mask=attention_mask)
+            return F.scaled_dot_product_attention(query, key, value, attn_mask=attention_mask), None
 
     def forward(
             self,
@@ -330,8 +329,7 @@ class LlamaAttention(nn.Module):
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[Tuple[torch.Tensor]]]:
 
         if self.query_key_value is None:
-            coef = math.sqrt(self.head_dim)
-            # coef = 1.0
+            coef = math.sqrt(self.head_dim) if self.norming else 1.0
             self.query_key_value = nn.Linear(self.hidden_size, 3 * self.num_heads * self.head_dim, bias=False,
                                              device=self.q_proj.weight.device, dtype=self.q_proj.weight.dtype)
             self.query_key_value.weight = nn.Parameter(
@@ -343,10 +341,11 @@ class LlamaAttention(nn.Module):
             self.k_proj = None
             self.v_proj = self.v_proj.cpu()
             self.v_proj = None
+            self.normed = True
 
         bs, l = hidden_states.shape[:2]
         if past_key_value is not None:
-            kv_seq_len = l + past_key_value[0].shape[1]
+            kv_seq_len = past_key_value[0].shape[2]
         else:
             kv_seq_len = l
 
@@ -360,16 +359,16 @@ class LlamaAttention(nn.Module):
         if past_key_value is None:
             decoding_max_length = decoding_kwargs.get('decoding_max_length', None)
 
-            attn_output, attn_weights, _ = self._sdp_attn(query_states,
-                                                               key_states,
-                                                               value_states,
-                                                               attention_mask=attention_mask)
+            attn_output, attn_weights = self._attn(query_states,
+                                                          key_states,
+                                                          value_states,
+                                                          attention_mask=attention_mask)
 
-            zeros = torch.zeros([bs, decoding_max_length - l, self.num_heads, self.head_dim],
-                                dtype=hidden_states.
-                                dtype, device=hidden_states.device)
-            past_key = torch.cat([key_states, zeros], 1)
-            past_value = torch.cat([value_states, zeros], 1)
+            zeros = torch.zeros([bs, self.num_heads, decoding_max_length - l, self.head_dim],
+                                dtype=hidden_states.dtype, 
+                                device=hidden_states.device)
+            past_key = torch.cat([key_states, zeros], 2)
+            past_value = torch.cat([value_states, zeros], 2)
             past_key_value = [past_key, past_value]
             self.cache_seqlens = l
         else:
@@ -377,24 +376,24 @@ class LlamaAttention(nn.Module):
             decoding_cursors = decoding_kwargs.get('decoding_cursors', None)
             if decoding_cursors is None:
                 max_len = self.cache_seqlens + l
-                past_key[:, self.cache_seqlens: max_len] = key_states
-                past_value[:, self.cache_seqlens: max_len] = value_states
+                past_key[:, :,  self.cache_seqlens: max_len] = key_states
+                past_value[:, :, self.cache_seqlens: max_len] = value_states
             else:
                 max_len = max(decoding_cursors) + l
                 cs = list(set(decoding_cursors))
                 if len(cs) == 1:
                     c = cs[0]
-                    past_key[:, c: c + l] = key_states
-                    past_value[:, c: c + l] = value_states
+                    past_key[:, :, c: c + l] = key_states
+                    past_value[:, :, c: c + l] = value_states
                 else:
                     for i, cursor in enumerate(decoding_cursors):
-                        past_key[i, cursor: cursor + l] = key_states[i]
-                        past_value[i, cursor: cursor + l] = value_states[i]
+                        past_key[i, :,  cursor: cursor + l] = key_states[i]
+                        past_value[i,  :, cursor: cursor + l] = value_states[i]
 
-            attn_output, attn_weights, _ = self._sdp_attn(query_states,
-                                                               key_states[:,:,:max_len],
-                                                               value_states[:,:,:max_len],
-                                                               attention_mask=attention_mask)
+            attn_output, attn_weights = self._attn(query_states,
+                                                          past_key[:, :, :max_len],
+                                                          past_value[:, :, :max_len],
+                                                          attention_mask=attention_mask)
             if decoding_cursors is None:
                 self.cache_seqlens += 1
 
@@ -403,6 +402,8 @@ class LlamaAttention(nn.Module):
 
         if not output_attentions:
             attn_weights = None
+
+        attn_output = attn_output.permute(0, 2, 1, 3).contiguous()
         attn_shape = attn_output.size()[:-2] + (self.num_heads * self.head_dim,)
         attn_output = attn_output.view(attn_shape)
         attn_output = self.o_proj(attn_output)

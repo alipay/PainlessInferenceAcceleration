@@ -1,15 +1,14 @@
-import os
-import torch
 from typing import Union, Dict, Any
-from modelscope.pipelines.builder import PIPELINES
-from modelscope.models.builder import MODELS
-from modelscope.utils.constant import Tasks
-from modelscope.pipelines.base import Pipeline
-from modelscope.outputs import OutputKeys
-from modelscope.pipelines.nlp.text_generation_pipeline import TextGenerationPipeline
+
+import torch
 from modelscope.models.base import Model, TorchModel
+from modelscope.models.builder import MODELS
+from modelscope.outputs import OutputKeys
+from modelscope.pipelines.builder import PIPELINES
+from modelscope.pipelines.nlp.text_generation_pipeline import TextGenerationPipeline
+from modelscope.utils.constant import Tasks
 from modelscope.utils.logger import get_logger
-from transformers import AutoModelForCausalLM, AutoTokenizer, GenerationConfig
+from transformers import AutoModelForCausalLM, AutoTokenizer
 from transformers.generation.utils import GenerationConfig
 
 

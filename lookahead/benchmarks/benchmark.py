@@ -16,8 +16,7 @@ from pstats import SortKey
 
 import torch
 
-sys.path.append('../..')
-
+sys.path.append('..')
 
 # os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 # os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
@@ -37,7 +36,6 @@ class Benchmark():
 
         self.model = None
         self.tokenizer = None
-        self.model.lookahead_cache = None
         self.prompts = []
         self.answers = []
         self.ids = []
@@ -116,6 +114,12 @@ class Benchmark():
         tokenizer = self.tokenizer
         model = self.model
 
+        decoding_kwargs = {"use_lookahead": use_lookahead,
+                        "debug_lookahead": debug_lookahead,
+                        "decoding_mode": decoding_mode,
+                        "decoding_length": decoding_length,
+                        "branch_length": branch_length}
+
         outputs = model.generate(input_ids=input_ids,
                                  attention_mask=attention_mask,
                                  position_ids=position_ids,
@@ -125,15 +129,11 @@ class Benchmark():
                                  max_new_tokens=max_length,
                                  repetition_penalty=1.0,
                                  do_sample=False,
-                                 use_lookahead=use_lookahead,
-                                 decoding_length=decoding_length,
-                                 branch_length=branch_length,
-                                 decoding_mode=decoding_mode,
-                                 debug_lookahead=debug_lookahead,
+                                 decoding_kwargs=decoding_kwargs,
                                  return_dict_in_generate=True
                                  )
         output_ids = outputs.sequences
-        kwargs = outputs.kwargs or {}
+        kwargs = outputs.kwargs if hasattr(outputs, 'kwargs') else {}
         input_length = input_ids.size(-1)
         output_ids = output_ids[:, input_length:].tolist()
         # output_ids = output_ids.tolist()
@@ -218,16 +218,16 @@ class Benchmark():
                 et = kwargs.get('fts', [0])[0]
                 # print(f"Human:{query[:80]}...")
                 print(f"1/{bs} Robot:{output_texts[0]}")
-                prefix = 'Prefetch:' + ('On ' if use_lookahead else 'Off')
-                imp = speeds[-1] / speeds[0] if use_lookahead else 0.0
+                prefix = 'lookahead:' + ('On ' if use_lookahead else 'Off')
+                speedup = speeds[-1] / speeds[0] if use_lookahead else 0.0
                 print(
                     f"{prefix} mode:{decoding_mode} idx:{i}/{chat_count} "
                     f"input:{in_char:.1f}/{in_token:.1f} output:{out_char:.1f}/{out_token:.1f} "
-                    f"edl:{edl:.3f}/{dl:.3f}/{et:.3f} time:{t:.3f} speed:{speed_token:.1f} imp:{imp:.3f}\n")
+                    f"edl:{edl:.3f}/{dl:.3f}/{et:.3f} time:{t:.3f} speed:{speed_token:.1f} speedup:{speedup:.3f}\n")
         org_speed = total_out_tokens[0] / total_times[0]
         opt_speed = total_out_tokens[1] / total_times[1]
-        imp = opt_speed / org_speed
-        print(f'speed:{org_speed:.2f}->{opt_speed:.2f} imp:{imp:.3f}')
+        speedup = opt_speed / org_speed
+        print(f'speed:{org_speed:.2f}->{opt_speed:.2f} speedup:{speedup:.3f}')
 
     def perf_check(self, queries, warmup_ids=None, max_length=256, sizes=(31, 64),
                    lens=(4, 8, 12), decoding_mode='hier',
@@ -313,14 +313,14 @@ class Benchmark():
                 ft = sum(fts) / max(len(fts), 1)
                 ms = torch.cuda.memory_stats()
                 mem = ms['reserved_bytes.large_pool.peak'] / 1024 ** 3
-                imp = speeds[-1] / speeds[0]
+                speedup = speeds[-1] / speeds[0]
                 times = [round(x, 3) for x in times]
                 log_str = f"mode:{decoding_mode} bs:{batch_size} " \
                           f"decoding:{decoding_length}/{branch_length} " \
                           f"query:{len(queries)} warmup:{wc} " \
                           f"input:{in_token:.1f} output:{out_token:.1f} " \
                           f"edl:{edl:.3f}/{dl:.3f}/{ft:.3f} time:{t:.3f} " \
-                          f"speed:{speed:.1f} imp:{imp:.3f} mem:{mem:.3f} "
+                          f"speed:{speed:.1f} mem:{mem:.3f} "
                 print(log_str)
                 if self.logger is not None:
                     self.logger.write(log_str + '\n')

@@ -1,5 +1,5 @@
-from typing import List
 from queue import Queue
+from typing import List
 
 import torch
 

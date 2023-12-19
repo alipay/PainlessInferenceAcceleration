@@ -9,7 +9,7 @@ import sys
 
 import torch
 
-sys.path.append('../..')
+sys.path.append('..')
 from common.lookahead_cache import LookaheadCache
 
 # os.environ['CUDA_VISIBLE_DEVICES'] = '0'
@@ -17,21 +17,22 @@ from common.lookahead_cache import LookaheadCache
 
 from transformers import AutoTokenizer
 
-from .benchmark import Benchmark
+from benchmark import Benchmark
 
 
 class ChatglmBenchmark(Benchmark):
 
     def initialize(self, model_dir=None, token_dir=None, **kwargs):
-        from models.llama.modeling_llama_flash_triton import LlamaForCausalLM
-        model = LlamaForCausalLM.from_pretrained(model_dir
+        from models.chatglm.modeling_chatglm import ChatGLMForConditionalGeneration
+        from models.chatglm.tokenization_chatglm import ChatGLMTokenizer
+        model = ChatGLMForConditionalGeneration.from_pretrained(model_dir
                                                  , cache_dir='../'
                                                  , torch_dtype=torch.float16
                                                  , low_cpu_mem_usage=True
                                                  , device_map='auto')
-        tokenizer = AutoTokenizer.from_pretrained(token_dir)
-        tokenizer.pad_token = tokenizer.eos_token
-        tokenizer.padding_side = 'left'
+        tokenizer = ChatGLMTokenizer.from_pretrained(token_dir)
+        # tokenizer.pad_token = tokenizer.eos_token
+        # tokenizer.padding_side = 'left'
         stop_ids = tokenizer.convert_tokens_to_ids(self.stop_words)
         lookahead_cache = LookaheadCache(eos=tokenizer.eos_token_id, stop_words=stop_ids)
         model.lookahead_cache = lookahead_cache

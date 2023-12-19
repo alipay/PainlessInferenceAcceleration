@@ -20,29 +20,27 @@
 # limitations under the License.
 
 
-from models.baichuan.configuration_baichuan import BaichuanConfig
-from models.baichuan.generation_utils import build_chat_input, TextIterStreamer
-
 import math
-from typing import List, Optional, Tuple, Union
+import os
+from contextlib import contextmanager
 from threading import Thread
+from typing import List, Optional, Tuple, Union
 
 import torch
 import torch.utils.checkpoint
 from torch import nn
-from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss
+from torch.nn import CrossEntropyLoss
 from torch.nn import functional as F
 # from transformers import PreTrainedModel, PretrainedConfig
 from transformers import PretrainedConfig
-from common.pretrained_model import LookaheadPreTrainedModel
-
 from transformers.activations import ACT2FN
-from transformers.modeling_outputs import BaseModelOutputWithPast, CausalLMOutputWithPast
 from transformers.generation.utils import GenerationConfig
+from transformers.modeling_outputs import BaseModelOutputWithPast, CausalLMOutputWithPast
 from transformers.utils import logging, ContextManagers
 
-import os
-from contextlib import contextmanager
+from common.pretrained_model import LookaheadPreTrainedModel
+from models.baichuan.configuration_baichuan import BaichuanConfig
+from models.baichuan.generation_utils import build_chat_input, TextIterStreamer
 
 logger = logging.get_logger(__name__)
 

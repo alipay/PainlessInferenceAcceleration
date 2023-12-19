@@ -1,6 +1,5 @@
 # coding=utf-8
-# Copyright 2018 The OpenAI Team Authors and HuggingFace Inc. team.
-# Copyright (c) 2018, NVIDIA CORPORATION.  All rights reserved.
+# Copyright 2022 shunxing1234 The HuggingFace Inc. team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -14,63 +13,29 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import math
-import os
-import time
-import copy
-import json
-import pickle
-
-import warnings
-from functools import reduce
-from collections import defaultdict
-from itertools import accumulate
 import inspect
-import random
-from dataclasses import dataclass
-from typing import Optional, Tuple, Union
-import sys
+from typing import Any, Dict, Optional, Tuple, Union
 
-import numpy as np
 import torch
-import torch.utils.checkpoint
-from torch.nn.utils import skip_init
-from torch import nn
-from torch.cuda.amp import autocast
-from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss
-from torch.nn import init
 import torch.nn.functional as F
-from torch.nn.parameter import Parameter
-
+import torch.utils.checkpoint
+from torch import nn
+from torch.nn import CrossEntropyLoss
+from torch.nn import init
 # from transformers.activations import gelu
 from torch.nn.functional import gelu
+from torch.nn.parameter import Parameter
+from transformers.generation.utils import ModelOutput
 from transformers.modeling_outputs import (
     BaseModelOutputWithPastAndCrossAttentions,
     CausalLMOutputWithCrossAttentions,
-    SequenceClassifierOutputWithPast,
-    TokenClassifierOutput,
 )
-# from transformers.modeling_utils import PreTrainedModel, SequenceSummary
-from transformers.modeling_utils import SequenceSummary
-from common.pretrained_model_batch import LookaheadPreTrainedModel, LookaheadCache
-
-from transformers.pytorch_utils import Conv1D, find_pruneable_heads_and_indices, prune_conv1d_layer
 from transformers.utils import (
-    ModelOutput,
-    add_code_sample_docstrings,
-    add_start_docstrings,
-    add_start_docstrings_to_model_forward,
     logging,
-    replace_return_docstrings,
 )
-from transformers.utils.model_parallel_utils import assert_device_map, get_device_map
 
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
-from transformers.generation.logits_process import LogitsProcessorList
-from transformers.generation.stopping_criteria import StoppingCriteriaList
-from transformers.generation.utils import GreedySearchOutput, ModelOutput, \
-    validate_stopping_criteria, GreedySearchDecoderOnlyOutput
-
+# from transformers.modeling_utils import PreTrainedModel, SequenceSummary
+from common.pretrained_model_batch import LookaheadPreTrainedModel, LookaheadCache
 from models.antglm.configuration_glm import GLMConfig
 
 logger = logging.get_logger(__name__)
@@ -177,10 +142,10 @@ class SelfAttention(nn.Module):
         query, key, value = mat.view(update_shape).permute(0, 3, 2, 1, 4).unbind(2)
 
         if past_key_value is None:
-            prefetch_max_length = decoding_kwargs.get('prefetch_max_length', None)
-            # past_key = torch.zeros([bs, prefetch_max_length, self.num_heads, self.head_dim],dtype=hidden_states.dtype,device=hidden_states.device)
-            # past_value = torch.zeros([bs, prefetch_max_length, self.num_heads, self.head_dim],dtype=hidden_states.dtype,device=hidden_states.device)
-            # kv = torch.zeros([2, bs, self.num_heads, prefetch_max_length, self.head_dim],dtype=hidden_states.dtype,device=hidden_states.device)
+            decoding_max_length = decoding_kwargs.get('decoding_max_length', None)
+            # past_key = torch.zeros([bs, decoding_max_length, self.num_heads, self.head_dim],dtype=hidden_states.dtype,device=hidden_states.device)
+            # past_value = torch.zeros([bs, decoding_max_length, self.num_heads, self.head_dim],dtype=hidden_states.dtype,device=hidden_states.device)
+            # kv = torch.zeros([2, bs, self.num_heads, decoding_max_length, self.head_dim],dtype=hidden_states.dtype,device=hidden_states.device)
             # past_key = past_kv[0]
             # past_value = past_kv[1]
             # past_key, past_value = kv.unbind(0)
@@ -188,7 +153,7 @@ class SelfAttention(nn.Module):
             # past_value[:,:,:l] = value
             attn_output, attn_weights = self._attn(query, key, value,
                                                    attention_mask=attention_mask)
-            zeros = torch.zeros([bs, self.num_heads, prefetch_max_length - l, self.head_dim], dtype=hidden_states.dtype,
+            zeros = torch.zeros([bs, self.num_heads, decoding_max_length - l, self.head_dim], dtype=hidden_states.dtype,
                                 device=hidden_states.device)
             past_key = torch.cat([key, zeros], 2)
             past_value = torch.cat([value, zeros], 2)
@@ -196,27 +161,27 @@ class SelfAttention(nn.Module):
             past_key_value = [past_key, past_value]
         else:
             past_key, past_value = past_key_value
-            prefetch_cursors = decoding_kwargs.get('prefetch_cursors', None)
-            if prefetch_cursors is None:
+            decoding_cursors = decoding_kwargs.get('decoding_cursors', None)
+            if decoding_cursors is None:
                 max_len = self.cache_seqlens + l
                 past_key[:, :, self.cache_seqlens: max_len] = key
                 past_value[:, :, self.cache_seqlens: max_len] = value
             else:
-                max_len = max(prefetch_cursors) + l
-                cs = list(set(prefetch_cursors))
+                max_len = max(decoding_cursors) + l
+                cs = list(set(decoding_cursors))
                 if len(cs) == 1:
                     c = cs[0]
                     past_key[:, :, c: c + l] = key
                     past_value[:, :, c: c + l] = value
                 else:
-                    for i, cursor in enumerate(prefetch_cursors):
+                    for i, cursor in enumerate(decoding_cursors):
                         past_key[i, :, cursor: cursor + l] = key[i]
                         past_value[i, :, cursor: cursor + l] = value[i]
             attn_output, attn_weights = self._attn(query,
                                                    past_key[:, :, :max_len],
                                                    past_value[:, :, :max_len],
                                                    attention_mask=attention_mask)
-            if prefetch_cursors is None:
+            if decoding_cursors is None:
                 self.cache_seqlens += 1
 
         attn_output = attn_output.permute(0, 2, 1, 3).contiguous()

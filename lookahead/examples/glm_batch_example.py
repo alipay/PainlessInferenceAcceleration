@@ -10,7 +10,7 @@ import time
 
 import torch
 
-sys.path.append('../..')
+sys.path.append('..')
 sys.path.append('/ossfs/workspace/lookahead')
 
 from common.lookahead_cache import LookaheadCache
@@ -18,8 +18,8 @@ from common.lookahead_cache import LookaheadCache
 # os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 # os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
 
-from models.antglm.tokenization_glm import GLMChineseTokenizer
-from models.antglm.modeling_glm_batch import GLMForConditionalGeneration
+from models.glm.tokenization_glm import GLMChineseTokenizer
+from models.glm.modeling_glm_batch import GLMForConditionalGeneration
 
 model_dir = '/mntnlp/nanxiao/lookahead_benchmark/antrag'
 model = GLMForConditionalGeneration.from_pretrained(model_dir
@@ -28,9 +28,10 @@ model = GLMForConditionalGeneration.from_pretrained(model_dir
                                                     , torch_dtype=torch.float16
                                                     , low_cpu_mem_usage=True
                                                     , device_map='auto')
+assert hasattr(model, '_batch_generate') and model._batch_generate
 tokenizer = GLMChineseTokenizer.from_pretrained(model_dir)
 tokenizer.pad_token = tokenizer.eos_token
-tokenizer.padding_side = 'left'
+# tokenizer.padding_side = 'left'
 lookahead_cache = LookaheadCache(eos=50005, stop_words={43359, 43360, 43361, 43362})
 model.lookahead_cache = lookahead_cache
 
@@ -39,9 +40,8 @@ prompt = ["杭州在哪里？[gMASK]", "西湖在哪个省？[gMASK]"]
 inputs = tokenizer(prompt, return_tensors="pt", padding=True, truncation=False, )
 
 device = model.device
-use_lookahead = True
-debug_lookahead = False
-decoding_length = 63
+debug_lookahead = True
+decoding_length = 64
 branch_length = 12
 max_new_tokens = 128
 inputs = tokenizer.build_inputs_for_generation(inputs, max_gen_length=max_new_tokens + decoding_length + 1)
@@ -49,10 +49,9 @@ input_ids = inputs['input_ids'].to(device)
 attention_mask = inputs['generation_attention_mask'].to(device)
 position_ids = inputs['position_ids'].to(device)
 
-# first time without lookahead
-assert hasattr(model, '_batch_generation') and model._batch_generation
 
-for use_lookahead in [False, True]:
+# first time without lookahead
+for use_lookahead in [False, False, True, True]:
     ts = time.time()
     decoding_kwargs = {"use_lookahead": use_lookahead,
                        "debug_lookahead": debug_lookahead,
