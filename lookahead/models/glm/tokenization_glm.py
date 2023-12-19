@@ -1,14 +1,30 @@
+# coding=utf-8
+# Copyright 2022 shunxing1234 The HuggingFace Inc. team. All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 import os
 import re
-from typing import Optional, Tuple, List, Union, Dict, Any
 from shutil import copyfile
-import torch
+from typing import Optional, Tuple, List, Union, Dict, Any
 
+import sentencepiece as spm
+import torch
 from transformers import (
     PreTrainedTokenizer, RobertaTokenizer, GPT2Tokenizer, BertTokenizer
 )
-from transformers.utils import logging, PaddingStrategy, TensorType
 from transformers.file_utils import to_py_obj
+from transformers.models.auto.tokenization_auto import get_tokenizer_config
 from transformers.tokenization_utils_base import (
     BatchEncoding,
     TextInput,
@@ -16,9 +32,8 @@ from transformers.tokenization_utils_base import (
     EncodedInput,
     TruncationStrategy
 )
-from transformers.models.auto.tokenization_auto import get_tokenizer_config
+from transformers.utils import logging, PaddingStrategy, TensorType
 from transformers.utils.generic import _is_torch_device
-import sentencepiece as spm
 
 logger = logging.get_logger(__name__)
 
@@ -356,11 +371,11 @@ class GLMChineseTokenizer(PreTrainedTokenizer, GLMTokenizerMixin):
         special tokens should init, check special token is not None
         '''
         for name, special_token in zip(
-            ['bos', 'eos', 'unk', 'sep', 'pad', 'cls', 'mask'],
-            [
-                self.bos_token, self.eos_token, self.unk_token,
-                self.sep_token, self.pad_token, self.cls_token, self.mask_token
-            ]
+                ['bos', 'eos', 'unk', 'sep', 'pad', 'cls', 'mask'],
+                [
+                    self.bos_token, self.eos_token, self.unk_token,
+                    self.sep_token, self.pad_token, self.cls_token, self.mask_token
+                ]
         ):
             assert special_token is not None, f'should init special token [{name}] in tokenizer_config.json'
 
@@ -428,7 +443,7 @@ class GLMChineseTokenizer(PreTrainedTokenizer, GLMTokenizerMixin):
         return self.sp_model.decode(tokens)
 
     def prepare_for_tokenization(
-        self, text: str, is_split_into_words: bool = False, **kwargs
+            self, text: str, is_split_into_words: bool = False, **kwargs
     ) -> Tuple[str, Dict[str, Any]]:
         """
         Performs any necessary transformations before tokenization.
@@ -448,16 +463,16 @@ class GLMChineseTokenizer(PreTrainedTokenizer, GLMTokenizerMixin):
         return (self.encode_whitespaces(text), kwargs)
 
     def encode(
-        self,
-        text: Union[TextInput, PreTokenizedInput, EncodedInput],
-        text_pair: Optional[Union[TextInput, PreTokenizedInput, EncodedInput]] = None,
-        add_special_tokens: bool = False,
-        padding: Union[bool, str, PaddingStrategy] = False,
-        truncation: Union[bool, str, TruncationStrategy] = False,
-        max_length: Optional[int] = None,
-        stride: int = 0,
-        return_tensors: Optional[Union[str, TensorType]] = None,
-        **kwargs,
+            self,
+            text: Union[TextInput, PreTokenizedInput, EncodedInput],
+            text_pair: Optional[Union[TextInput, PreTokenizedInput, EncodedInput]] = None,
+            add_special_tokens: bool = False,
+            padding: Union[bool, str, PaddingStrategy] = False,
+            truncation: Union[bool, str, TruncationStrategy] = False,
+            max_length: Optional[int] = None,
+            stride: int = 0,
+            return_tensors: Optional[Union[str, TensorType]] = None,
+            **kwargs,
     ) -> List[int]:
         """
         FROM: https://github.com/huggingface/transformers/blob/v4.27.2/src/transformers/tokenization_utils_base.py#L2274
@@ -478,12 +493,12 @@ class GLMChineseTokenizer(PreTrainedTokenizer, GLMTokenizerMixin):
         return encoded_inputs["input_ids"]
 
     def decode(
-        self,
-        token_ids: Union[int, List[int], "np.ndarray", "torch.Tensor", "tf.Tensor"],
-        skip_special_tokens: bool = False,
-        clean_up_tokenization_spaces: bool = True,
-        spaces_between_special_tokens: bool = False,
-        **kwargs,
+            self,
+            token_ids: Union[int, List[int], "np.ndarray", "torch.Tensor", "tf.Tensor"],
+            skip_special_tokens: bool = False,
+            clean_up_tokenization_spaces: bool = True,
+            spaces_between_special_tokens: bool = False,
+            **kwargs,
     ) -> str:
         """
         Converts a sequence of ids in a string, using the tokenizer and vocabulary with options to remove special

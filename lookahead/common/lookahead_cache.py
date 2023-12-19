@@ -4,16 +4,14 @@ Copyright (c) Ant Financial Service Group and its affiliates.
 """
 
 import json
-from operator import itemgetter
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple, Union
+import pickle
 from collections import defaultdict
 from functools import reduce
-import pickle
 
 import numpy as np
 
 
-class Pair():
+class Node():
     __slots__ = ['freqs', 'pairs']
 
     def __init__(self, freqs=None, pairs=None):
@@ -24,8 +22,9 @@ class Pair():
         return f'{self.freqs}->{list(self.pairs.keys())}'
 
 
-class PrefetchCell():
-    def __init__(self, max_node=512, max_output_node=256):  # TODO
+class Tree():
+    def __init__(self, token_id, max_node=512, max_output_node=256):
+        self.token_id = token_id
         self.max_node = max_node
         self.max_output_node = max_output_node
         self.n_node = 0
@@ -39,6 +38,7 @@ class PrefetchCell():
         else:
             assert idx >= 0
         self._put(token_ids, self.nodes, mode=mode, idx=idx, freq=1.0)
+        return None
 
     def _put(self, token_ids, pairs, mode='output', freq=1.0, idx=-1):
 
@@ -58,21 +58,24 @@ class PrefetchCell():
             pair.freqs[idx] = pair.freqs.get(idx, 0.0) + freq
             pairs = pair.pairs
             token_ids = token_ids[1:]
+        return None
 
     def _pack(self, token_ids, idx=-1, freq=1.0):
         ps = {}
         for token in token_ids[::-1]:
             freqs = {idx: freq}
-            p = Pair(freqs=freqs, pairs=ps)
+            p = Node(freqs=freqs, pairs=ps)
             ps = {token: p}
         return ps
 
-    def get(self, token_ids, max_size=63, max_length=8, min_input_size=0, min_output_size=0, output_weight=1e-4, mode='mix', idx=0):
+    def get(self, token_ids, max_size=64, max_length=8, min_input_size=0,
+            min_output_size=0, output_weight=1e-4, mode='mix', idx=0):
         assert mode in ('input', 'output', 'mix')
 
-        pairs = self._match(token_ids, mode=mode, idx=idx)
+        match_token_id, pairs = self._match(token_ids, mode=mode, idx=idx)
         if len(pairs) == 0:
-            return [], np.ones((1, 1), dtype=np.int64), []
+            token_id = token_ids[-1] if len(token_ids) > 0 else self.token_id
+            return [token_id], np.ones((1, 1), dtype=np.int64), [0,0]
 
         freqs = []
         self._get_freqs(pairs, freqs, idx, output_weight)
@@ -115,20 +118,21 @@ class PrefetchCell():
                     rest_size = max_size - len(indices)
                     indices.update([x[0] for x in mix_freqs[:rest_size]])
                     cur_size = len(indices)
-                    for i in range(rest_size, min(rest_size+max_size, size)):
+                    for i in range(rest_size, min(rest_size + max_size, size)):
                         if mix_freqs[i][0] in indices:
                             continue
                         cur_size += 1
-                        if cur_size>=max_size:
+                        if cur_size >= max_size:
                             x = mix_freqs[i]
                             min_mix_freq = x[3]
                             break
             else:
                 min_mix_freq = 0.0
 
-        mask = np.zeros((max_size + 1, max_size + 1), dtype=np.int64)
-        ids = []
-        sizes = [0,0]
+        mask = np.zeros((max_size, max_size), dtype=np.int64)
+        mask[:, 0] = 1
+        ids = [match_token_id or self.token_id]
+        sizes = [0, 0]
         self._ravel(pairs, ids, mask, -1,
                     max_size=max_size,
                     max_length=max_length,
@@ -141,35 +145,34 @@ class PrefetchCell():
                     idx=idx)
         size = len(ids)
 
-        mask = mask[:size + 1, :size + 1]
-        mask[1:, 1:] = mask[:-1, :-1]
-        mask[:, 0] = 1
+        mask = mask[:size, :size]
         return ids, mask, sizes
 
     def _get_freqs(self, pairs, freqs, idx, output_weight):
         for tid, pair in pairs.items():
             fo = pair.freqs.get(-1, 0.0)
             fi = pair.freqs.get(idx, 0.0)
-            if fo>0 or fi>0:
-                fm = (1.0-output_weight)*fi + output_weight*fo
-                freqs.append([len(freqs), fi,  fo, fm])
+            if fo > 0 or fi > 0:
+                fm = (1.0 - output_weight) * fi + output_weight * fo
+                freqs.append([len(freqs), fi, fo, fm])
                 if len(pair.pairs) > 0:
                     self._get_freqs(pair.pairs, freqs, idx, output_weight)
 
     def get_one_branch(self, token_ids, max_length=8, mode='output', idx=-1):
         assert mode in ('input', 'output', 'mix')
 
-        pairs = self._match(token_ids, mode=mode)
+        match_token_id, pairs = self._match(token_ids, mode=mode)
         if len(pairs) == 0:
-            return [], np.ones((1, 1), dtype=np.int64), []
+            token_id = token_ids[-1] if len(token_ids) > 0 else self.token_id
+            return [token_id], np.ones((1, 1), dtype=np.int64), [0,0]
 
-        ids = []
+        ids = [match_token_id]
         length = 0
         while True:
             if len(pairs) == 0 or length >= max_length:
                 break
             max_freq = 0.0
-            max_pair = None 
+            max_pair = None
             max_id = None
             if mode == 'mix':
                 for t, pair in pairs.items():
@@ -179,7 +182,7 @@ class PrefetchCell():
                     if fo > 0 or fi > 0:
                         freq = 10000 * fi + fo
                         if freq > max_freq:
-                            max_freq = freq 
+                            max_freq = freq
                             max_pair = pair
                             max_id = t
             elif mode == 'input':
@@ -188,7 +191,7 @@ class PrefetchCell():
                     freq = freqs.get(idx, 0.0)
                     if freq > 0:
                         if freq > max_freq:
-                            max_freq = freq 
+                            max_freq = freq
                             max_pair = pair
                             max_id = t
             else:
@@ -197,7 +200,7 @@ class PrefetchCell():
                     freq = freqs.get(idx, 0.0)
                     if freq > 0:
                         if freq > max_freq:
-                            max_freq = freq 
+                            max_freq = freq
                             max_pair = pair
                             max_id = t
             if max_pair is None:
@@ -210,8 +213,9 @@ class PrefetchCell():
 
     def _match(self, token_ids, mode='output', idx=-1):
         pairs = self.nodes
+        token_id = None
         if len(token_ids) == 0:
-            return pairs
+            return token_id, pairs
 
         for token_id in token_ids:
             pair = pairs.get(token_id, None)
@@ -229,17 +233,16 @@ class PrefetchCell():
                 if pair.freqs.get(idx, 0.0) > 0 or pair.freqs.get(-1, 0.0) > 0:
                     pairs = pair.pairs
 
-        return pairs
+        return token_id, pairs
 
-    def _ravel(self, pairs, ids, mask, pid, max_size=63,  max_length=8,
-               min_output_freq=1.0, min_input_freq=1.0, min_mix_freq=1.0, 
-               output_weight=1e-4,
-               sizes=None, mode='mix', idx=0):
+    def _ravel(self, pairs, ids, mask, pid, max_size=64, max_length=8,
+               min_output_freq=1.0, min_input_freq=1.0, min_mix_freq=1.0,
+               output_weight=1e-4, sizes=None, mode='mix', idx=0):
         if len(ids) >= max_size or max_length <= 0:
             return
 
-        # TODO
-        sorts = [(k, v, (1.0-output_weight) * v.freqs.get(idx, 0.0) + output_weight * v.freqs.get(-1, 0.0)) for k,v in pairs.items()]
+        sorts = [(k, v, (1.0 - output_weight) * v.freqs.get(idx, 0.0) + output_weight * v.freqs.get(-1, 0.0)) for k, v
+                 in pairs.items()]
         sorts = sorted(sorts,
                        key=lambda x: x[2],
                        reverse=True)
@@ -325,7 +328,7 @@ class PrefetchCell():
                 self._reset_input_freq(p.pairs)
 
 
-class PrefetchCache():
+class LookaheadCache():
     def __init__(self, debug=False, eos=2, stop_words=None, max_node=512, max_output_node=256):
         self.debug = debug
         self.eos = eos
@@ -333,143 +336,111 @@ class PrefetchCache():
         self.max_output_node = max_output_node
         self.mem = {}
         self._output_ids = defaultdict(list)
-        self._update_cells = set()
-        self._update_input_cells = set()
+        self._update_trees = set()
+        self._update_input_trees = set()
         self.stop_words = stop_words if stop_words is not None else {}
         self.default_mask = np.ones((1, 1), dtype=np.int64)
 
-        # self.tot_freq = 0.0
-        # self.freq_dict = {}
-
-    def put(self, token_ids, prefetch_length=8, final=False, mode='output', idx=-1):
+    def put(self, token_ids, branch_length=8, final=False, mode='output', idx=-1):
         if len(token_ids) >= 2:
-            ts = len(token_ids)  # ts: token_ids size
-            # self.tot_freq += ts
-            # for t in token_ids:
-            #     self.freq_dict[t] = self.freq_dict.get(t, 0)+1
+            ts = len(token_ids)   # ts: token_ids size
 
             for i in range(ts - 1):
                 token_id = token_ids[i]
-                tup = token_ids[i + 1:i + prefetch_length + 1]
+                tup = token_ids[i + 1:i + branch_length + 1]
                 if self.debug:
                     print(f'input token:{token_id} tokens:{tup}')
-                cell = self.mem.get(token_id, None)
-                if cell is not None:
-                    cell.put(tup, mode=mode, idx=idx)
+                tree = self.mem.get(token_id, None)
+                if tree is not None:
+                    tree.put(tup, mode=mode, idx=idx)
                 else:
-                    cell = PrefetchCell(max_node = self.max_node, max_output_node=self.max_output_node)
-                    cell.put(tup, mode=mode, idx=idx)
-                    self.mem[token_id] = cell
-                self._update_cells.add(cell)
+                    tree = Tree(token_id, max_node=self.max_node, max_output_node=self.max_output_node)
+                    tree.put(tup, mode=mode, idx=idx)
+                    self.mem[token_id] = tree
+                self._update_trees.add(tree)
                 if mode == 'input':
-                    self._update_input_cells.add(cell)
+                    self._update_input_trees.add(tree)
 
         if final:
             self.reset_input_freqs()
             self.squeeze_branch_counts()
 
-    def stream_put(self, token_ids, prefetch_length=8, final=False, mode='output', idx=0):
+    def stream_put(self, token_ids, branch_length=8, final=False, mode='output', idx=0):
         # idx is only used for caching output_ids
         assert mode == 'output' and idx >= 0
         self._output_ids[idx].extend(token_ids)
         output_ids = self._output_ids[idx]
         ts = len(output_ids)
-        if final:
-            prefetch_length = 1
-        if ts > prefetch_length:
-            for i in range(ts - prefetch_length):
+        min_branch_length = 1 if final else branch_length
+        if ts > min_branch_length:
+            for i in range(ts - min_branch_length):
                 token_id = output_ids[i]
-                tup = output_ids[i + 1:i + prefetch_length + 1]
+                tup = output_ids[i + 1:i + branch_length + 1]
                 if self.debug:
                     print(f'input token:{token_id} tokens:{tup}')
-                cell = self.mem.get(token_id, None)
-                if cell:
-                    cell.put(tup, mode='output', idx=-1)
+                tree = self.mem.get(token_id, None)
+                if tree:
+                    tree.put(tup, mode='output', idx=-1)
                 else:
-                    cell = PrefetchCell(max_node = self.max_node, max_output_node=self.max_output_node)
-                    cell.put(tup, mode='output', idx=-1)
-                    self.mem[token_id] = cell
-                self._update_cells.add(cell)
+                    tree = Tree(token_id, max_node=self.max_node, max_output_node=self.max_output_node)
+                    tree.put(tup, mode='output', idx=-1)
+                    self.mem[token_id] = tree
+                self._update_trees.add(tree)
             if not final:
-                self._output_ids[idx] = output_ids[ts - prefetch_length:]
+                self._output_ids[idx] = output_ids[ts - branch_length:]
         if final:
             self._output_ids[idx] = []
             self.reset_input_freqs()
             self.squeeze_branch_counts()
 
-    def llma_put(self, token_ids, mode='input', idx=0):
-        assert mode in ('input', )
-        self._output_ids[idx] = token_ids
-
-    def trie_get(self, token_ids, prefetch_size=63, prefetch_length=8, min_input_size=0, min_output_size=0, mode='mix', idx=0):
+    def hier_get(self, token_ids, decoding_length=64, branch_length=8, min_input_size=0, min_output_size=0, mode='mix',
+                 idx=0):
         assert mode in ('input', 'output', 'mix')
 
-        prefetch_masks = self.default_mask
-        if prefetch_size == 0 or prefetch_length == 0:
-            return token_ids[-1:], prefetch_masks, []
+        decoding_masks = self.default_mask
+        if decoding_length <= 1 or branch_length == 0:
+            return token_ids[-1:], decoding_masks, []
 
-        prefetch_ids = []
-        sizes = [[0, 0] for _ in range(len(token_ids))]
+        decoding_ids = None
+        sizes = [0, 0]
+        match_count = len(token_ids)
         for i, t in enumerate(token_ids):
-            cell = self.mem.get(t, None)
-            if cell is not None:
+            tree = self.mem.get(t, None)
+            if tree is not None:
                 ids = token_ids[i + 1:]
                 if t in self.stop_words and len(ids) == 0:
                     continue
-                # update_prefetch_length = max(prefetch_length//(1+i), 1)  # TODO
-                prefetch_ids, prefetch_masks, prefetch_sizes = cell.get(ids,
-                                                                        max_size=prefetch_size,
-                                                                        max_length=prefetch_length,
-                                                                        min_input_size=min_input_size,
-                                                                        min_output_size=min_output_size,
-                                                                        mode=mode,
-                                                                        idx=idx)
-                sizes[i] = prefetch_sizes
-                s = len(prefetch_ids)
-                # if s > 0:
-                #     break
-                # too few tokens, retrieve again  # TODO
-                if s >= prefetch_length or self.eos in prefetch_ids:
+                decoding_ids, decoding_masks, sizes = tree.get(ids,
+                                                                          max_size=decoding_length,
+                                                                          max_length=branch_length,
+                                                                          min_input_size=min_input_size,
+                                                                          min_output_size=min_output_size,
+                                                                          mode=mode,
+                                                                          idx=idx)
+                s = len(decoding_ids)
+                match_count = len(token_ids) - i
+                if s >= branch_length or self.eos in decoding_ids:
                     break
-        output_ids = token_ids[-1:] + prefetch_ids
-        prefetch_sizes = reduce(lambda x, y: x + y, sizes)
-        # print(f'{token_ids=} {prefetch_ids=} {output_ids=} {prefetch_masks=} {prefetch_sizes=}')
 
-        return output_ids, prefetch_masks, prefetch_sizes
+        if decoding_ids is None:
+            decoding_ids = token_ids[-1:]
 
-    def llma_get(self, token_ids, prefetch_size=16, prefetch_length=8, min_input_size=0, min_output_size=0,  mode='input',
-                idx=-1):
-        output_str = ','.join([str(x) for x in  self._output_ids[idx]])
+        return decoding_ids, decoding_masks, sizes
 
-        ids = []
-        for i in range(len(token_ids)-1):
-            token_str = ','+ ','.join([str(x) for x in token_ids[i:]])+','
-            if token_str in output_str:
-                subs = output_str[output_str.index(token_str)+len(token_str):]
-                ids = [int(x) for x in subs.split(',')][:prefetch_length]
-                break
-        length = len(ids)
-        ids = token_ids[-1:] + ids
-
-        mask = np.tril(np.ones((length+1, length+1)), 0)
-
-        return ids, mask, [length]
-
-    def block_get(self, token_ids, prefetch_size=16, prefetch_length=8, min_input_size=0, min_output_size=0, mode='mix',
+    def block_get(self, token_ids, decoding_length=16, branch_length=8, min_input_size=0, min_output_size=0, mode='mix',
                   idx=0):
 
-        output_ids, prefetch_masks, prefetch_sizes = self.trie_get(token_ids,
-                                                                   prefetch_size=prefetch_size,
-                                                                   prefetch_length=prefetch_length,
-                                                                   min_input_size=min_input_size,
-                                                                   min_output_size=min_output_size,
-                                                                   mode=mode,
-                                                                   idx=idx)
+        output_ids, decoding_masks, decoding_lengths = self.trie_get(token_ids,
+                                                                     decoding_length=decoding_length,
+                                                                     branch_length=branch_length,
+                                                                     min_input_size=min_input_size,
+                                                                     min_output_size=min_output_size,
+                                                                     mode=mode,
+                                                                     idx=idx)
         sets = []
-        true_prefetch_size = len(output_ids) - 1
-        # true_prefetch_size = prefetch_size
-        for i in range(true_prefetch_size, 0, -1):
-            indices, = np.nonzero(prefetch_masks[i, 1:])
+        true_decoding_length = len(output_ids) - 1
+        for i in range(true_decoding_length, 0, -1):
+            indices, = np.nonzero(decoding_masks[i, 1:])
             indices = set(indices)
             flag = True
             for ss in sets:
@@ -479,102 +450,120 @@ class PrefetchCache():
             if flag:
                 sets.append(indices)
 
-
         sets.reverse()
         count = 0
-        # TODO
-        # max_prefetch_size = prefetch_size
-        max_prefetch_size = true_prefetch_size
+        max_decoding_length = true_decoding_length
         branches = []
         for indices in sets:
             indices = sorted(list(indices))
-            rest_count = max_prefetch_size - count
+            rest_count = max_decoding_length - count
             indices = indices[:rest_count]
             count += len(indices)
             branch = []
             for i in indices:
-                branch.append(output_ids[i+1])
+                branch.append(output_ids[i + 1])
             branches.append(branch)
-            if count >= max_prefetch_size:
+            if count >= max_decoding_length:
                 break
         ids = [output_ids[0]]
-        masks = np.tril(np.ones((count+1, count+1)), 0)
+        masks = np.tril(np.ones((count + 1, count + 1)), 0)
         count = 1
         for branch in branches:
             ids.extend(branch)
             length = len(branch)
-            masks[count:count+length,1:count] = 0
+            masks[count:count + length, 1:count] = 0
             count += length
 
         # ps = sum([len(x) for x in sets])
-        # print(f'hier:{true_prefetch_size} par:{ps}/{count-1} rate:{ps/max(true_prefetch_size,1):.3f}')
+        # print(f'hier:{true_decoding_length} par:{ps}/{count-1} rate:{ps/max(true_decoding_length,1):.3f}')
 
-        return ids, masks, [count-1]
+        return ids, masks, [count - 1]
 
-    def bat_get(self, token_id_list, prefetch_size=63, prefetch_length=8, prefetch_cursors=None, mode='output',
-                indices=None, prefetch_mode='trie'):
+    def one_get(self, token_ids, decoding_length=64, branch_length=8, min_input_size=0, min_output_size=0, mode='mix',
+                idx=0):
         assert mode in ('input', 'output', 'mix')
-        assert prefetch_mode in ('trie', 'llma', 'block')
+
+        decoding_masks = self.default_mask
+        if decoding_length <= 1 or branch_length == 0:
+            return token_ids[-1:], decoding_masks, []
+
+        decoding_ids = []
+        sizes = [0, 0]
+        for i, t in enumerate(token_ids):
+            tree = self.mem.get(t, None)
+            if tree is not None:
+                ids = token_ids[i + 1:]
+                if t in self.stop_words and len(ids) == 0:
+                    continue
+                decoding_ids, decoding_masks, sizes = tree.get_one_branch(ids,
+                                                                                     max_length=branch_length,
+                                                                                     mode=mode,
+                                                                                     idx=idx)
+                s = len(decoding_ids)
+                # too few tokens, retrieve again
+                if s >= branch_length // 2 or self.eos in decoding_ids:
+                    break
+
+        return decoding_ids, decoding_masks, sizes
+
+    def bat_get(self, token_id_list, decoding_length=64, branch_length=8, decoding_cursors=None, mode='output',
+                indices=None, decoding_mode='hier'):
+        assert mode in ('input', 'output', 'mix')
+        assert decoding_mode in ('hier', 'one')
         bs = len(token_id_list)
-        assert bs == len(prefetch_cursors) and bs == len(indices), f'{bs=} {len(prefetch_cursors)=} {len(indices)=}'
+        assert bs == len(decoding_cursors) and bs == len(indices), f'{bs=} {len(decoding_cursors)=} {len(indices)=}'
 
-        prefetch_id_list = []
-        prefetch_mask_list = []
-        prefetch_size_list = []
+        decoding_id_list = []
+        decoding_mask_list = []
+        size_list = []
 
-        min_cur = min(prefetch_cursors)
-        max_cur = max(prefetch_cursors)
-        mean_cur = sum(prefetch_cursors)/bs
-        bs = len(prefetch_cursors)
+        min_cur = min(decoding_cursors)
+        max_cur = max(decoding_cursors)
+        bs = len(decoding_cursors)
         for sub_idx, token_ids in enumerate(token_id_list):
-            update_prefetch_size = prefetch_size//bs
-            # cur = prefetch_cursors[sub_idx]
-            # update_prefetch_size = max(int(update_prefetch_size*(1+(mean_cur-cur)/mean_cur)), 1)
+            update_decoding_length = decoding_length // bs
             min_input_size = 0
-            # min_input_size = max(update_prefetch_size // 4, 1)
-            # min_output_size = 0
-            # min_output_size = prefetch_length # TODO
-            min_output_size = max(update_prefetch_size // 2, 1)
-            method_name = prefetch_mode + '_get'
-            prefetch_ids, prefetch_masks, prefetch_sizes = getattr(self, method_name)(token_ids,
-                                                                    prefetch_size=update_prefetch_size,
-                                                                    prefetch_length=prefetch_length,
-                                                                    min_input_size=min_input_size,
-                                                                    min_output_size=min_output_size,
-                                                                    mode=mode,
-                                                                    idx=indices[sub_idx])
-            prefetch_id_list.append(prefetch_ids)
-            prefetch_mask_list.append(prefetch_masks)
-            prefetch_size_list.append(prefetch_sizes)
+            min_output_size = max(update_decoding_length // 2, 1)
+            method_name = decoding_mode + '_get'
+            decoding_ids, decoding_masks, sizes = getattr(self, method_name)(token_ids,
+                                                                                        decoding_length=update_decoding_length,
+                                                                                        branch_length=branch_length,
+                                                                                        min_input_size=min_input_size,
+                                                                                        min_output_size=min_output_size,
+                                                                                        mode=mode,
+                                                                                        idx=indices[sub_idx])
+            decoding_id_list.append(decoding_ids)
+            decoding_mask_list.append(decoding_masks)
+            size_list.append(sizes)
 
         bs = len(token_id_list)
-        max_size = max([len(x) for x in prefetch_id_list])
+        max_size = max([len(x) for x in decoding_id_list])
 
-        prefetch_masks = np.zeros((bs, max_size, max_cur - min_cur + max_size), dtype=np.int64)
-        for i, prefetch_ids in enumerate(prefetch_id_list):
-            org_size = len(prefetch_ids)
+        decoding_masks = np.zeros((bs, max_size, max_cur - min_cur + max_size), dtype=np.int64)
+        for i, decoding_ids in enumerate(decoding_id_list):
+            org_size = len(decoding_ids)
             gap = max_size - org_size
             if gap > 0:
-                prefetch_ids.extend([self.eos] * gap)
-            cur = prefetch_cursors[i]
-            prefetch_masks[i, :org_size, cur - min_cur:cur - min_cur + org_size] = prefetch_mask_list[i]
-            prefetch_masks[i, :, :cur - min_cur + 1] = 1
-        return prefetch_id_list, prefetch_masks, prefetch_size_list
+                decoding_ids.extend([self.eos] * gap)
+            cur = decoding_cursors[i]
+            decoding_masks[i, :org_size, cur - min_cur:cur - min_cur + org_size] = decoding_mask_list[i]
+            decoding_masks[i, :, :cur - min_cur + 1] = 1
+        return decoding_id_list, decoding_masks, size_list
 
     def fresh(self):
         self.mem = {}
 
     def reset_input_freqs(self):
-        if len(self._update_input_cells) > 0:
-            for c in self._update_input_cells:
+        if len(self._update_input_trees) > 0:
+            for c in self._update_input_trees:
                 c.reset_input_freq()
-            self._update_input_cells.clear()
+            self._update_input_trees.clear()
 
     def squeeze_branch_counts(self):
-        if len(self._update_cells) >= 1024:
-            for c in self._update_cells:
+        if len(self._update_trees) >= 1024:
+            for c in self._update_trees:
                 c.squeeze()
-            self._update_cells.clear()
+            self._update_trees.clear()
 
     def save_mem(self, save_mem_dir):
         cache_mem = self.mem
@@ -589,4 +578,3 @@ class PrefetchCache():
         deserialized_object = pickle.loads(json.loads(json_string).encode('latin-1'))
         cache_mem = deserialized_object
         self.mem = cache_mem
-

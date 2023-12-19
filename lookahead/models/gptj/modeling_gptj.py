@@ -22,7 +22,6 @@ import torch.fx
 import torch.utils.checkpoint
 from torch import nn
 from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss
-
 from transformers.activations import ACT2FN
 from transformers.modeling_outputs import (
     BaseModelOutputWithPast,
@@ -30,8 +29,7 @@ from transformers.modeling_outputs import (
     QuestionAnsweringModelOutput,
     SequenceClassifierOutputWithPast,
 )
-# from transformers.modeling_utils import PreTrainedModel
-from common.pretrained_model import LookaheadPreTrainedModel
+from transformers.models.gptj.configuration_gptj import GPTJConfig
 from transformers.utils import (
     add_code_sample_docstrings,
     add_start_docstrings,
@@ -40,15 +38,15 @@ from transformers.utils import (
     logging,
 )
 from transformers.utils.model_parallel_utils import assert_device_map, get_device_map
-from transformers.models.gptj.configuration_gptj import GPTJConfig
 
+# from transformers.modeling_utils import PreTrainedModel
+from common.pretrained_model import LookaheadPreTrainedModel
 
 logger = logging.get_logger(__name__)
 
 _CHECKPOINT_FOR_DOC = "hf-internal-testing/tiny-random-gptj"
 _REAL_CHECKPOINT_FOR_DOC = "EleutherAI/gpt-j-6B"
 _CONFIG_FOR_DOC = "GPTJConfig"
-
 
 GPTJ_PRETRAINED_MODEL_ARCHIVE_LIST = [
     "EleutherAI/gpt-j-6B",
@@ -144,16 +142,16 @@ class GPTJAttention(nn.Module):
         return tensor.view(new_shape)
 
     def _attn(
-        self,
-        query,
-        key,
-        value,
-        attention_mask=None,
-        head_mask=None,
+            self,
+            query,
+            key,
+            value,
+            attention_mask=None,
+            head_mask=None,
     ):
         # compute causal mask from causal mask buffer
         query_length, key_length = query.size(-2), key.size(-2)
-        causal_mask = self.bias[:, :, key_length - query_length : key_length, :key_length].to(query.device)
+        causal_mask = self.bias[:, :, key_length - query_length: key_length, :key_length].to(query.device)
 
         # Keep the attention weights computation in fp32 to avoid overflow issues
         query = query.to(torch.float32)
@@ -193,14 +191,14 @@ class GPTJAttention(nn.Module):
         return embed_positions.repeat(position_ids.shape[0], 1, 1)
 
     def forward(
-        self,
-        hidden_states: torch.FloatTensor,
-        layer_past: Optional[Tuple[torch.Tensor]] = None,
-        attention_mask: Optional[torch.FloatTensor] = None,
-        position_ids: Optional[torch.LongTensor] = None,
-        head_mask: Optional[torch.FloatTensor] = None,
-        use_cache: Optional[bool] = False,
-        output_attentions: Optional[bool] = False,
+            self,
+            hidden_states: torch.FloatTensor,
+            layer_past: Optional[Tuple[torch.Tensor]] = None,
+            attention_mask: Optional[torch.FloatTensor] = None,
+            position_ids: Optional[torch.LongTensor] = None,
+            head_mask: Optional[torch.FloatTensor] = None,
+            use_cache: Optional[bool] = False,
+            output_attentions: Optional[bool] = False,
     ) -> Union[
         Tuple[torch.Tensor, Tuple[torch.Tensor]],
         Optional[Tuple[torch.Tensor, Tuple[torch.Tensor], Tuple[torch.Tensor, ...]]],
@@ -226,10 +224,10 @@ class GPTJAttention(nn.Module):
 
         if self.rotary_dim is not None:
             k_rot = key[:, :, :, : self.rotary_dim]
-            k_pass = key[:, :, :, self.rotary_dim :]
+            k_pass = key[:, :, :, self.rotary_dim:]
 
             q_rot = query[:, :, :, : self.rotary_dim]
-            q_pass = query[:, :, :, self.rotary_dim :]
+            q_pass = query[:, :, :, self.rotary_dim:]
 
             k_rot = apply_rotary_pos_emb(k_rot, sin, cos)
             q_rot = apply_rotary_pos_emb(q_rot, sin, cos)
@@ -296,14 +294,14 @@ class GPTJBlock(nn.Module):
         self.mlp = GPTJMLP(inner_dim, config)
 
     def forward(
-        self,
-        hidden_states: Optional[torch.FloatTensor],
-        layer_past: Optional[Tuple[torch.Tensor]] = None,
-        attention_mask: Optional[torch.FloatTensor] = None,
-        position_ids: Optional[torch.LongTensor] = None,
-        head_mask: Optional[torch.FloatTensor] = None,
-        use_cache: Optional[bool] = False,
-        output_attentions: Optional[bool] = False,
+            self,
+            hidden_states: Optional[torch.FloatTensor],
+            layer_past: Optional[Tuple[torch.Tensor]] = None,
+            attention_mask: Optional[torch.FloatTensor] = None,
+            position_ids: Optional[torch.LongTensor] = None,
+            head_mask: Optional[torch.FloatTensor] = None,
+            use_cache: Optional[bool] = False,
+            output_attentions: Optional[bool] = False,
     ) -> Union[Tuple[torch.Tensor], Optional[Tuple[torch.Tensor, Tuple[torch.FloatTensor, ...]]]]:
         residual = hidden_states
         hidden_states = self.ln_1(hidden_states)
@@ -555,18 +553,18 @@ class GPTJModel(GPTJPreTrainedModel):
         real_checkpoint=_REAL_CHECKPOINT_FOR_DOC,
     )
     def forward(
-        self,
-        input_ids: Optional[torch.LongTensor] = None,
-        past_key_values: Optional[Tuple[Tuple[torch.Tensor]]] = None,
-        attention_mask: Optional[torch.FloatTensor] = None,
-        token_type_ids: Optional[torch.LongTensor] = None,
-        position_ids: Optional[torch.LongTensor] = None,
-        head_mask: Optional[torch.FloatTensor] = None,
-        inputs_embeds: Optional[torch.FloatTensor] = None,
-        use_cache: Optional[bool] = None,
-        output_attentions: Optional[bool] = None,
-        output_hidden_states: Optional[bool] = None,
-        return_dict: Optional[bool] = None,
+            self,
+            input_ids: Optional[torch.LongTensor] = None,
+            past_key_values: Optional[Tuple[Tuple[torch.Tensor]]] = None,
+            attention_mask: Optional[torch.FloatTensor] = None,
+            token_type_ids: Optional[torch.LongTensor] = None,
+            position_ids: Optional[torch.LongTensor] = None,
+            head_mask: Optional[torch.FloatTensor] = None,
+            inputs_embeds: Optional[torch.FloatTensor] = None,
+            use_cache: Optional[bool] = None,
+            output_attentions: Optional[bool] = None,
+            output_hidden_states: Optional[bool] = None,
+            return_dict: Optional[bool] = None,
     ) -> Union[Tuple, BaseModelOutputWithPast]:
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
         output_hidden_states = (
@@ -599,10 +597,14 @@ class GPTJModel(GPTJPreTrainedModel):
         else:
             past_length = past_key_values[0][0].size(-2)
 
+        # NOTE: adapt for lookahead
+        if attention_mask is not None and len(attention_mask.shape) == 4:
+            # lookahead
+            position_ids = torch.sum(attention_mask, dim=-1).squeeze(1) - 1
+            attention_mask = (1.0 - attention_mask) * torch.finfo(self.dtype).min
 
-        # Attention mask.
-        if attention_mask is None or len(attention_mask.shape) == 2:
-
+        else:
+            # no lookahead
             if position_ids is not None:
                 position_ids = position_ids.view(-1, input_shape[-1]).long()
             else:
@@ -625,11 +627,6 @@ class GPTJModel(GPTJPreTrainedModel):
             # Since we are adding it to the raw scores before the softmax, this is
             # effectively the same as removing these entirely.
             attention_mask = attention_mask.to(dtype=self.dtype)  # fp16 compatibility
-            attention_mask = (1.0 - attention_mask) * torch.finfo(self.dtype).min
-
-        elif len(attention_mask.shape) == 4:
-            # TODO: lookahead
-            position_ids = torch.sum(attention_mask, dim=-1).squeeze(1)-1
             attention_mask = (1.0 - attention_mask) * torch.finfo(self.dtype).min
 
 
@@ -838,19 +835,19 @@ class GPTJForCausalLM(GPTJPreTrainedModel):
         real_checkpoint=_REAL_CHECKPOINT_FOR_DOC,
     )
     def forward(
-        self,
-        input_ids: Optional[torch.LongTensor] = None,
-        past_key_values: Optional[Tuple[Tuple[torch.Tensor]]] = None,
-        attention_mask: Optional[torch.FloatTensor] = None,
-        token_type_ids: Optional[torch.LongTensor] = None,
-        position_ids: Optional[torch.LongTensor] = None,
-        head_mask: Optional[torch.FloatTensor] = None,
-        inputs_embeds: Optional[torch.FloatTensor] = None,
-        labels: Optional[torch.LongTensor] = None,
-        use_cache: Optional[bool] = None,
-        output_attentions: Optional[bool] = None,
-        output_hidden_states: Optional[bool] = None,
-        return_dict: Optional[bool] = None,
+            self,
+            input_ids: Optional[torch.LongTensor] = None,
+            past_key_values: Optional[Tuple[Tuple[torch.Tensor]]] = None,
+            attention_mask: Optional[torch.FloatTensor] = None,
+            token_type_ids: Optional[torch.LongTensor] = None,
+            position_ids: Optional[torch.LongTensor] = None,
+            head_mask: Optional[torch.FloatTensor] = None,
+            inputs_embeds: Optional[torch.FloatTensor] = None,
+            labels: Optional[torch.LongTensor] = None,
+            use_cache: Optional[bool] = None,
+            output_attentions: Optional[bool] = None,
+            output_hidden_states: Optional[bool] = None,
+            return_dict: Optional[bool] = None,
     ) -> Union[Tuple, CausalLMOutputWithPast]:
         r"""
         labels (`torch.LongTensor` of shape `(batch_size, sequence_length)`, *optional*):
@@ -912,7 +909,7 @@ class GPTJForCausalLM(GPTJPreTrainedModel):
 
     @staticmethod
     def _reorder_cache(
-        past_key_values: Tuple[Tuple[torch.Tensor]], beam_idx: torch.Tensor
+            past_key_values: Tuple[Tuple[torch.Tensor]], beam_idx: torch.Tensor
     ) -> Tuple[Tuple[torch.Tensor]]:
         """
         This function is used to re-order the `past_key_values` cache if [`~PretrainedModel.beam_search`] or
@@ -962,19 +959,19 @@ class GPTJForSequenceClassification(GPTJPreTrainedModel):
         real_checkpoint=_REAL_CHECKPOINT_FOR_DOC,
     )
     def forward(
-        self,
-        input_ids: Optional[torch.LongTensor] = None,
-        past_key_values: Optional[Tuple[Tuple[torch.Tensor]]] = None,
-        attention_mask: Optional[torch.FloatTensor] = None,
-        token_type_ids: Optional[torch.LongTensor] = None,
-        position_ids: Optional[torch.LongTensor] = None,
-        head_mask: Optional[torch.FloatTensor] = None,
-        inputs_embeds: Optional[torch.FloatTensor] = None,
-        labels: Optional[torch.LongTensor] = None,
-        use_cache: Optional[bool] = None,
-        output_attentions: Optional[bool] = None,
-        output_hidden_states: Optional[bool] = None,
-        return_dict: Optional[bool] = None,
+            self,
+            input_ids: Optional[torch.LongTensor] = None,
+            past_key_values: Optional[Tuple[Tuple[torch.Tensor]]] = None,
+            attention_mask: Optional[torch.FloatTensor] = None,
+            token_type_ids: Optional[torch.LongTensor] = None,
+            position_ids: Optional[torch.LongTensor] = None,
+            head_mask: Optional[torch.FloatTensor] = None,
+            inputs_embeds: Optional[torch.FloatTensor] = None,
+            labels: Optional[torch.LongTensor] = None,
+            use_cache: Optional[bool] = None,
+            output_attentions: Optional[bool] = None,
+            output_hidden_states: Optional[bool] = None,
+            return_dict: Optional[bool] = None,
     ) -> Union[Tuple, SequenceClassifierOutputWithPast]:
         r"""
         labels (`torch.LongTensor` of shape `(batch_size,)`, *optional*):
@@ -1088,18 +1085,18 @@ class GPTJForQuestionAnswering(GPTJPreTrainedModel):
         real_checkpoint=_REAL_CHECKPOINT_FOR_DOC,
     )
     def forward(
-        self,
-        input_ids: Optional[torch.LongTensor] = None,
-        attention_mask: Optional[torch.FloatTensor] = None,
-        token_type_ids: Optional[torch.LongTensor] = None,
-        position_ids: Optional[torch.LongTensor] = None,
-        head_mask: Optional[torch.FloatTensor] = None,
-        inputs_embeds: Optional[torch.FloatTensor] = None,
-        start_positions: Optional[torch.LongTensor] = None,
-        end_positions: Optional[torch.LongTensor] = None,
-        output_attentions: Optional[bool] = None,
-        output_hidden_states: Optional[bool] = None,
-        return_dict: Optional[bool] = None,
+            self,
+            input_ids: Optional[torch.LongTensor] = None,
+            attention_mask: Optional[torch.FloatTensor] = None,
+            token_type_ids: Optional[torch.LongTensor] = None,
+            position_ids: Optional[torch.LongTensor] = None,
+            head_mask: Optional[torch.FloatTensor] = None,
+            inputs_embeds: Optional[torch.FloatTensor] = None,
+            start_positions: Optional[torch.LongTensor] = None,
+            end_positions: Optional[torch.LongTensor] = None,
+            output_attentions: Optional[bool] = None,
+            output_hidden_states: Optional[bool] = None,
+            return_dict: Optional[bool] = None,
     ) -> Union[Tuple, QuestionAnsweringModelOutput]:
         r"""
         start_positions (`torch.LongTensor` of shape `(batch_size,)`, *optional*):

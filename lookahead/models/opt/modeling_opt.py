@@ -19,7 +19,6 @@ import torch
 import torch.utils.checkpoint
 from torch import nn
 from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss
-
 from transformers.activations import ACT2FN
 from transformers.modeling_outputs import (
     BaseModelOutputWithPast,
@@ -27,8 +26,7 @@ from transformers.modeling_outputs import (
     QuestionAnsweringModelOutput,
     SequenceClassifierOutputWithPast,
 )
-# from transformers.modeling_utils import PreTrainedModel
-from common.pretrained_model import LookaheadPreTrainedModel
+from transformers.models.opt.configuration_opt import OPTConfig
 from transformers.utils import (
     add_code_sample_docstrings,
     add_start_docstrings,
@@ -36,8 +34,9 @@ from transformers.utils import (
     logging,
     replace_return_docstrings,
 )
-from transformers.models.opt.configuration_opt import OPTConfig
 
+# from transformers.modeling_utils import PreTrainedModel
+from common.pretrained_model import LookaheadPreTrainedModel
 
 logger = logging.get_logger(__name__)
 
@@ -66,7 +65,7 @@ OPT_PRETRAINED_MODEL_ARCHIVE_LIST = [
 
 # Copied from transformers.models.bart.modeling_bart._make_causal_mask
 def _make_causal_mask(
-    input_ids_shape: torch.Size, dtype: torch.dtype, device: torch.device, past_key_values_length: int = 0
+        input_ids_shape: torch.Size, dtype: torch.dtype, device: torch.device, past_key_values_length: int = 0
 ):
     """
     Make causal mask used for bi-directional self-attention.
@@ -126,12 +125,12 @@ class OPTAttention(nn.Module):
     """Multi-headed attention from 'Attention Is All You Need' paper"""
 
     def __init__(
-        self,
-        embed_dim: int,
-        num_heads: int,
-        dropout: float = 0.0,
-        is_decoder: bool = False,
-        bias: bool = True,
+            self,
+            embed_dim: int,
+            num_heads: int,
+            dropout: float = 0.0,
+            is_decoder: bool = False,
+            bias: bool = True,
     ):
         super().__init__()
         self.embed_dim = embed_dim
@@ -144,7 +143,7 @@ class OPTAttention(nn.Module):
                 f"embed_dim must be divisible by num_heads (got `embed_dim`: {self.embed_dim}"
                 f" and `num_heads`: {num_heads})."
             )
-        self.scaling = self.head_dim**-0.5
+        self.scaling = self.head_dim ** -0.5
         self.is_decoder = is_decoder
 
         self.k_proj = nn.Linear(embed_dim, embed_dim, bias=bias)
@@ -156,13 +155,13 @@ class OPTAttention(nn.Module):
         return tensor.view(bsz, seq_len, self.num_heads, self.head_dim).transpose(1, 2).contiguous()
 
     def forward(
-        self,
-        hidden_states: torch.Tensor,
-        key_value_states: Optional[torch.Tensor] = None,
-        past_key_value: Optional[Tuple[torch.Tensor]] = None,
-        attention_mask: Optional[torch.Tensor] = None,
-        layer_head_mask: Optional[torch.Tensor] = None,
-        output_attentions: bool = False,
+            self,
+            hidden_states: torch.Tensor,
+            key_value_states: Optional[torch.Tensor] = None,
+            past_key_value: Optional[Tuple[torch.Tensor]] = None,
+            attention_mask: Optional[torch.Tensor] = None,
+            layer_head_mask: Optional[torch.Tensor] = None,
+            output_attentions: bool = False,
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[Tuple[torch.Tensor]]]:
         """Input shape: Batch x Time x Channel"""
 
@@ -299,13 +298,13 @@ class OPTDecoderLayer(nn.Module):
         self.final_layer_norm = nn.LayerNorm(self.embed_dim, elementwise_affine=config.layer_norm_elementwise_affine)
 
     def forward(
-        self,
-        hidden_states: torch.Tensor,
-        attention_mask: Optional[torch.Tensor] = None,
-        layer_head_mask: Optional[torch.Tensor] = None,
-        past_key_value: Optional[Tuple[torch.Tensor]] = None,
-        output_attentions: Optional[bool] = False,
-        use_cache: Optional[bool] = False,
+            self,
+            hidden_states: torch.Tensor,
+            attention_mask: Optional[torch.Tensor] = None,
+            layer_head_mask: Optional[torch.Tensor] = None,
+            past_key_value: Optional[Tuple[torch.Tensor]] = None,
+            output_attentions: Optional[bool] = False,
+            use_cache: Optional[bool] = False,
     ) -> Tuple[torch.FloatTensor, Optional[Tuple[torch.FloatTensor, torch.FloatTensor]]]:
         """
         Args:
@@ -557,16 +556,16 @@ class OPTDecoder(OPTPreTrainedModel):
         return combined_attention_mask
 
     def forward(
-        self,
-        input_ids: torch.LongTensor = None,
-        attention_mask: Optional[torch.Tensor] = None,
-        head_mask: Optional[torch.Tensor] = None,
-        past_key_values: Optional[List[torch.FloatTensor]] = None,
-        inputs_embeds: Optional[torch.FloatTensor] = None,
-        use_cache: Optional[bool] = None,
-        output_attentions: Optional[bool] = None,
-        output_hidden_states: Optional[bool] = None,
-        return_dict: Optional[bool] = None,
+            self,
+            input_ids: torch.LongTensor = None,
+            attention_mask: Optional[torch.Tensor] = None,
+            head_mask: Optional[torch.Tensor] = None,
+            past_key_values: Optional[List[torch.FloatTensor]] = None,
+            inputs_embeds: Optional[torch.FloatTensor] = None,
+            use_cache: Optional[bool] = None,
+            output_attentions: Optional[bool] = None,
+            output_hidden_states: Optional[bool] = None,
+            return_dict: Optional[bool] = None,
     ) -> Union[Tuple, BaseModelOutputWithPast]:
         r"""
         Args:
@@ -643,20 +642,12 @@ class OPTDecoder(OPTPreTrainedModel):
         mask_seq_length = past_key_values_length + seq_length
 
         # TODO: adapt for lookahead
-        # embed positions
-        # if attention_mask is None:
-        #     attention_mask = torch.ones(batch_size, mask_seq_length, device=inputs_embeds.device)
-        # elif attention_mask.shape[1] != mask_seq_length:
-        #     raise ValueError(
-        #         f"The provided attention mask has length {attention_mask.shape[1]}, but its length should be "
-        #         f"{mask_seq_length} (sum of the lengths of current and past inputs)"
-        #     )
-        # causal_attention_mask = self._prepare_decoder_attention_mask(
-        #     attention_mask, input_shape, inputs_embeds, past_key_values_length
-        # )
-        # pos_embeds = self.embed_positions(attention_mask, past_key_values_length)
-
-        if attention_mask is None or len(attention_mask.shape) == 2:
+        if attention_mask is not None and len(attention_mask.shape) == 4:
+            # lookahead
+            # attention_mask:  [bs, 1, src_len, tgt_len]
+            causal_attention_mask = (1.0 - attention_mask.to(inputs_embeds.dtype)) * torch.finfo(inputs_embeds.dtype).min
+            pos_embeds = self.embed_positions(attention_mask, past_key_values_length)
+        else:
             # non-lookahead
             if attention_mask is None:
                 attention_mask = torch.ones(batch_size, mask_seq_length, device=inputs_embeds.device)
@@ -664,11 +655,6 @@ class OPTDecoder(OPTPreTrainedModel):
             causal_attention_mask = self._prepare_decoder_attention_mask(
                 attention_mask, input_shape, inputs_embeds, past_key_values_length
             )
-            pos_embeds = self.embed_positions(attention_mask, past_key_values_length)
-        else:
-            # lookahead
-            # attention_mask:  [bs, 1, src_len, tgt_len]
-            causal_attention_mask = (attention_mask.to(inputs_embeds.dtype)-1.0)*10000.0
             pos_embeds = self.embed_positions(attention_mask, past_key_values_length)
 
         if self.project_in is not None:
@@ -792,16 +778,16 @@ class OPTModel(OPTPreTrainedModel):
         expected_output=_EXPECTED_OUTPUT_SHAPE,
     )
     def forward(
-        self,
-        input_ids: torch.LongTensor = None,
-        attention_mask: Optional[torch.Tensor] = None,
-        head_mask: Optional[torch.Tensor] = None,
-        past_key_values: Optional[List[torch.FloatTensor]] = None,
-        inputs_embeds: Optional[torch.FloatTensor] = None,
-        use_cache: Optional[bool] = None,
-        output_attentions: Optional[bool] = None,
-        output_hidden_states: Optional[bool] = None,
-        return_dict: Optional[bool] = None,
+            self,
+            input_ids: torch.LongTensor = None,
+            attention_mask: Optional[torch.Tensor] = None,
+            head_mask: Optional[torch.Tensor] = None,
+            past_key_values: Optional[List[torch.FloatTensor]] = None,
+            inputs_embeds: Optional[torch.FloatTensor] = None,
+            use_cache: Optional[bool] = None,
+            output_attentions: Optional[bool] = None,
+            output_hidden_states: Optional[bool] = None,
+            return_dict: Optional[bool] = None,
     ) -> Union[Tuple, BaseModelOutputWithPast]:
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
         output_hidden_states = (
@@ -867,17 +853,17 @@ class OPTForCausalLM(OPTPreTrainedModel):
 
     @replace_return_docstrings(output_type=CausalLMOutputWithPast, config_class=_CONFIG_FOR_DOC)
     def forward(
-        self,
-        input_ids: torch.LongTensor = None,
-        attention_mask: Optional[torch.Tensor] = None,
-        head_mask: Optional[torch.Tensor] = None,
-        past_key_values: Optional[List[torch.FloatTensor]] = None,
-        inputs_embeds: Optional[torch.FloatTensor] = None,
-        labels: Optional[torch.LongTensor] = None,
-        use_cache: Optional[bool] = None,
-        output_attentions: Optional[bool] = None,
-        output_hidden_states: Optional[bool] = None,
-        return_dict: Optional[bool] = None,
+            self,
+            input_ids: torch.LongTensor = None,
+            attention_mask: Optional[torch.Tensor] = None,
+            head_mask: Optional[torch.Tensor] = None,
+            past_key_values: Optional[List[torch.FloatTensor]] = None,
+            inputs_embeds: Optional[torch.FloatTensor] = None,
+            labels: Optional[torch.LongTensor] = None,
+            use_cache: Optional[bool] = None,
+            output_attentions: Optional[bool] = None,
+            output_hidden_states: Optional[bool] = None,
+            return_dict: Optional[bool] = None,
     ) -> Union[Tuple, CausalLMOutputWithPast]:
         r"""
         Args:
@@ -998,7 +984,7 @@ class OPTForCausalLM(OPTPreTrainedModel):
         )
 
     def prepare_inputs_for_generation(
-        self, input_ids, past_key_values=None, attention_mask=None, inputs_embeds=None, **kwargs
+            self, input_ids, past_key_values=None, attention_mask=None, inputs_embeds=None, **kwargs
     ):
         if past_key_values:
             input_ids = input_ids[:, -1:]
@@ -1060,17 +1046,17 @@ class OPTForSequenceClassification(OPTPreTrainedModel):
         expected_loss=_SEQ_CLASS_EXPECTED_LOSS,
     )
     def forward(
-        self,
-        input_ids: Optional[torch.LongTensor] = None,
-        attention_mask: Optional[torch.FloatTensor] = None,
-        head_mask: Optional[torch.FloatTensor] = None,
-        past_key_values: Optional[Tuple[Tuple[torch.Tensor]]] = None,
-        inputs_embeds: Optional[torch.FloatTensor] = None,
-        labels: Optional[torch.LongTensor] = None,
-        use_cache: Optional[bool] = None,
-        output_attentions: Optional[bool] = None,
-        output_hidden_states: Optional[bool] = None,
-        return_dict: Optional[bool] = None,
+            self,
+            input_ids: Optional[torch.LongTensor] = None,
+            attention_mask: Optional[torch.FloatTensor] = None,
+            head_mask: Optional[torch.FloatTensor] = None,
+            past_key_values: Optional[Tuple[Tuple[torch.Tensor]]] = None,
+            inputs_embeds: Optional[torch.FloatTensor] = None,
+            labels: Optional[torch.LongTensor] = None,
+            use_cache: Optional[bool] = None,
+            output_attentions: Optional[bool] = None,
+            output_hidden_states: Optional[bool] = None,
+            return_dict: Optional[bool] = None,
     ) -> Union[Tuple, SequenceClassifierOutputWithPast]:
         r"""
         labels (`torch.LongTensor` of shape `(batch_size,)`, *optional*):
@@ -1175,18 +1161,18 @@ class OPTForQuestionAnswering(OPTPreTrainedModel):
     @add_start_docstrings_to_model_forward(OPT_INPUTS_DOCSTRING)
     @replace_return_docstrings(output_type=QuestionAnsweringModelOutput, config_class=_CONFIG_FOR_DOC)
     def forward(
-        self,
-        input_ids: Optional[torch.LongTensor] = None,
-        attention_mask: Optional[torch.FloatTensor] = None,
-        head_mask: Optional[torch.FloatTensor] = None,
-        past_key_values: Optional[Tuple[Tuple[torch.Tensor]]] = None,
-        inputs_embeds: Optional[torch.FloatTensor] = None,
-        start_positions: Optional[torch.LongTensor] = None,
-        end_positions: Optional[torch.LongTensor] = None,
-        use_cache: Optional[bool] = None,
-        output_attentions: Optional[bool] = None,
-        output_hidden_states: Optional[bool] = None,
-        return_dict: Optional[bool] = None,
+            self,
+            input_ids: Optional[torch.LongTensor] = None,
+            attention_mask: Optional[torch.FloatTensor] = None,
+            head_mask: Optional[torch.FloatTensor] = None,
+            past_key_values: Optional[Tuple[Tuple[torch.Tensor]]] = None,
+            inputs_embeds: Optional[torch.FloatTensor] = None,
+            start_positions: Optional[torch.LongTensor] = None,
+            end_positions: Optional[torch.LongTensor] = None,
+            use_cache: Optional[bool] = None,
+            output_attentions: Optional[bool] = None,
+            output_hidden_states: Optional[bool] = None,
+            return_dict: Optional[bool] = None,
     ) -> Union[Tuple, QuestionAnsweringModelOutput]:
         r"""
         start_positions (`torch.LongTensor` of shape `(batch_size,)`, *optional*):

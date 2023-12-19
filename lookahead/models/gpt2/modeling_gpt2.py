@@ -35,9 +35,7 @@ from transformers.modeling_outputs import (
     SequenceClassifierOutputWithPast,
     TokenClassifierOutput,
 )
-# from transformers.modeling_utils import PreTrainedModel, SequenceSummary
-from transformers.modeling_utils import SequenceSummary
-from common.pretrained_model import LookaheadPreTrainedModel
+from transformers.modeling_utils import PreTrainedModel, SequenceSummary
 from transformers.pytorch_utils import Conv1D, find_pruneable_heads_and_indices, prune_conv1d_layer
 from transformers.utils import (
     ModelOutput,
@@ -49,7 +47,7 @@ from transformers.utils import (
 )
 from transformers.utils.model_parallel_utils import assert_device_map, get_device_map
 from transformers.models.gpt2.configuration_gpt2 import GPT2Config
-
+from common.pretrained_model import LookaheadPreTrainedModel
 
 logger = logging.get_logger(__name__)
 
@@ -112,9 +110,10 @@ def load_tf_weights_in_gpt2(model, config, gpt2_checkpoint_path):
                 num = int(scope_names[1])
                 pointer = pointer[num]
         try:
-            if pointer.shape != array.shape:
-                raise ValueError(f"Pointer shape {pointer.shape} and array shape {array.shape} mismatched")
-        except ValueError as e:
+            assert (
+                pointer.shape == array.shape
+            ), f"Pointer shape {pointer.shape} and array shape {array.shape} mismatched"
+        except AssertionError as e:
             e.args += (pointer.shape, array.shape)
             raise
         logger.info(f"Initialize PyTorch weight {name}")
@@ -669,6 +668,9 @@ DEPARALLELIZE_DOCSTRING = r"""
     GPT2_START_DOCSTRING,
 )
 class GPT2Model(GPT2PreTrainedModel):
+    _keys_to_ignore_on_load_unexpected = [r"h\.\d+\.attn\.bias", r"h\.\d+\.attn\.masked_bias"]
+    _keys_to_ignore_on_load_missing = [r"attn.masked_bias", r"h\.\d+\.attn\.masked_bias", r"h\.\d+\.attn\.bias"]
+
     def __init__(self, config):
         super().__init__(config)
 
@@ -778,7 +780,6 @@ class GPT2Model(GPT2PreTrainedModel):
         if input_ids is not None and inputs_embeds is not None:
             raise ValueError("You cannot specify both input_ids and inputs_embeds at the same time")
         elif input_ids is not None:
-            self.warn_if_padding_and_no_attention_mask(input_ids, attention_mask)
             input_shape = input_ids.size()
             input_ids = input_ids.view(-1, input_shape[-1])
             batch_size = input_ids.shape[0]
@@ -801,11 +802,13 @@ class GPT2Model(GPT2PreTrainedModel):
         else:
             past_length = past_key_values[0][0].size(-2)
 
-
         # TODO: adapt for lookahead
-        if attention_mask is None or attention_mask is not None and len(attention_mask.shape) == 2:
-            # no lookahead
-
+        if attention_mask is not None and len(attention_mask.shape) == 4:
+            # with lookahead
+            position_ids = torch.sum(attention_mask, 3).squeeze(1) - 1
+            attention_mask = (1.0 - attention_mask) * torch.finfo(self.dtype).min
+        else:
+            # without lookahead
             if position_ids is None:
                 position_ids = torch.arange(past_length, input_shape[-1] + past_length, dtype=torch.long, device=device)
                 position_ids = position_ids.unsqueeze(0).view(-1, input_shape[-1])
@@ -829,10 +832,6 @@ class GPT2Model(GPT2PreTrainedModel):
                 # effectively the same as removing these entirely.
                 attention_mask = attention_mask.to(dtype=self.dtype)  # fp16 compatibility
                 attention_mask = (1.0 - attention_mask) * torch.finfo(self.dtype).min
-        else:
-            # lookahead
-            position_ids = torch.sum(attention_mask, 3).squeeze(1) - 1
-            attention_mask = (1.0 - attention_mask) * torch.finfo(self.dtype).min
 
         # If a 2D or 3D attention mask is provided for the cross-attention
         # we need to make broadcastable to [batch_size, num_heads, seq_length, seq_length]
@@ -862,7 +861,7 @@ class GPT2Model(GPT2PreTrainedModel):
 
         hidden_states = self.drop(hidden_states)
 
-        output_shape = (-1,) + input_shape[1:] + (hidden_states.size(-1),)
+        output_shape = input_shape + (hidden_states.size(-1),)
 
         if self.gradient_checkpointing and self.training:
             if use_cache:
@@ -966,7 +965,8 @@ class GPT2Model(GPT2PreTrainedModel):
     GPT2_START_DOCSTRING,
 )
 class GPT2LMHeadModel(GPT2PreTrainedModel):
-    _tied_weights_keys = ["lm_head.weight"]
+    _keys_to_ignore_on_load_missing = [r"lm_head.weight"]
+    _keys_to_ignore_on_load_unexpected = [r"h\.\d+\.attn\.masked_bias", r"h\.\d+\.attn\.bias"]
 
     def __init__(self, config):
         super().__init__(config)
@@ -1158,7 +1158,8 @@ input sequence).
     GPT2_START_DOCSTRING,
 )
 class GPT2DoubleHeadsModel(GPT2PreTrainedModel):
-    _tied_weights_keys = ["lm_head.weight"]
+    _keys_to_ignore_on_load_unexpected = [r"h\.\d+\.attn\.bias", r"h\.\d+\.attn\.masked_bias"]
+    _keys_to_ignore_on_load_missing = [r"attn.masked_bias", r"attn.bias", r"lm_head.weight"]
 
     def __init__(self, config):
         super().__init__(config)
@@ -1386,6 +1387,9 @@ class GPT2DoubleHeadsModel(GPT2PreTrainedModel):
     GPT2_START_DOCSTRING,
 )
 class GPT2ForSequenceClassification(GPT2PreTrainedModel):
+    _keys_to_ignore_on_load_unexpected = [r"h\.\d+\.attn\.bias", r"h\.\d+\.attn\.masked_bias"]
+    _keys_to_ignore_on_load_missing = [r"h\.\d+\.attn\.masked_bias", r"lm_head.weight"]
+
     def __init__(self, config):
         super().__init__(config)
         self.num_labels = config.num_labels
@@ -1456,9 +1460,7 @@ class GPT2ForSequenceClassification(GPT2PreTrainedModel):
             sequence_lengths = -1
         else:
             if input_ids is not None:
-                sequence_lengths = (torch.eq(input_ids, self.config.pad_token_id).long().argmax(-1) - 1).to(
-                    logits.device
-                )
+                sequence_lengths = (torch.ne(input_ids, self.config.pad_token_id).sum(-1) - 1).to(logits.device)
             else:
                 sequence_lengths = -1
                 logger.warning(
@@ -1609,6 +1611,9 @@ class GPT2ForTokenClassification(GPT2PreTrainedModel):
     GPT2_START_DOCSTRING,
 )
 class GPT2ForQuestionAnswering(GPT2PreTrainedModel):
+    _keys_to_ignore_on_load_unexpected = [r"h\.\d+\.attn\.bias", r"h\.\d+\.attn\.masked_bias"]
+    _keys_to_ignore_on_load_missing = [r"h\.\d+\.attn\.masked_bias", r"h\.\d+\.attn\.bias", r"lm_head.weight"]
+
     def __init__(self, config):
         super().__init__(config)
         self.num_labels = config.num_labels

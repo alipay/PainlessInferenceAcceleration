@@ -1,31 +1,27 @@
 """ PyTorch ChatGLM model. """
 
-import math
 import copy
+import math
 import warnings
-import re
-import sys
+from typing import Optional, Tuple, List, Callable, Dict, Any
 
 import torch
-import torch.utils.checkpoint
 import torch.nn.functional as F
+import torch.utils.checkpoint
+from models.chatglm.configuration_chatglm import ChatGLMConfig
 from torch import nn
 from torch.nn import CrossEntropyLoss, LayerNorm
 from torch.nn.utils import skip_init
-from typing import Optional, Tuple, Union, List, Callable, Dict, Any
-
+from transformers.generation.logits_process import LogitsProcessor
+from transformers.generation.utils import LogitsProcessorList, StoppingCriteriaList, GenerationConfig, ModelOutput
 from transformers.modeling_outputs import (
     BaseModelOutputWithPast,
     CausalLMOutputWithPast,
 )
+from transformers.utils import logging
+
 # from transformers.modeling_utils import PreTrainedModel
 from common.pretrained_model import LookaheadPreTrainedModel
-
-from transformers.utils import logging
-from transformers.generation.logits_process import LogitsProcessor
-from transformers.generation.utils import LogitsProcessorList, StoppingCriteriaList, GenerationConfig, ModelOutput
-
-from models.chatglm2.configuration_chatglm import ChatGLMConfig
 
 # flags required to enable jit fusion kernels
 
@@ -811,8 +807,16 @@ class ChatGLMModel(ChatGLMPreTrainedModel):
         if inputs_embeds is None:
             inputs_embeds = self.embedding(input_ids)
 
-        # TODO: adapt for lookahead
-        if attention_mask is None or len(attention_mask.shape) == 2:
+        # NOTE: adapt for lookahead
+        if attention_mask is not None and len(attention_mask.shape) == 4:
+            # lookahead
+            full_attention_mask = (1 - attention_mask).to(torch.bool)
+            # Rotary positional embeddings
+            position_ids = torch.sum(attention_mask, 3).squeeze(1) - 1
+            rotary_pos_emb = self.rotary_pos_emb(self.seq_length)
+            rotary_pos_emb = rotary_pos_emb[position_ids]
+            rotary_pos_emb = rotary_pos_emb.transpose(0, 1).contiguous()
+        else:
             # no lookahead
             if self.pre_seq_len is not None:
                 if past_key_values is None:
@@ -834,15 +838,6 @@ class ChatGLMModel(ChatGLMPreTrainedModel):
                 rotary_pos_emb = rotary_pos_emb[None, :seq_length]
             rotary_pos_emb = rotary_pos_emb.transpose(0, 1).contiguous()
 
-        else:
-            # lookahead
-            full_attention_mask = (1-attention_mask).to(torch.bool)
-            # Rotary positional embeddings
-            position_ids = torch.sum(attention_mask, 3).squeeze(1) - 1
-            rotary_pos_emb = self.rotary_pos_emb(self.seq_length)
-            rotary_pos_emb = rotary_pos_emb[position_ids]
-            rotary_pos_emb = rotary_pos_emb.transpose(0, 1).contiguous()
-
         # Run encoder.
         hidden_states, presents, all_hidden_states, all_self_attentions = self.encoder(
             inputs_embeds, full_attention_mask, rotary_pos_emb=rotary_pos_emb,
@@ -858,7 +853,6 @@ class ChatGLMModel(ChatGLMPreTrainedModel):
             hidden_states=all_hidden_states,
             attentions=all_self_attentions,
         )
-
 
 
 class ChatGLMForConditionalGeneration(ChatGLMPreTrainedModel):
@@ -987,7 +981,8 @@ class ChatGLMForConditionalGeneration(ChatGLMPreTrainedModel):
             attentions=transformer_outputs.attentions,
         )
 
-    def _update_cache(self, past_key_values, kv_idx, prefix_and_next_count=None, max_match_count=None, max_match_index=None):
+    def _update_cache(self, past_key_values, kv_idx, prefix_and_next_count=None, max_match_count=None,
+                      max_match_index=None):
         output_past_key_values = []
         for k, v in past_key_values:
             if max_match_index + 1 == max_match_count:

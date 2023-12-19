@@ -5,117 +5,53 @@ Copyright (c) Ant Financial Service Group and its affiliates.
 
 from __future__ import print_function
 
-import time
-from operator import itemgetter
-import inspect
-
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple, Union
-
-from collections import defaultdict
-from functools import reduce
-import pickle
-import json
 import copy
+import inspect
+import time
 import warnings
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import numpy as np
-
 import torch
 import torch.distributed as dist
 from torch import nn
 from transformers import PreTrainedModel
-from transformers.utils import ExplicitEnum, ModelOutput, is_accelerate_available, logging
-from transformers.generation import LogitsProcessorList
+from transformers.generation.beam_constraints import DisjunctiveConstraint, PhrasalConstraint
+# from transformers.integrations.deepspeed import is_deepspeed_zero3_enabled
+from transformers.generation.beam_search import BeamSearchScorer, ConstrainedBeamSearchScorer
+from transformers.generation.logits_process import (
+    LogitsProcessorList,
+    MinLengthLogitsProcessor,
+)
 from transformers.generation.stopping_criteria import (
     MaxLengthCriteria,
-    MaxTimeCriteria,
-    StoppingCriteria,
     StoppingCriteriaList,
     validate_stopping_criteria,
 )
-from transformers.generation.logits_process import (
-    EncoderNoRepeatNGramLogitsProcessor,
-    EncoderRepetitionPenaltyLogitsProcessor,
-    EpsilonLogitsWarper,
-    EtaLogitsWarper,
-    ExponentialDecayLengthPenalty,
-    ForcedBOSTokenLogitsProcessor,
-    ForcedEOSTokenLogitsProcessor,
-    ForceTokensLogitsProcessor,
-    HammingDiversityLogitsProcessor,
-    InfNanRemoveLogitsProcessor,
-    LogitNormalization,
-    LogitsProcessorList,
-    MinLengthLogitsProcessor,
-    MinNewTokensLengthLogitsProcessor,
-    NoBadWordsLogitsProcessor,
-    NoRepeatNGramLogitsProcessor,
-    PrefixConstrainedLogitsProcessor,
-    RepetitionPenaltyLogitsProcessor,
-    SuppressTokensAtBeginLogitsProcessor,
-    SuppressTokensLogitsProcessor,
-    TemperatureLogitsWarper,
-    TopKLogitsWarper,
-    TopPLogitsWarper,
-    TypicalLogitsWarper,
-)
 from transformers.generation.utils import (
-    GenerateOutput,
-    GreedySearchOutput,
     GreedySearchEncoderDecoderOutput,
     GreedySearchDecoderOnlyOutput)
-# from transformers.integrations.deepspeed import is_deepspeed_zero3_enabled
-from transformers.generation.beam_search import BeamScorer, BeamSearchScorer, ConstrainedBeamSearchScorer
-from transformers.generation.beam_constraints import DisjunctiveConstraint, PhrasalConstraint
 from transformers.generation.utils import (
-    SampleEncoderDecoderOutput,
     GreedySearchOutput,
-    SampleOutput,
-    BeamSearchOutput,
-    BeamSampleOutput,
-    ContrastiveSearchOutput,
-    GenerateOutput,
-    SampleEncoderDecoderOutput,
-SampleDecoderOnlyOutput)
-
-
-
+    GenerateOutput)
+from transformers.utils import ModelOutput, logging
 
 logger = logging.get_logger(__name__)
 
-
-from common.configuration_utils import GenerationConfig
-from common.prefetch_cache import PrefetchCache
-
-
-class GenerationMode(ExplicitEnum):
-    """
-    Possible generation modes, downstream of the [`~generation.GenerationMixin.generate`] method.
-    """
-
-    # Non-beam methods
-    CONTRASTIVE_SEARCH = "contrastive_search"
-    GREEDY_SEARCH = "greedy_search"
-    LOOKAHEAD_GENERATION = "lookahead_generation"
-    SAMPLE = "sample"
-    ASSISTED_GENERATION = "assisted_generation"
-    # Beam methods
-    BEAM_SEARCH = "beam_search"
-    BEAM_SAMPLE = "beam_sample"
-    CONSTRAINED_BEAM_SEARCH = "constrained_beam_search"
-    GROUP_BEAM_SEARCH = "group_beam_search"
+from transformers.generation.configuration_utils import GenerationConfig
+from common.lookahead_cache import LookaheadCache
+from common.lookahead_generation_utils import GenerationMode, LookaheadDecoderOnlyOutput
 
 
 class LookaheadPreTrainedModel(PreTrainedModel):
-    _batch_prefetch = False
-    _stream_prefetch = False
-
+    _batch_generation = False
+    _stream_generation = False
 
     def __init__(self, config):
         super().__init__(config=config)
 
     def _get_generation_mode(
-        self, generation_config: GenerationConfig, assistant_model: Optional["PreTrainedModel"]
+            self, generation_config: GenerationConfig, assistant_model: Optional["PreTrainedModel"]
     ) -> GenerationMode:
         """
         Returns the generation mode triggered by a [`GenerationConfig`] instance.
@@ -125,18 +61,26 @@ class LookaheadPreTrainedModel(PreTrainedModel):
         elif generation_config.num_beams == 1:
             if generation_config.do_sample is False:
                 if (
-                    generation_config.top_k is not None
-                    and generation_config.top_k > 1
-                    and generation_config.penalty_alpha is not None
-                    and generation_config.penalty_alpha > 0
+                        generation_config.top_k is not None
+                        and generation_config.top_k > 1
+                        and generation_config.penalty_alpha is not None
+                        and generation_config.penalty_alpha > 0
                 ):
                     generation_mode = GenerationMode.CONTRASTIVE_SEARCH
-                elif generation_config.use_prefetch and generation_config.prefetch_size>0 and generation_config.prefetch_length>0 and generation_config.use_cache:
+                elif generation_config.use_cache \
+                        and hasattr(generation_config, 'decoding_kwargs') \
+                        and generation_config.decoding_kwargs.get('use_lookahead', False) \
+                        and generation_config.decoding_kwargs.get('decoding_length', 64) > 1 \
+                        and generation_config.decoding_kwargs.get('branch_length', 12) > 1:
                     generation_mode = GenerationMode.LOOKAHEAD_GENERATION
                 else:
                     generation_mode = GenerationMode.GREEDY_SEARCH
             else:
-                if generation_config.use_prefetch and generation_config.prefetch_size>0 and generation_config.prefetch_length>0 and generation_config.use_cache:
+                if generation_config.use_cache \
+                        and hasattr(generation_config, 'decoding_kwargs') \
+                        and generation_config.decoding_kwargs.get('use_lookahead', False) \
+                        and generation_config.decoding_kwargs.get('decoding_length', 64) > 1 \
+                        and generation_config.decoding_kwargs.get('branch_length', 12) > 1:
                     generation_mode = GenerationMode.LOOKAHEAD_GENERATION
                 else:
                     generation_mode = GenerationMode.SAMPLE
@@ -159,19 +103,18 @@ class LookaheadPreTrainedModel(PreTrainedModel):
                 )
         return generation_mode
 
-
     @torch.no_grad()
     def generate(
-        self,
-        inputs: Optional[torch.Tensor] = None,
-        generation_config: Optional[GenerationConfig] = None,
-        logits_processor: Optional[LogitsProcessorList] = None,
-        stopping_criteria: Optional[StoppingCriteriaList] = None,
-        prefix_allowed_tokens_fn: Optional[Callable[[int, torch.Tensor], List[int]]] = None,
-        synced_gpus: Optional[bool] = None,
-        assistant_model: Optional["PreTrainedModel"] = None,
-        streamer: Optional["BaseStreamer"] = None,
-        **kwargs,
+            self,
+            inputs: Optional[torch.Tensor] = None,
+            generation_config: Optional[GenerationConfig] = None,
+            logits_processor: Optional[LogitsProcessorList] = None,
+            stopping_criteria: Optional[StoppingCriteriaList] = None,
+            prefix_allowed_tokens_fn: Optional[Callable[[int, torch.Tensor], List[int]]] = None,
+            synced_gpus: Optional[bool] = None,
+            assistant_model: Optional["PreTrainedModel"] = None,
+            streamer: Optional["BaseStreamer"] = None,
+            **kwargs,
     ) -> Union[GenerateOutput, torch.LongTensor]:
         r"""
 
@@ -284,6 +227,8 @@ class LookaheadPreTrainedModel(PreTrainedModel):
         model_kwargs = generation_config.update(**kwargs)  # All unused kwargs must be model kwargs
         generation_config.validate()
         self._validate_model_kwargs(model_kwargs.copy())
+        if not hasattr(generation_config, 'decoding_kwargs'):
+            generation_config.decoding_kwargs = model_kwargs.get('decoding_kwargs', {})
 
         # 2. Set generation parameters if not already defined
         logits_processor = logits_processor if logits_processor is not None else LogitsProcessorList()
@@ -321,13 +266,6 @@ class LookaheadPreTrainedModel(PreTrainedModel):
         else:
             model_kwargs["use_cache"] = generation_config.use_cache
 
-        model_kwargs['use_prefetch'] = generation_config.use_prefetch
-        model_kwargs['debug_prefetch'] = generation_config.debug_prefetch
-        model_kwargs['prefetch_size'] = generation_config.prefetch_size
-        model_kwargs['prefetch_length'] = generation_config.prefetch_length
-        model_kwargs['do_sample'] = generation_config.do_sample
-        model_kwargs['inputs_embeds_position'] = generation_config.inputs_embeds_position
-
         accepts_attention_mask = "attention_mask" in set(inspect.signature(self.forward).parameters.keys())
         requires_attention_mask = "encoder_outputs" not in model_kwargs
 
@@ -341,9 +279,9 @@ class LookaheadPreTrainedModel(PreTrainedModel):
             # If `input_ids` was given, check if the last id in any sequence is `pad_token_id`
             # Note: If using, `inputs_embeds` this check does not work, because we want to be more hands-off.
             if (
-                generation_config.pad_token_id is not None
-                and len(inputs_tensor.shape) == 2
-                and torch.sum(inputs_tensor[:, -1] == generation_config.pad_token_id) > 0
+                    generation_config.pad_token_id is not None
+                    and len(inputs_tensor.shape) == 2
+                    and torch.sum(inputs_tensor[:, -1] == generation_config.pad_token_id) > 0
             ):
                 logger.warning(
                     "A decoder-only architecture is being used, but right-padding was detected! For correct "
@@ -388,7 +326,6 @@ class LookaheadPreTrainedModel(PreTrainedModel):
 
         # 7. determine generation mode
         generation_mode = self._get_generation_mode(generation_config, assistant_model)
-        # print(f'{generation_mode.value=}')
 
         if streamer is not None and (generation_config.num_beams > 1):
             raise ValueError(
@@ -419,6 +356,19 @@ class LookaheadPreTrainedModel(PreTrainedModel):
         stopping_criteria = self._get_stopping_criteria(
             generation_config=generation_config, stopping_criteria=stopping_criteria
         )
+
+        decoding_kwargs = generation_config.decoding_kwargs if hasattr(generation_config, 'decoding_kwargs') else {}
+        decoding_kwargs['generation_mode'] = generation_mode
+        decoding_kwargs['do_sample'] = generation_config.do_sample
+        decoding_kwargs['inputs_embeds_position'] = generation_config.inputs_embeds_position if hasattr(generation_config, 'inputs_embeds_position') else 0
+        decoding_kwargs['max_length'] = generation_config.max_length
+        if generation_mode == GenerationMode.LOOKAHEAD_GENERATION:
+            decoding_length = decoding_kwargs.get('decoding_length', 64)
+            decoding_kwargs['decoding_max_length'] = generation_config.max_length + decoding_length + 1
+        else:
+            decoding_kwargs['decoding_max_length'] = generation_config.max_length
+        model_kwargs['decoding_kwargs'] = decoding_kwargs
+
         # 10. go into different generation modes
         if generation_mode == GenerationMode.ASSISTED_GENERATION:
             if generation_config.num_return_sequences > 1:
@@ -652,8 +602,8 @@ class LookaheadPreTrainedModel(PreTrainedModel):
                     )
 
                 if (
-                    not isinstance(generation_config.force_words_ids, list)
-                    or len(generation_config.force_words_ids) == 0
+                        not isinstance(generation_config.force_words_ids, list)
+                        or len(generation_config.force_words_ids) == 0
                 ):
                     typeerror()
 
@@ -664,8 +614,8 @@ class LookaheadPreTrainedModel(PreTrainedModel):
                         if any(not isinstance(token_ids, list) for token_ids in word_ids):
                             typeerror()
                         if any(
-                            any((not isinstance(token_id, int) or token_id < 0) for token_id in token_ids)
-                            for token_ids in word_ids
+                                any((not isinstance(token_id, int) or token_id < 0) for token_id in token_ids)
+                                for token_ids in word_ids
                         ):
                             typeerror()
 
@@ -717,15 +667,15 @@ class LookaheadPreTrainedModel(PreTrainedModel):
                                                 attention_mask=None,
                                                 inputs_embeds=None,
                                                 **kwargs):
-
         position_ids = kwargs.get("position_ids", None)
 
-        prefetch_kwargs = kwargs.get('prefetch_kwargs', {})
-        prefetch_size = prefetch_kwargs.get('prefetch_size', 63)
-        prefetch_length = prefetch_kwargs.get('prefetch_length', 12)
-        max_length = prefetch_kwargs.get('max_length', 2048)
-        update_prefetch_length = min(prefetch_length, max_length - input_ids.size(-1))
-        assert update_prefetch_length > 0, f'{prefetch_length=} {max_length=} {input_ids.size(-1)=} {update_prefetch_length=}'
+        decoding_kwargs = kwargs.get('decoding_kwargs', {})
+        decoding_length = decoding_kwargs.get('decoding_length', 64)
+        branch_length = decoding_kwargs.get('branch_length', 12)
+        decoding_mode = decoding_kwargs.get('decoding_mode', 'hier')
+        max_length = decoding_kwargs.get('max_length', 2048)
+        update_branch_length = min(branch_length, max_length - input_ids.size(-1))
+        assert update_branch_length > 0, f'{branch_length=} {max_length=} {input_ids.size(-1)=} {update_branch_length=}'
 
         if past_key_values is None:
             if inputs_embeds is not None and input_ids is not None:
@@ -745,61 +695,68 @@ class LookaheadPreTrainedModel(PreTrainedModel):
                 {"past_key_values": past_key_values,
                  "use_cache": kwargs.get("use_cache"),
                  "attention_mask": update_attention_mask,
-                 "prefetch_kwargs": prefetch_kwargs
+                 "decoding_kwargs": decoding_kwargs
                  })
 
             if position_ids is not None:
-                # full position_ids, truncate in forward call
-                model_inputs["position_ids"] = position_ids
+                model_inputs["position_ids"] = self._get_position_ids(position_ids, encoding=True, length=length)
 
         else:
-            prefetch_qids = input_ids[0, -2:].tolist()
+            decoding_qids = input_ids[0, -2:].tolist()
+            # decoding_qids = decoding_kwargs['input_id_list'][0][-2:]
             min_input_size = 0
-            min_output_size = max(prefetch_size // 2, 1)
+            min_output_size = max(decoding_length // 2, 1)
 
-            prefetch_ids, prefetch_masks, prefetch_sizes = self.prefetch_cache.trie_get(prefetch_qids,
-                                                                                        prefetch_size=prefetch_size,
-                                                                                        prefetch_length=update_prefetch_length,
-                                                                                        min_input_size=min_input_size,
-                                                                                        min_output_size=min_output_size,
-                                                                                        mode='mix',
-                                                                                        idx=0)
+            if decoding_mode in ('hier', 'par', 'one'):
+                decoding_mode = decoding_mode + '_mix'
+            fmt, mode = decoding_mode.split('_')
+            method_name = fmt + '_get'
 
-            prefetch_input_ids = torch.LongTensor([prefetch_ids]).to(input_ids.device)
+            decoding_ids, decoding_masks, sizes = getattr(self.lookahead_cache, method_name)(decoding_qids,
+                                                                                                        decoding_length=decoding_length,
+                                                                                                        branch_length=update_branch_length,
+                                                                                                        min_input_size=min_input_size,
+                                                                                                        min_output_size=min_output_size,
+                                                                                                        mode=mode,
+                                                                                                        idx=0)
+
+            decoding_input_ids = torch.tensor([decoding_ids], dtype=torch.long, device=input_ids.device)
             prefix_length = input_ids.size(-1) - 1
-            fresh_length = len(prefetch_ids)
+            fresh_length = len(decoding_ids)
             ppl = prefix_length + fresh_length
-            assert ppl <= attention_mask.size(2), f'{max_length=} {update_prefetch_length=} {prefix_length=} {fresh_length=} {ppl=} {attention_mask.shape=}'
+            assert ppl <= attention_mask.size(2), \
+                f'{max_length=} {update_branch_length=} {prefix_length=} {fresh_length=} {attention_mask.shape=}'
             prefix_mask_tensor = attention_mask[:, :, prefix_length:ppl, :prefix_length]
-            prefetch_mask_tensor = torch.from_numpy(prefetch_masks[None, None]).to(
-                dtype=attention_mask.dtype,device=attention_mask.device)
-            prefetch_attention_mask = torch.cat([prefix_mask_tensor, prefetch_mask_tensor], dim=3)
+            decoding_mask_tensor = torch.from_numpy(decoding_masks[None, None]).to(
+                dtype=attention_mask.dtype, device=attention_mask.device)
+            decoding_attention_mask = torch.cat([prefix_mask_tensor, decoding_mask_tensor], dim=3)
 
-            prefetch_kwargs.update({'prefetch_qids': prefetch_qids,
-                                'prefetch_ids': prefetch_ids,
-                               'prefetch_masks': prefetch_masks,
-                               'prefetch_sizes': prefetch_sizes,
-                               'prefetch_qids': prefetch_qids,
-                               })
-            model_inputs = {'prefetch_kwargs': prefetch_kwargs}
+            decoding_kwargs.update({'decoding_qids': decoding_qids,
+                                    'decoding_ids': decoding_ids,
+                                    'decoding_masks': decoding_masks,
+                                    'sizes': sizes,
+                                    })
+            model_inputs = {'decoding_kwargs': decoding_kwargs}
 
             model_inputs.update(
                 {
-                    "input_ids": prefetch_input_ids,
+                    "input_ids": decoding_input_ids,
                     "past_key_values": past_key_values,
                     "use_cache": kwargs.get("use_cache"),
-                    "attention_mask": prefetch_attention_mask
+                    "attention_mask": decoding_attention_mask
                 }
             )
             if position_ids is not None:
-                positions = torch.sum(prefetch_attention_mask, dim=3).squeeze(1)[0]
-                model_inputs["position_ids"] = self._get_position_ids(position_ids, positions)
-
+                indices = torch.sum(decoding_attention_mask, dim=3).squeeze(1)[0]
+                model_inputs["position_ids"] = self._get_position_ids(position_ids, indices=indices, encoding=False)
 
         return model_inputs
 
-    def _get_position_ids(self, full_position_ids, positions):
-        return full_position_ids[..., positions]
+    def _get_position_ids(self, full_position_ids, indices=None, length=None, encoding=True):
+        if encoding:
+            return full_position_ids[..., :length]
+        else:
+            return full_position_ids[..., indices]
 
     def _lookahead_update_model_kwargs_for_generation(
             self,
@@ -808,111 +765,111 @@ class LookaheadPreTrainedModel(PreTrainedModel):
             is_encoder_decoder: bool = False,
             standardize_cache_format: bool = False,
             logits_processor: Optional[LogitsProcessorList] = None,
-            input_ids:  Optional[torch.Tensor] = None,
+            input_ids: Optional[torch.Tensor] = None,
     ) -> Dict[str, Any]:
         # update past_key_values
         model_kwargs["past_key_values"] = self._extract_past_from_model_output(
             outputs, standardize_cache_format=standardize_cache_format
         )
 
-        prefetch_kwargs = model_kwargs['prefetch_kwargs']
-        prefetch_ids = prefetch_kwargs.get('prefetch_ids', [])
-        if len(prefetch_ids) <= 1:
+        decoding_kwargs = model_kwargs['decoding_kwargs']
+        decoding_ids = decoding_kwargs.get('decoding_ids', [])
+        if len(decoding_ids) <= 1:
             next_token_logits = outputs.logits[:, -1:, :]
             # pre-process distribution
             # next_tokens_scores = logits_processor(input_ids, next_token_logits)
             bs, nt, nv = next_token_logits.shape
             next_tokens_scores = logits_processor(input_ids, next_token_logits.squeeze(1)).unsqueeze(1)
 
-            if prefetch_kwargs.get('do_sample', False):
+            if decoding_kwargs.get('do_sample', False):
                 probs = nn.functional.softmax(next_tokens_scores, dim=-1)
                 next_tokens = torch.multinomial(probs.view(bs * nt, nv), num_samples=1).view(bs, nt)
             else:
                 next_tokens = torch.argmax(next_tokens_scores, dim=-1, keepdim=False).long()
             model_kwargs['next_tokens'] = next_tokens
             model_kwargs['next_tokens_scores'] = next_tokens_scores
-            model_kwargs['next_token_list'] = next_tokens.tolist()
-            prefetch_kwargs['dls'].append(1)
-            prefetch_kwargs['edls'].append(1)
-            if prefetch_kwargs.get('debug_prefetch', False):
-                next_token_list = model_kwargs['next_token_list']
-                prefetch_qids = prefetch_kwargs.get('prefetch_qids', [])
-                print(f'size:0 query:{prefetch_qids} next:{next_token_list[0]}')
-
+            next_token_list = next_tokens.tolist()
+            model_kwargs['next_token_list'] = next_token_list
+            decoding_kwargs['input_id_list'][0].extend(next_token_list[0])
+            decoding_kwargs['dls'].append(1)
+            decoding_kwargs['edls'].append(1)
+            if decoding_kwargs.get('debug_lookahead', False):
+                decoding_qids = decoding_kwargs.get('decoding_qids', [])
+                print(f'size:0 query:{decoding_qids} next_token:{next_token_list[0]}')
         else:
             # TODO: accurate logit_processor
             # next_tokens_scores = logits_processor(input_ids, outputs.logits)
-
             bs, nt, nv = outputs.logits.shape
-            next_tokens_scores = logits_processor(input_ids.repeat(1, nt).view(bs*nt, -1),
-                                                  outputs.logits.view(bs*nt, -1)).view(bs, nt, -1)
+            next_tokens_scores = logits_processor(input_ids.repeat(1, nt).view(bs * nt, -1),
+                                                  outputs.logits.view(bs * nt, -1)).view(bs, nt, -1)
 
-            if prefetch_kwargs.get('do_sample', False):
+            if decoding_kwargs.get('do_sample', False):
                 probs = nn.functional.softmax(next_tokens_scores, dim=-1)
                 bs, nt, nv = probs.shape
                 next_tokens = torch.multinomial(probs.view(bs * nt, nv), num_samples=1).view(bs, nt)
             else:
                 next_tokens = torch.argmax(next_tokens_scores, dim=-1, keepdim=False).long()
 
-            # TODO: logit_processor
             next_token_list = next_tokens.tolist()[0]
-            prefetch_ids = prefetch_kwargs['prefetch_ids'][1:]
-            prefetch_mask = prefetch_kwargs['prefetch_masks']
-            prefetch_sizes = prefetch_kwargs['prefetch_sizes']
+            decoding_ids = decoding_kwargs['decoding_ids'][1:]
+            decoding_mask = decoding_kwargs['decoding_masks']
+            sizes = decoding_kwargs['sizes']
 
             max_match_index = 0
             max_match_count = 0
-            max_prefetch_ids_slice = None
+            max_decoding_ids_slice = None
             max_next_token_slice = None
-            for i in range(len(prefetch_ids)):
-                mask_indices = np.nonzero(prefetch_mask[i + 1, 1:])[0]
-                prefetch_ids_slice = [prefetch_ids[j] for j in mask_indices]
+            for i in range(len(decoding_ids)):
+                mask_indices = np.nonzero(decoding_mask[i + 1, 1:])[0]
+                decoding_ids_slice = [decoding_ids[j] for j in mask_indices]
                 next_token_slice = [next_token_list[0]] + [next_token_list[j + 1] for j in mask_indices]
 
-                c = len(prefetch_ids_slice)
-                for j, p in enumerate(prefetch_ids_slice):
+                c = len(decoding_ids_slice)
+                for j, p in enumerate(decoding_ids_slice):
                     if next_token_slice[j] != p:
                         c = j
                         break
-                # print(f'prefetch_ids_slice:{prefetch_ids_slice} next_token_slice:{next_token_slice} c:{c} max_match_count:{max_match_count}')
                 if c > max_match_count:
                     max_match_count = c
                     max_match_index = i
                 if c >= max_match_count:
-                    max_prefetch_ids_slice = prefetch_ids_slice
+                    max_decoding_ids_slice = decoding_ids_slice
                     max_next_token_slice = next_token_slice
 
             prefix_plus_count = input_ids.size(-1)
-            match_idx = np.nonzero(prefetch_mask[max_match_index + 1, 1:])[0][:max_match_count]
-            if len(prefetch_ids) != max_match_count:
+            match_idx = np.nonzero(decoding_mask[max_match_index + 1, 1:])[0][:max_match_count]
+            if len(decoding_ids) != max_match_count:
                 past = model_kwargs["past_key_values"]
                 device = past[0][0].device
-                kv_idx = torch.LongTensor(match_idx + prefix_plus_count).to(device)
-                model_kwargs["past_key_values"] = self._update_cache(past, 
-                                                                        kv_idx,
-                                                                        prefix_and_next_count=prefix_plus_count,
-                                                                        max_match_count=max_match_count,
-                                                                        max_match_index=max_match_index)
+                kv_idx = torch.tensor(match_idx + prefix_plus_count, dtype=torch.long, device=device)
+                model_kwargs["past_key_values"] = self._update_cache(past,
+                                                                     kv_idx,
+                                                                     prefix_and_next_count=prefix_plus_count,
+                                                                     max_match_count=max_match_count,
+                                                                     max_match_index=max_match_index)
 
             next_token_list = [next_token_list[0:1] + [next_token_list[x + 1] for x in match_idx]]
-            next_tokens = torch.LongTensor(next_token_list).to(input_ids.device)
+            next_tokens = torch.tensor(next_token_list, dtype=torch.long, device=input_ids.device)
             model_kwargs['next_tokens'] = next_tokens
             model_kwargs['next_token_list'] = next_token_list
-            prefetch_kwargs['dls'].append(len(prefetch_ids))
-            prefetch_kwargs['edls'].append(max_match_count+1)
-            if prefetch_kwargs.get('debug_prefetch', False):
-                lengths = np.sum(prefetch_mask, axis=1) - 1
-                # print(','.join(lengths.astype(np.str_)))
+            decoding_kwargs['input_id_list'][0].extend(next_token_list[0])
+            decoding_kwargs['dls'].append(len(decoding_ids))
+            decoding_kwargs['edls'].append(max_match_count + 1)
+            if decoding_kwargs.get('debug_lookahead', False):
+                lengths = np.sum(decoding_mask, axis=1) - 1
                 l = np.concatenate([lengths[:-1][(lengths[1:] - lengths[:-1]) <= 0], lengths[-1:]], axis=0)
                 ls = ','.join(l.astype(np.str_))
-                prefetch_qids = prefetch_kwargs['prefetch_qids']
-                size_str = ','.join([str(x) for x in prefetch_sizes])
+                decoding_qids = decoding_kwargs['decoding_qids']
+                size_str = ','.join([str(x) for x in sizes])
                 print(
-                    f'size:{max_match_count}/{len(prefetch_ids)} from:{size_str} length:{ls} index:{max_match_index} query:{prefetch_qids} prefetch:{max_prefetch_ids_slice} next:{max_next_token_slice}')
+                    f'decoding_length:{len(decoding_ids)+1} accept_length:{max_match_count+1} '
+                    f'query:{decoding_qids} source:{size_str} lengths:{ls} index:{max_match_index} '
+                    f'branch_token:{max_decoding_ids_slice} next_token:{max_next_token_slice}')
 
         return model_kwargs
 
-    def _update_cache(self, past_key_values, kv_idx, prefix_and_next_count=None, max_match_count=None, max_match_index=None):
+    def _update_cache(self, past_key_values, kv_idx, prefix_and_next_count=None, max_match_count=None,
+                      max_match_index=None):
         update_past_key_values = []
         for k, v in past_key_values:
             if max_match_index + 1 == max_match_count:
@@ -925,20 +882,20 @@ class LookaheadPreTrainedModel(PreTrainedModel):
         return tuple(update_past_key_values)
 
     def lookahead_generation(
-        self,
-        input_ids: torch.LongTensor,
-        logits_processor: Optional[LogitsProcessorList] = None,
-        stopping_criteria: Optional[StoppingCriteriaList] = None,
-        max_length: Optional[int] = None,
-        pad_token_id: Optional[int] = None,
-        eos_token_id: Optional[Union[int, List[int]]] = None,
-        output_attentions: Optional[bool] = None,
-        output_hidden_states: Optional[bool] = None,
-        output_scores: Optional[bool] = None,
-        return_dict_in_generate: Optional[bool] = None,
-        synced_gpus: bool = False,
-        streamer: Optional["BaseStreamer"] = None,
-        **model_kwargs,
+            self,
+            input_ids: torch.LongTensor,
+            logits_processor: Optional[LogitsProcessorList] = None,
+            stopping_criteria: Optional[StoppingCriteriaList] = None,
+            max_length: Optional[int] = None,
+            pad_token_id: Optional[int] = None,
+            eos_token_id: Optional[Union[int, List[int]]] = None,
+            output_attentions: Optional[bool] = None,
+            output_hidden_states: Optional[bool] = None,
+            output_scores: Optional[bool] = None,
+            return_dict_in_generate: Optional[bool] = None,
+            synced_gpus: bool = False,
+            streamer: Optional["BaseStreamer"] = None,
+            **model_kwargs,
     ) -> Union[GreedySearchOutput, torch.LongTensor]:
         r"""
         Generates sequences of token ids for models with a language modeling head using **greedy decoding** and can be
@@ -1034,8 +991,8 @@ class LookaheadPreTrainedModel(PreTrainedModel):
         ```"""
         # init values
 
-        if not hasattr(self, 'prefetch_cache'):
-            self.prefetch_cache = PrefetchCache()
+        if not hasattr(self, 'lookahead_cache'):
+            self.lookahead_cache = LookaheadCache()
 
         logits_processor = logits_processor if logits_processor is not None else LogitsProcessorList()
         stopping_criteria = stopping_criteria if stopping_criteria is not None else StoppingCriteriaList()
@@ -1050,7 +1007,7 @@ class LookaheadPreTrainedModel(PreTrainedModel):
         eos_token_id = eos_token_id if eos_token_id is not None else self.generation_config.eos_token_id
         if isinstance(eos_token_id, int):
             eos_token_id = [eos_token_id]
-        eos_token_id_tensor = torch.tensor(eos_token_id).to(input_ids.device) if eos_token_id is not None else None
+        eos_token_id_tensor = torch.tensor(eos_token_id, device=input_ids.device) if eos_token_id is not None else None
         output_scores = output_scores if output_scores is not None else self.generation_config.output_scores
         output_attentions = (
             output_attentions if output_attentions is not None else self.generation_config.output_attentions
@@ -1077,59 +1034,58 @@ class LookaheadPreTrainedModel(PreTrainedModel):
                 model_kwargs["encoder_outputs"].get("hidden_states") if output_hidden_states else None
             )
 
-        prefetch_kwargs = {
-            'prefetch_size': model_kwargs.pop('prefetch_size', 63),
-            'prefetch_length': model_kwargs.pop('prefetch_length', 12),
-            'use_prefetch': True,
-            'debug_prefetch': model_kwargs.pop('debug_prefetch', False),
+        decoding_kwargs = model_kwargs['decoding_kwargs']
+        decoding_kwargs.update({
             'eos': eos_token_id[0] if eos_token_id is not None else 2,
-            'do_sample':  model_kwargs.pop('do_sample', False),
             'edls': [],
             'dls': [],
             'fts': []
-        }
+        })
 
-        prefetch_size = prefetch_kwargs.get('prefetch_size', 63)
-        stop_max_length = stopping_criteria.max_length or max_length
-        attn_max_length = stop_max_length + prefetch_size + 1
+        decoding_length = decoding_kwargs.get('decoding_length', 64)
+        stop_max_length = stopping_criteria.max_length
+        decoding_max_length = stop_max_length + decoding_length + 1
         attention_mask = model_kwargs.get('attention_mask', None)
         input_device = input_ids.device
         if attention_mask is None:
             bs = input_ids.size(0)
-            full_attention_mask = torch.tril(torch.ones((bs,1,attn_max_length, attn_max_length),dtype=torch.long),
-                                             0).to(input_device)
+            full_attention_mask = torch.tril(
+                torch.ones((bs, 1, decoding_max_length, decoding_max_length), dtype=torch.long, device=input_device),
+                0)
         elif len(attention_mask.shape) == 2:
             # from [bs, src_len] to [bs,1,max_len,max_len]
             bs, src_len = attention_mask.shape
-            pad_len = attn_max_length - src_len
+            pad_len = decoding_max_length - src_len
             attention_mask = attention_mask.long()
             if pad_len > 0:
-                pad_mask = torch.ones((bs, pad_len), dtype=torch.long).to(attention_mask.device)
+                pad_mask = torch.ones((bs, pad_len), dtype=torch.long, device=attention_mask.device)
                 attention_mask = torch.cat([attention_mask, pad_mask], 1)
-            full_attention_mask = torch.tril(attention_mask[:,None,None].expand(-1,-1,attn_max_length,-1),0)
+            full_attention_mask = torch.tril(attention_mask[:, None, None].expand(-1, -1, decoding_max_length, -1), 0)
         elif len(attention_mask.shape) == 4:
             bs, _, src_len, tgt_len = attention_mask.shape
             attention_mask = attention_mask.long()
-            if src_len < attn_max_length or tgt_len < attn_max_length:
+            if src_len < decoding_max_length or tgt_len < decoding_max_length:
                 full_attention_mask = torch.tril(
-                    torch.ones((bs, 1, attn_max_length, attn_max_length), dtype=torch.long),
-                    0).to(input_device)
-                full_attention_mask[:,:,:src_len,:tgt_len] = attention_mask
+                    torch.ones((bs, 1, decoding_max_length, decoding_max_length), dtype=torch.long,
+                               device=input_device),
+                    0)
+                full_attention_mask[:, :, :src_len, :tgt_len] = attention_mask
             else:
                 full_attention_mask = attention_mask
         else:
             raise ValueError(f'unsupport attention_mask.shape:{attention_mask.shape}')
         model_kwargs['attention_mask'] = full_attention_mask
-        prefetch_kwargs['max_length'] = stop_max_length
-        model_kwargs['prefetch_kwargs'] = prefetch_kwargs
+        decoding_kwargs['max_length'] = stop_max_length
+        decoding_kwargs['decoding_max_length'] = decoding_max_length
 
         # keep track of which sequences are already finished
         unfinished_sequences = torch.ones(input_ids.shape[0], dtype=torch.long, device=input_ids.device)
 
         assert input_ids.size(0) == 1
         input_id_list = input_ids[0].tolist()
-        prefetch_length = prefetch_kwargs.get('prefetch_length', 12)
-        self.prefetch_cache.put(input_id_list[1:], prefetch_length=prefetch_length + 1, mode='input', idx=0)
+        decoding_kwargs['input_id_list'] = [input_id_list]
+        branch_length = decoding_kwargs.get('branch_length', 12)
+        self.lookahead_cache.put(input_id_list[1:], branch_length=branch_length + 1, mode='input', idx=0)
         ts = time.time()
 
         this_peer_finished = False  # used by synced_gpus only
@@ -1146,7 +1102,7 @@ class LookaheadPreTrainedModel(PreTrainedModel):
 
             # prepare model inputs
             model_inputs = self.lookahead_prepare_inputs_for_generation(input_ids, **model_kwargs)
-            prefetch_kwargs = model_inputs.pop('prefetch_kwargs', {})
+            decoding_kwargs = model_inputs.pop('decoding_kwargs', {})
 
             # forward pass to get next token
             outputs = self(
@@ -1159,7 +1115,7 @@ class LookaheadPreTrainedModel(PreTrainedModel):
             if synced_gpus and this_peer_finished:
                 continue  # don't waste resources running the code we don't need
 
-            model_kwargs['prefetch_kwargs'] = prefetch_kwargs
+            model_kwargs['decoding_kwargs'] = decoding_kwargs
             model_kwargs = self._lookahead_update_model_kwargs_for_generation(
                 outputs,
                 model_kwargs,
@@ -1181,10 +1137,10 @@ class LookaheadPreTrainedModel(PreTrainedModel):
             # update generated ids, model inputs, and length for next step
             input_ids = torch.cat([input_ids, next_tokens], dim=-1)
             if streamer is not None:
-                streamer.put(next_tokens.cpu())
+                streamer.put(next_token_list)
 
-            self.prefetch_cache.stream_put(next_token_list[0], prefetch_length=prefetch_length + 1, final=False,
-                                          mode='output', idx=0)
+            self.lookahead_cache.stream_put(next_token_list[0], branch_length=branch_length + 1, final=False,
+                                            mode='output', idx=0)
 
             # Store scores, attentions and hidden_states when required
             if return_dict_in_generate:
@@ -1204,7 +1160,6 @@ class LookaheadPreTrainedModel(PreTrainedModel):
                         else (outputs.hidden_states,)
                     )
 
-
             # if eos_token was found in one sentence, set sentence to finished
             if eos_token_id_tensor is not None:
                 # unfinished_sequences = unfinished_sequences.mul(
@@ -1222,11 +1177,11 @@ class LookaheadPreTrainedModel(PreTrainedModel):
                 this_peer_finished = True
 
             te = time.time()
-            model_kwargs['prefetch_kwargs']['fts'].append(te-ts)
+            model_kwargs['decoding_kwargs']['fts'].append(te - ts)
             ts = te
             if this_peer_finished and not synced_gpus:
-                self.prefetch_cache.stream_put([], prefetch_length=prefetch_length + 1, final=True,
-                                               mode='output', idx=0)
+                self.lookahead_cache.stream_put([], branch_length=branch_length + 1, final=True,
+                                                mode='output', idx=0)
                 break
 
         if streamer is not None:
@@ -1244,14 +1199,15 @@ class LookaheadPreTrainedModel(PreTrainedModel):
                     decoder_hidden_states=decoder_hidden_states,
                 )
             else:
-                scores = {'dls':model_kwargs['prefetch_kwargs']['dls'], 
-                                'edls': model_kwargs['prefetch_kwargs']['edls'],
-                                'fts': model_kwargs['prefetch_kwargs']['fts']}
-                return GreedySearchDecoderOnlyOutput(
+                kwargs = {'dls': model_kwargs['decoding_kwargs']['dls'],
+                          'edls': model_kwargs['decoding_kwargs']['edls'],
+                          'fts': model_kwargs['decoding_kwargs']['fts']}
+                return LookaheadDecoderOnlyOutput(
                     sequences=input_ids,
                     scores=scores,
                     attentions=decoder_attentions,
                     hidden_states=decoder_hidden_states,
+                    kwargs=kwargs
                 )
         else:
             return input_ids
@@ -1295,11 +1251,9 @@ class LookaheadPreTrainedModel(PreTrainedModel):
                 decoder_model_args = set(inspect.signature(decoder.forward).parameters)
                 model_args |= {f"decoder_{x}" for x in decoder_model_args}
 
-        prefetch_kwargs = ['use_prefetch', 'prefetch_size', 'prefetch_length', 'debug_prefetch',
-                            'prefetch_kwargs',
-                           ]
+        decoding_kwargs = ['decoding_kwargs','stop_words_ids']
         for key, value in model_kwargs.items():
-            if value is not None and key not in model_args and key not in prefetch_kwargs:
+            if value is not None and key not in model_args and key not in decoding_kwargs:
                 unused_model_args.append(key)
 
         if unused_model_args:
@@ -1307,4 +1261,3 @@ class LookaheadPreTrainedModel(PreTrainedModel):
                 f"The following `model_kwargs` are not used by the model: {unused_model_args} (note: typos in the"
                 " generate arguments will also show up in this list)"
             )
-

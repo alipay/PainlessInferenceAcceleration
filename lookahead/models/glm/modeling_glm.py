@@ -1,6 +1,5 @@
 # coding=utf-8
-# Copyright 2018 The OpenAI Team Authors and HuggingFace Inc. team.
-# Copyright (c) 2018, NVIDIA CORPORATION.  All rights reserved.
+# Copyright 2022 shunxing1234 The HuggingFace Inc. team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -14,73 +13,35 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import math
-import os
-import time
-import copy
-import json
-import pickle
-
-import warnings
-from functools import reduce
-from collections import defaultdict
-from itertools import accumulate
 import inspect
-import random
-from dataclasses import dataclass
-from typing import Optional, Tuple, Union
-import sys
+from typing import Any, Dict, Optional, Tuple, Union
 
-
-import numpy as np
 import torch
-import torch.utils.checkpoint
-from torch.nn.utils import skip_init
-from torch import nn
-from torch.cuda.amp import autocast
-from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss
-from torch.nn import init
 import torch.nn.functional as F
+import torch.utils.checkpoint
+from torch import nn
+from torch.nn import CrossEntropyLoss
+from torch.nn import init
+# from transformers.activations import gelu
+from torch.nn.functional import gelu
 from torch.nn.parameter import Parameter
-
-
-from transformers.activations import gelu
-# from torch.nn.functional import gelu
+from transformers.generation.utils import ModelOutput
 from transformers.modeling_outputs import (
     BaseModelOutputWithPastAndCrossAttentions,
     CausalLMOutputWithCrossAttentions,
-    SequenceClassifierOutputWithPast,
-    TokenClassifierOutput,
 )
-# from transformers.modeling_utils import PreTrainedModel, SequenceSummary
-from transformers.modeling_utils import SequenceSummary
-from common.pretrained_model import LookaheadPreTrainedModel, PrefetchCache
-
-from transformers.pytorch_utils import Conv1D, find_pruneable_heads_and_indices, prune_conv1d_layer
 from transformers.utils import (
-    ModelOutput,
-    add_code_sample_docstrings,
-    add_start_docstrings,
-    add_start_docstrings_to_model_forward,
     logging,
-    replace_return_docstrings,
 )
-from transformers.utils.model_parallel_utils import assert_device_map, get_device_map
 
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
-from transformers.generation.logits_process import LogitsProcessorList
-from transformers.generation.stopping_criteria import StoppingCriteriaList
-from transformers.generation.utils import GreedySearchOutput, ModelOutput, \
-    validate_stopping_criteria, GreedySearchDecoderOnlyOutput
-
-
-from models.antglm.configuration_glm import GLMConfig
+# from transformers.modeling_utils import PreTrainedModel, SequenceSummary
+from common.pretrained_model import LookaheadPreTrainedModel, LookaheadCache
+from models.glm.configuration_glm import GLMConfig
 
 logger = logging.get_logger(__name__)
 
 _CHECKPOINT_FOR_DOC = "glm"
 _CONFIG_FOR_DOC = "GLMConfig"
-
 
 
 class SelfAttention(nn.Module):
@@ -146,7 +107,7 @@ class SelfAttention(nn.Module):
 
     def _fast_attn(self, query, key, value, attention_mask=None, head_mask=None):
         with torch.backends.cuda.sdp_kernel(enable_math=False):
-            return F.scaled_dot_product_attention(query,key,value,attn_mask=attention_mask)
+            return F.scaled_dot_product_attention(query, key, value, attn_mask=attention_mask)
 
     def _norm(self):
         self.query_key_value.weight.requires_grad = False
@@ -160,70 +121,39 @@ class SelfAttention(nn.Module):
     def forward(
             self,
             hidden_states: Optional[Tuple[torch.FloatTensor]],
-            layer_past: Optional[Tuple[torch.Tensor]] = None,
+            past_key_value: Optional[Tuple[torch.Tensor]] = None,
             attention_mask: Optional[torch.FloatTensor] = None,
             head_mask: Optional[torch.FloatTensor] = None,
             encoder_hidden_states: Optional[torch.Tensor] = None,
             encoder_attention_mask: Optional[torch.FloatTensor] = None,
             use_cache: Optional[bool] = False,
             output_attentions: Optional[bool] = False,
-            prefetch_kwargs: Optional[Dict] = None,
+            decoding_kwargs: Optional[Dict] = None,
     ) -> Tuple[Union[torch.Tensor, Tuple[torch.Tensor]], ...]:
 
         if self.norming and not self.normed:
             self._norm()
 
         mat = self.query_key_value(hidden_states)
-        new_shape = mat.size()[:-1] + (3, self.num_heads, self.head_dim)
-        query, key, value = mat.view(new_shape).permute(0, 3, 2, 1, 4).unbind(2)
+        update_shape = mat.size()[:-1] + (3, self.num_heads, self.head_dim)
+        query, key, value = mat.view(update_shape).permute(0, 3, 2, 1, 4).unbind(2)
 
-        if prefetch_kwargs is not None \
-                and prefetch_kwargs.get('use_prefetch', False) \
-                and LookaheadPreTrainedModel._batch_prefetch:
-            if layer_past is None:
-                attn_output, attn_weights = self._attn(query, key, value,
-                                                       attention_mask=attention_mask)
-            else:
-                prefetch_cursors = prefetch_kwargs['prefetch_cursors']
-                past_key, past_value = layer_past
-                bs, l, _ = hidden_states.size()
-                max_len = max(prefetch_cursors) + l
-                cs = list(set(prefetch_cursors))
-                if len(cs) == 1:
-                    c = cs[0]
-                    past_key[:, :, c: c + l] = key
-                    past_value[:, :, c: c + l] = value
-                else:
-                    for i, cursor in enumerate(prefetch_cursors):
-                        past_key[i, :, cursor: cursor + l] = key[i]
-                        past_value[i, :, cursor: cursor + l] = value[i]
-                key = past_key
-                value = past_value
-                attn_output, attn_weights = self._attn(query, key[:, :, :max_len], value[:, :, :max_len],
-                                                       attention_mask=attention_mask)
-        else:
-            if layer_past is not None:
-                past_key, past_value = layer_past
-                key = torch.cat((past_key, key), dim=-2)
-                value = torch.cat((past_value, value), dim=-2)
-            attn_output, attn_weights = self._attn(query, key, value, attention_mask)
+        if past_key_value is not None:
+            past_key, past_value = past_key_value
+            key = torch.cat((past_key, key), dim=-2)
+            value = torch.cat((past_value, value), dim=-2)
+        attn_output, attn_weights = self._attn(query, key, value, attention_mask)
 
         if use_cache is True:
-            present = (key, value)
+            past_key_value = (key, value)
         else:
-            present = None
+            past_key_value = None
 
         attn_output = attn_output.permute(0, 2, 1, 3).contiguous()
         attn_shape = attn_output.size()[:-2] + (self.num_heads * self.head_dim,)
         attn_output = attn_output.view(attn_shape)
         attn_output = self.dense(attn_output)
-        # attn_output = self.resid_dropout(attn_output)
-
-        outputs = (attn_output, present)
-        # if output_attentions:
-        #     outputs += (attn_weights,)
-
-        return outputs  # a, present, (attentions)
+        return attn_output, past_key_value
 
 
 class GLMMLP(nn.Module):
@@ -298,25 +228,25 @@ class GLMBlock(nn.Module):
     def forward(
             self,
             hidden_states: Optional[Tuple[torch.FloatTensor]],
-            layer_past: Optional[Tuple[torch.Tensor]] = None,
+            past_key_value: Optional[Tuple[torch.Tensor]] = None,
             attention_mask: Optional[torch.FloatTensor] = None,
             head_mask: Optional[torch.FloatTensor] = None,
             encoder_hidden_states: Optional[torch.Tensor] = None,
             encoder_attention_mask: Optional[torch.FloatTensor] = None,
             use_cache: Optional[bool] = False,
             output_attentions: Optional[bool] = False,
-            prefetch_kwargs: Optional[Dict] = None
+            decoding_kwargs: Optional[Dict] = None
     ) -> Union[Tuple[torch.Tensor], Optional[Tuple[torch.Tensor, Tuple[torch.FloatTensor, ...]]]]:
         residual = hidden_states
         hidden_states = self.input_layernorm(hidden_states)
         attn_outputs = self.attention(
             hidden_states,
-            layer_past=layer_past,
+            past_key_value=past_key_value,
             attention_mask=attention_mask,
             head_mask=head_mask,
             use_cache=use_cache,
             output_attentions=output_attentions,
-            prefetch_kwargs=prefetch_kwargs
+            decoding_kwargs=decoding_kwargs
         )
         attn_output = attn_outputs[0]  # output_attn: a, present, (attentions)
         outputs = attn_outputs[1:]
@@ -351,8 +281,6 @@ class GLMStack(torch.nn.Module):
         # Model parallel
         self.gradient_checkpointing = False
 
-        # Initialize weights and apply final processing
-
     def forward(
             self,
             hidden_states: Optional[torch.FloatTensor] = None,
@@ -362,12 +290,12 @@ class GLMStack(torch.nn.Module):
             inputs_embeds: Optional[torch.FloatTensor] = None,
             use_cache: Optional[bool] = True,
             return_dict: Optional[bool] = None,
-            prefetch_kwargs: Optional[Dict] = None
+            decoding_kwargs: Optional[Dict] = None
     ) -> Union[Tuple, BaseModelOutputWithPastAndCrossAttentions]:
 
         use_cache = use_cache if use_cache is not None else self.config.use_cache
 
-        attention_mask = -10000 * (1.0 - attention_mask.to(hidden_states.dtype))
+        attention_mask =  (1.0 - attention_mask.to(hidden_states.dtype)) * torch.finfo(hidden_states.dtype).min
 
         position_item_ids, position_block_ids = position_ids[:, :, :hidden_states.size(1)].unbind(1)
         position_embeds = self.position_embeddings(position_item_ids)
@@ -377,7 +305,6 @@ class GLMStack(torch.nn.Module):
         if past_key_values is None:
             past_key_values = tuple([None] * len(self.layers))
 
-
         if self.gradient_checkpointing and self.training:
             if use_cache:
                 logger.warning_once(
@@ -386,7 +313,7 @@ class GLMStack(torch.nn.Module):
                 use_cache = False
 
         presents = () if use_cache else None
-        for i, (block, layer_past) in enumerate(zip(self.layers, past_key_values)):
+        for i, (block, past_key_value) in enumerate(zip(self.layers, past_key_values)):
             if self.gradient_checkpointing and self.training:
 
                 def create_custom_forward(module):
@@ -405,10 +332,10 @@ class GLMStack(torch.nn.Module):
             else:
                 outputs = block(
                     hidden_states,
-                    layer_past=layer_past,
+                    past_key_value=past_key_value,
                     attention_mask=attention_mask,
                     use_cache=use_cache,
-                    prefetch_kwargs=prefetch_kwargs
+                    decoding_kwargs=decoding_kwargs
                 )
 
             hidden_states = outputs[0]
@@ -430,6 +357,7 @@ class GLMStack(torch.nn.Module):
             last_hidden_state=hidden_states,
             past_key_values=presents,
         )
+
 
 class GLMPreTrainedModel(LookaheadPreTrainedModel):
     """
@@ -493,7 +421,6 @@ class GLMModel(GLMPreTrainedModel):
         # Initialize weights and apply final processing
         self.post_init()
 
-
     def forward(
             self,
             input_ids: Optional[torch.LongTensor] = None,
@@ -510,7 +437,7 @@ class GLMModel(GLMPreTrainedModel):
             output_attentions: Optional[bool] = None,
             output_hidden_states: Optional[bool] = None,
             return_dict: Optional[bool] = None,
-            prefetch_kwargs: Optional[Dict] = None,
+            decoding_kwargs: Optional[Dict] = None,
             inputs_embeds_position: Optional[int] = 1
     ) -> Union[Tuple, CausalLMOutputWithCrossAttentions]:
         r"""
@@ -524,15 +451,15 @@ class GLMModel(GLMPreTrainedModel):
         words_embeddings = self.word_embeddings(input_ids)
         if inputs_embeds is not None and past_key_values is None:
             length = inputs_embeds.size(1)
-            words_embeddings[:, inputs_embeds_position: inputs_embeds_position+length, :] = inputs_embeds
+            words_embeddings[:, inputs_embeds_position: inputs_embeds_position + length, :] = inputs_embeds
 
-        #adapt for quant
+        # adapt for quant
         input_shape = input_ids.size()
         device = input_ids.device if input_ids is not None else inputs_embeds.device
         if position_ids is None:
             position_ids = torch.arange(0, input_shape[-1], dtype=torch.long, device=device)
             block_position_ids = torch.zeros(input_shape[-1], dtype=torch.long, device=device)
-            position_ids = torch.stack((position_ids, block_position_ids), dim=0).unsqueeze(0)                                                                                  
+            position_ids = torch.stack((position_ids, block_position_ids), dim=0).unsqueeze(0)
         if attention_mask is None:
             attention_mask = torch.zeros((input_shape[0], 1, input_shape[-1], input_shape[-1]), device=device)
 
@@ -543,7 +470,7 @@ class GLMModel(GLMPreTrainedModel):
             position_ids=position_ids,
             inputs_embeds=inputs_embeds,
             use_cache=use_cache,
-            prefetch_kwargs=prefetch_kwargs
+            decoding_kwargs=decoding_kwargs
         )
         hidden_states = transformer_outputs[0]
 
@@ -574,29 +501,17 @@ class GLMModel(GLMPreTrainedModel):
             cross_attentions=transformer_outputs.cross_attentions,
         )
 
-    # def get_output_embeddings(self):
-    #     return self.lm_head
-
-    # def set_output_embeddings(self, new_embeddings):
-    #     self.lm_head = new_embeddings
-
-    # def get_input_embeddings(self):
-    #     return self.word_embeddings
-
-    # def set_input_embeddings(self, new_embeddings):
-    #     self.word_embeddings = new_embeddings
-
-
 class GLMForConditionalGeneration(GLMPreTrainedModel):
     _keys_to_ignore_on_load_missing = ['glm.lm_head.weight']
     _no_split_modules = []
+
     # base_model_prefix = "glm"
 
     def __init__(self, config):
         super().__init__(config)
         self.glm = GLMModel(config)
         self.post_init()
-        self.prefetch_cache = PrefetchCache()
+        self.lookahead_cache = LookaheadCache()
 
     def forward(
             self,
@@ -610,24 +525,23 @@ class GLMForConditionalGeneration(GLMPreTrainedModel):
             output_attentions: Optional[bool] = None,
             output_hidden_states: Optional[bool] = None,
             return_dict: Optional[bool] = None,
-            prefetch_kwargs: Optional[Dict] = None,
+            decoding_kwargs: Optional[Dict] = None,
             inputs_embeds_position: Optional[int] = 1
     ) -> Union[Tuple, CausalLMOutputWithCrossAttentions]:
 
         return self.glm(input_ids=input_ids,
-                         position_ids=position_ids,
-                         attention_mask=attention_mask,
-                         inputs_embeds_position=inputs_embeds_position,
-                         use_cache=use_cache,
-                         past_key_values=past_key_values,
-                         inputs_embeds=inputs_embeds,
-                         labels=labels,
-                         output_attentions=output_attentions,
-                         output_hidden_states=output_hidden_states,
-                         return_dict=return_dict,
-                         prefetch_kwargs=prefetch_kwargs
-                         )
-
+                        position_ids=position_ids,
+                        attention_mask=attention_mask,
+                        inputs_embeds_position=inputs_embeds_position,
+                        use_cache=use_cache,
+                        past_key_values=past_key_values,
+                        inputs_embeds=inputs_embeds,
+                        labels=labels,
+                        output_attentions=output_attentions,
+                        output_hidden_states=output_hidden_states,
+                        return_dict=return_dict,
+                        decoding_kwargs=decoding_kwargs
+                        )
 
     def prepare_inputs_for_generation(self, input_ids, past_key_values=None, inputs_embeds=None, **kwargs):
         attention_mask_cache = kwargs.get("attention_mask", None)
@@ -641,7 +555,7 @@ class GLMForConditionalGeneration(GLMPreTrainedModel):
             position_ids = position_ids_cache[:, :, :input_length]
         else:
             prefix_length = input_ids.size(-1) - 1
-            input_id_slice = input_ids[:,-1:]
+            input_id_slice = input_ids[:, -1:]
             fresh_length = 1
             ppl = prefix_length + fresh_length
             attention_mask = attention_mask_cache[:, :, prefix_length:ppl, :ppl]
@@ -677,7 +591,6 @@ class GLMForConditionalGeneration(GLMPreTrainedModel):
             model_kwargs: Dict[str, Any],
             is_encoder_decoder: bool = False,
             standardize_cache_format: bool = False,
-            prefetched: bool = False
     ) -> Dict[str, Any]:
         # update past_key_values
         model_kwargs["past_key_values"] = self._extract_past_from_model_output(
@@ -700,9 +613,7 @@ class GLMForConditionalGeneration(GLMPreTrainedModel):
         if "kwargs" in model_args or "model_kwargs" in model_args:
             model_args |= set(inspect.signature(self.forward).parameters)
         for key, value in model_kwargs.items():
-            if value is not None and key not in model_args and key not in (
-                    'use_prefetch', 'prefetch_size', 'prefetch_length', 'debug_prefetch', 'prefetch_kwargs',
-                    'inputs_embeds_position'):
+            if value is not None and key not in model_args and key not in ('decoding_kwargs', ):
                 unused_model_args.append(key)
 
         if unused_model_args:
@@ -723,5 +634,3 @@ class GLMForConditionalGeneration(GLMPreTrainedModel):
                 key.index_select(0, beam_idx.to(key.device)),
                 value.index_select(0, beam_idx.to(value.device))])
         return reordered_decoder_past
-
-
