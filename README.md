@@ -159,6 +159,8 @@ class LlamaModel(LlamaPreTrainedModel):
             )
 ```
 
+Note that the above adaption can not be used for batch inference, as generated token length of different samples may be varied. Adaption for batch 
+inference can be found in `models/modeling_glm_batch.py` or `models/modeling_llama_batch.py`. `Flash-attention` enhanced batch inference is on developing.
 
 ## Supported Models
 

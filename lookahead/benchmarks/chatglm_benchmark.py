@@ -58,7 +58,6 @@ worker.load_prompts(prompt_dir=prompt_dir)
 
 # runable check
 prompt = '杭州在哪里？'
-decoding_mode = 'hier'
 max_length = 256
 chat_count = 1000
 warmup_count = 10000
@@ -67,7 +66,6 @@ worker.chat(prompt,
             use_lookahead=False,
             decoding_length=15,
             branch_length=4,
-            decoding_mode=decoding_mode,
             debug_lookahead=False)
 
 # test correctness with lookahead decoding
@@ -75,12 +73,11 @@ worker.batch_chat(worker.prompts[:10],
                   max_length=max_length,
                   decoding_length=15,
                   branch_length=4,
-                  decoding_mode=decoding_mode,
                   debug_lookahead=False,
                   erase=True,
                   batch_size=1)
 
 worker.perf_check(worker.prompts[:chat_count], warmup_ids=worker.ids[chat_count:chat_count + warmup_count],
-                  decoding_mode=decoding_mode, sizes=[64], lens=[0], max_length=max_length)
+                  sizes=[64], lens=[0], max_length=max_length)
 worker.perf_check(worker.prompts[:chat_count], warmup_ids=worker.ids[chat_count:chat_count + warmup_count],
-                  decoding_mode=decoding_mode, sizes=[64], lens=[12], max_length=max_length)
+                  sizes=[64], lens=[12], max_length=max_length)
