@@ -4,7 +4,7 @@
 
   
 <p align="center">
-   A toolkit for accelerating LLM inference without painness. Currently it only contains LOOKAHEAD, a framework which accelerates LLM without loss of accuracy. It does not need an assist model (e.g., speculative) or retraining (e.g., parallel decoding) and could obtain remarkable acceleration.
+   A toolkit for accelerating LLM inference without painness. Currently it only contains `lookahead`, a framework which accelerates LLM inference without loss of accuracy, other works will release soon.
 </p>
 
 ## News or Update
@@ -79,7 +79,7 @@ response = tokenizer.decode(output_ids[0].tolist())
 print(f'{response=}')
 ```
 
-To use lookahead with other models, we can run the scripts in the path examples/.
+To use `lookahead` with other models, we can run the scripts in the path `examples/`.
 Each supported models are included and  can be used for correctness evaluation.
 
 ```shell
@@ -99,6 +99,12 @@ To evaluation speedup of `lookahead`, we can run the scrips in the path `benchma
 To support a customize model, usually we only need add a few lines, here is a example for supporting Llama:
 
 ```python
+
+from common.pretrained_model import LookaheadPreTrainedModel
+class LlamaPreTrainedModel(LookaheadPreTrainedModel):
+    '''
+    other code
+    '''
 
 class LlamaModel(LlamaPreTrainedModel):
 
@@ -156,7 +162,7 @@ class LlamaModel(LlamaPreTrainedModel):
 
 ## Supported Models
 
-We currently support Llama/OPT/Bloom/GPTJ/GPT2/Baichuan/ChatGLM/GLM/Qwen, we welcome contribution of supportment for other models.
+We currently support a range of models, including Llama, OPT, Bloom, GPTJ, GPT2, Baichuan, ChatGLM, GLM, and Qwen. We welcome contributions to extend support to additional models.
 
 ## Tests
 
@@ -164,9 +170,6 @@ Tests can be run with:
 ```shell
 pytest tests/ -s
 ```
-
-
-## Acknowledgement
 
 
 ## Citations
