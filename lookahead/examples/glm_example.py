@@ -3,25 +3,18 @@
 Copyright (c) Ant Financial Service Group and its affiliates.
 """
 
-from __future__ import print_function
 
 import sys
 import time
-
 import torch
 
 sys.path.append('..')
-sys.path.append('/ossfs/workspace/lookahead')
 from common.pretrained_model import LookaheadCache
-
-# os.environ['CUDA_VISIBLE_DEVICES'] = '0'
-# os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
-
 from models.glm.modeling_glm import GLMForConditionalGeneration
 from models.glm.tokenization_glm import GLMChineseTokenizer
 
 
-model_dir = '/mntnlp/nanxiao/lookahead_benchmark/antrag'
+model_dir = 'your/model/path'
 model = GLMForConditionalGeneration.from_pretrained(model_dir
                                                     , cache_dir='../'
                                                     , offload_folder='./'

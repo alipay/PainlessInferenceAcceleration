@@ -427,7 +427,7 @@ class LookaheadCache():
 
         return decoding_ids, decoding_masks, sizes
 
-    def block_get(self, token_ids, decoding_length=16, branch_length=8, min_input_size=0, min_output_size=0, mode='mix',
+    def par_get(self, token_ids, decoding_length=16, branch_length=8, min_input_size=0, min_output_size=0, mode='mix',
                   idx=0):
 
         output_ids, decoding_masks, decoding_lengths = self.trie_get(token_ids,

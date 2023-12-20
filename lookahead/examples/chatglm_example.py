@@ -3,23 +3,16 @@
 Copyright (c) Ant Financial Service Group and its affiliates.
 """
 
-from __future__ import print_function
-
 import sys
 import time
-
 import torch
 
 sys.path.append('..')
-sys.path.append('/ossfs/workspace/lookahead')
 from common.pretrained_model import LookaheadCache
 from models.chatglm.tokenization_chatglm import ChatGLMTokenizer
 from models.chatglm.modeling_chatglm import ChatGLMForConditionalGeneration
 
-# os.environ['CUDA_VISIBLE_DEVICES'] = '0'
-# os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
-
-model_dir = '/mntnlp/common_base_model/chatglm2'
+model_dir = 'your/model/path'
 
 tokenizer = ChatGLMTokenizer.from_pretrained(model_dir)
 model = ChatGLMForConditionalGeneration.from_pretrained(model_dir
@@ -32,7 +25,7 @@ lookahead_cache = LookaheadCache(eos=50005, stop_words={43359, 43360, 43361, 433
 model.lookahead_cache = lookahead_cache
 
 # prompt = "Hello, I'm am conscious and"
-prompt = "杭州在哪里？[gMASK]"
+prompt = "杭州在哪里？"
 
 inputs = model.build_inputs(tokenizer, prompt, history=[])
 input_ids = inputs.input_ids.cuda()

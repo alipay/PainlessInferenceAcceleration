@@ -4,25 +4,34 @@
 
   
 <p align="center">
-   A toolkit for LLM inference without painness. Currently it only contains `lookahead`, a framework which accelerates LLM inference without loss of accuracy, other works will release soon.
+   A toolkit for LLM inference without painness. Currently it only contains *lookahead*, a framework which accelerates LLM inference without loss of accuracy, other works will release soon.
 </p>
 
 ## News or Update
 
+TODO1: support the latest version  [🤗 transformers](https://github.com/huggingface/transformers) ]. Currently it's based on 4.30.2.
+
+TODO2: integrate our work [FastCoT](https://arxiv.org/pdf/2311.08263.pdf)
+
+TODO3: integrate our work [Pruning&Distilling](https://arxiv.org/abs/2312.05795)
+
 
 ## Performance Comparison
 
-| model  | dataset         | GPU           | hugging face | Lookahead |
-|---------------|---------------|---------------|-----------|-----------|
-| Antglm-10b      | AntRAG-8k     | 1xA100-80G    | 52.4         |  280.9(x5.36)     |
-| Llama2-chat-7b      | Dolly-15k      | 1xA100-80G    | 38.3         | 86.2(x2.25)     |
-| Llama2-chat-13b      | Dolly-15k      | 1xA100-80G    | 34.0         | 71.7(x2.00)     |
-| ChatGLM2-6b      | Dolly-15k      | 1xA100-80G    | 42.8         | 85.5(x2.11)     |
+| model          | dataset       | GPU           | 🤗 transformers | Lookahead    |
+|----------------|---------------|---------------|-----------------|--------------|
+| Antglm-10b     | AntRAG-8k     | A100-80G      | 52.4            |  280.9(x5.36)|
+| Llama2-chat-7b | Dolly-15k     | A100-80G      | 40.6            | 83.7(x2.06)  |
+| Llama2-chat-13b| Dolly-15k     | A100-80G      | 34.0            | 71.7(x2.00)  |
+| ChatGLM2-6b    | Dolly-15k     | A100-80G      | 41.6            | 88.1(x2.12)  |
+
+
+
 
 
 ## Introduction
 
-Our repo PIA (short for Painless Inference Acceleration) is used for LLM inference, it is based on transformers library of huggingface.co.
+Our repo PIA (short for Painless Inference Acceleration) is used for LLM inference, it is based on [🤗 transformers](https://github.com/huggingface/transformers)  library.
 
 PIA includes the following modules:
 - lookahead						# lookahead 
@@ -96,7 +105,11 @@ To evaluation speedup of `lookahead`, we can run the scripts in the path `benchm
 
 ## Customize Model
 
-To support a customize model, usually we only need add a few lines, here is a example for supporting Llama:
+<details>
+
+<summary>
+
+To support a customize model, usually we only need add a few lines, here is a example for supporting Llama: </summary>
 
 ```python
 
@@ -159,12 +172,16 @@ class LlamaModel(LlamaPreTrainedModel):
             )
 ```
 
+
 Note that the above adaption can not be used for batch inference, as generated token length of different samples may be varied. Adaption for batch 
 inference can be found in `models/modeling_glm_batch.py` or `models/modeling_llama_batch.py`. `Flash-attention` enhanced batch inference is on developing.
 
+</details>
+
+
 ## Supported Models
 
-We currently support a range of models, including Llama, OPT, Bloom, GPTJ, GPT2, Baichuan, ChatGLM, GLM, and Qwen. We welcome contributions to extend support to additional models.
+We currently support a range of models, including Llama, OPT, Bloom, GPTJ, GPT2, Baichuan, ChatGLM, GLM, and Qwen. We welcome contributions to extend support to additional models. 
 
 ## Tests
 

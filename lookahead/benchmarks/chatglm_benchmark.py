@@ -3,20 +3,13 @@
 Copyright (c) Ant Financial Service Group and its affiliates.
 """
 
-from __future__ import print_function
 
 import sys
-
 import torch
+from transformers import AutoTokenizer
 
 sys.path.append('..')
 from common.lookahead_cache import LookaheadCache
-
-# os.environ['CUDA_VISIBLE_DEVICES'] = '0'
-# os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
-
-from transformers import AutoTokenizer
-
 from benchmark import Benchmark
 
 
@@ -49,8 +42,8 @@ class ChatglmBenchmark(Benchmark):
         return input_ids, position_ids, attention_mask
 
 
-model_dir = '/mntnlp/common_base_model/chatglm2'
-prompt_dir = '/mntnlp/nanxiao/lookahead_benchmark/dolly_15k_llama2_13b_chat.jsonl'
+model_dir = 'your/model/path/chatglm2'
+prompt_dir = '../datasets/dolly_15k_llama2_13b_chat.jsonl'
 
 worker = ChatglmBenchmark(log_dir='chatglm_benchmark')
 worker.initialize(model_dir=model_dir, token_dir=model_dir)

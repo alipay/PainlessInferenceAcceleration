@@ -3,18 +3,13 @@
 Copyright (c) Ant Financial Service Group and its affiliates.
 """
 
-from __future__ import print_function
 
 import sys
-sys.path.append('..')
 import torch
-from common.lookahead_cache import LookaheadCache
-
-# os.environ['CUDA_VISIBLE_DEVICES'] = '0'
-# os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
-
 from transformers import AutoTokenizer
 
+sys.path.append('..')
+from common.lookahead_cache import LookaheadCache
 from benchmark import Benchmark
 
 
@@ -65,8 +60,8 @@ class GlmBenchmark(Benchmark):
         return input_ids, position_ids, attention_mask
 
 
-model_dir = '/mntnlp/nanxiao/lookahead_benchmark/antrag'
-prompt_dir = '/mntnlp/nanxiao/lookahead_benchmark/search_8k_antglm_10b.jsonl'
+model_dir = 'your/model/path/glm10b'
+prompt_dir = 'your/dataset'
 
 worker = GlmBenchmark(log_dir='antglm_benchmark')
 worker.initialize(model_dir=model_dir, token_dir=model_dir)

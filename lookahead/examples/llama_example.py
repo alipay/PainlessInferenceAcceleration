@@ -3,27 +3,19 @@
 Copyright (c) Ant Financial Service Group and its affiliates.
 """
 
-from __future__ import print_function
 
 import os
 import sys
 import time
 
 import torch
-
-sys.path.append('..')
-sys.path.append('/ossfs/workspace/lookahead')
-from common.lookahead_cache import LookaheadCache
-
-# os.environ['CUDA_VISIBLE_DEVICES'] = '0'
-# os.environ['CUDA_LAUNCH_BLOCKING'] = '0'
-# os.environ['TOKENIZERS_PARALLELISM'] = 'false'
-
 from transformers import AutoTokenizer
 
+sys.path.append('..')
+from common.lookahead_cache import LookaheadCache
 from models.llama.modeling_llama import LlamaForCausalLM
 
-model_dir = '/mntnlp/common_base_model/llama2-7b-chat'
+model_dir = 'meta-llama/Llama-2-7b-chat'
 dtype = torch.float16 if torch.cuda.is_available() else torch.float32
 model = LlamaForCausalLM.from_pretrained(model_dir
                                          , cache_dir='../'
