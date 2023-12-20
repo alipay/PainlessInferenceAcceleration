@@ -27,7 +27,7 @@ def rmsnorm_triton(x_ptr, rms_w_ptr, out_ptr,
     offset_m = pid_batch * stride_x_batch + pid_m * stride_x_m
     block_n_size = tl.arange(0, BLOCK_N_SIZE)
     var = tl.zeros((BLOCK_N_SIZE,), tl.float32)
-    # parallel between blocks
+
     for block_n_strart_ptr in range(0, N_SIZE, BLOCK_N_SIZE):
         offset_n = block_n_strart_ptr + block_n_size
         x_ptr_mask = offset_n < N_SIZE
@@ -35,7 +35,7 @@ def rmsnorm_triton(x_ptr, rms_w_ptr, out_ptr,
         var += tl.math.pow(x.to(tl.float32), 2)
 
     # tl.device_print("var: ", var) 
-    var = tl.sum(var, axis=0) / N_SIZE  # reduce between wrap
+    var = tl.sum(var, axis=0) / N_SIZE  # reduce 
     std = tl.math.rsqrt(var + eps)
     # tl.device_print("var: ", var)
 
