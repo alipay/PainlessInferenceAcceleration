@@ -13,7 +13,6 @@ TODO1: support the latest version  [🤗 transformers](https://github.com/huggin
 
 TODO2: integrate our work [FastCoT](https://arxiv.org/pdf/2311.08263.pdf)
 
-TODO3: integrate our work [Pruning&Distilling](https://arxiv.org/abs/2312.05795)
 
 
 ## Performance Comparison
