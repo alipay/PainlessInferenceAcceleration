@@ -5,7 +5,7 @@
 
   
 <p align="center">
-   A toolkit for LLM inference without painness. Currently it only contains *lookahead*, a framework which accelerates LLM inference without loss of accuracy, other works will release soon.
+   A toolkit for LLM inference without 😭 . Currently it contains our work LOOKAHEAD, a framework which accelerates LLM inference without loss of accuracy, other works will release soon.
 </p>
 
 ## News or Update
@@ -48,14 +48,17 @@ AntGLM-10B is a LLM developed by Ant Group with [GLM](https://huggingface.co/THU
 
 Our repo PIA (short for Painless Inference Acceleration) is used for LLM inference, it is based on [🤗 transformers](https://github.com/huggingface/transformers)  library.
 
-PIA includes the following modules:
-- lookahead						# lookahead 
-- lookahead/benchmarks          # benchmarks for several models, used for speed test and hyper-parameter tuning
-- lookahead/common              # fundamental classes for lookahead
-- lookahead/models			    # models supported by lookahead
-- lookahead/examples            # minimum usage examples
-- lookahead/tests			    # test cases
-- requirements.txt
+It uses an on-the-fly trie-tree cache to prepare hierarchical multi-branch drafts, without the demand for assist models (e.g., speculative decoding) or additional head training (e.g., block decoding). 
+With the efficient hierarchical structure, we can lookahead tens fo branches, therefore significantly improve generated tokens in a forward pass.
+
+Note that our work is different from the other method named [lookahead decoding](https://github.com/hao-ai-lab/LookaheadDecoding). 
+
+
+### hierarchical multi-branch draft
+
+<img src="./lookahead/etc/draft.png" width="50%">
+
+
 
 
 ## Lincense （使用协议）
