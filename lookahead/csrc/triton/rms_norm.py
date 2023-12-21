@@ -12,6 +12,11 @@ def rmsnorm_torch(x: torch.Tensor, rms_weights: torch.Tensor, eps=1e-6) -> torch
     x = x * torch.rsqrt(x.pow(2).mean(-1, keepdim=True) + eps)
     return x * rms_weights
 
+def rmsnorm_torch_precise(x: torch.Tensor, rms_weights: torch.Tensor, eps=1e-6) -> torch.Tensor:
+    input_dtype = x.dtype
+    variance = x.to(torch.float32).pow(2).mean(-1, keepdim=True)
+    x = x * torch.rsqrt(variance + eps)
+    return (rms_weights * x).to(input_dtype)
 
 @triton.jit
 def rmsnorm_triton(x_ptr, rms_w_ptr, out_ptr,
@@ -21,7 +26,6 @@ def rmsnorm_triton(x_ptr, rms_w_ptr, out_ptr,
                    N_SIZE: tl.constexpr, eps: tl.constexpr, BLOCK_N_SIZE: tl.constexpr):
     pid_batch = tl.program_id(0)
     pid_m = tl.program_id(1)
-    # tl.device_print("stride_x_batch: ", stride_x_batch)
 
     # parallel at m dimention
     offset_m = pid_batch * stride_x_batch + pid_m * stride_x_m
@@ -34,10 +38,8 @@ def rmsnorm_triton(x_ptr, rms_w_ptr, out_ptr,
         x = tl.load(x_ptr + offset_m + offset_n * stride_x_k, mask=x_ptr_mask, other=0.)  # careful stride_x_k
         var += tl.math.pow(x.to(tl.float32), 2)
 
-    # tl.device_print("var: ", var) 
     var = tl.sum(var, axis=0) / N_SIZE  # reduce 
     std = tl.math.rsqrt(var + eps)
-    # tl.device_print("var: ", var)
 
     for block_n_strart_ptr in range(0, N_SIZE, BLOCK_N_SIZE):
         offset_n = block_n_strart_ptr + block_n_size
@@ -54,11 +56,7 @@ def rmsnorm_triton(x_ptr, rms_w_ptr, out_ptr,
 
 def rmsnorm_wrapper(x, rms_weights, eps=1e-6):
     batch, M, K = x.shape
-    # print(x.shape) #1, 1000, 4096
-    # assert rms_weights.shape[-1] == K
     out = torch.empty_like(x)
-    # print(x.stride())
-    # print(out.stride())
     rmsnorm_triton[(batch, M,)](x, rms_weights, out,
                                 *x.stride(),  # 4096000 4096 1
                                 *rms_weights.stride(),  # 1
