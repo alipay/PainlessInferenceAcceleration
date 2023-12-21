@@ -17,15 +17,30 @@ TODO2: integrate our work [FastCoT](https://arxiv.org/pdf/2311.08263.pdf)
 
 ## Performance Comparison
 
+Performance is measured by token/s(tokens per second) of generation tokens.
+
+### Public datasets and models
+
 | model          | dataset       | GPU           | 🤗 transformers | Lookahead    |
 |----------------|---------------|---------------|-----------------|--------------|
-| Antglm-10b     | AntRAG-8k     | A100-80G      | 52.4            |  280.9(x5.36)|
 | Llama2-chat-7b | Dolly-15k     | A100-80G      | 40.6            | 83.7(x2.06)  |
 | Llama2-chat-13b| Dolly-15k     | A100-80G      | 34.0            | 71.7(x2.00)  |
 | ChatGLM2-6b    | Dolly-15k     | A100-80G      | 41.6            | 88.1(x2.12)  |
+| Llama2-chat-7b | GSM-8k        | A100-80G      | 41.4            | 111.3(x2.69) |
+| Llama2-chat-13b| GSM-8k        | A100-80G      | 31.2            | 71.1(x2.28)  |
+| ChatGLM2-6b    | GSM-8k        | A100-80G      | 43.9            | 89.2(x2.03)  |
 
 
+### Private datasets and models
 
+Our method could obtain significant acceleration in RAG (Retrieval Augmented Generation) scenarios. However, there is no real-life datasets avaiable currently. Therefore, we only evaluate on our private datasets and models. 
+AntGLM-10B is a LLM developed by Ant Group with [GLM](https://huggingface.co/THUDM/glm-10b-chinese) architecture. 
+
+| model          | scenarios       | GPU           | 🤗 transformers | Lookahead    |
+|----------------|---------------|---------------|-----------------|--------------|
+| AntGLM-10b     | Citizen Biz Agent     | A100-80G      | 52.4            | 280.9(x5.36) |
+| AntGLM-10b     | Enterprise Info QA    | A100-80G      | 50.7            | 259.1(x5.11) |
+| AntGLM-10b     | Health Suggestion     | A100-80G      | 51.6            | 240.2(x4.66) |
 
 
 ## Introduction
@@ -191,3 +206,12 @@ pytest tests/ -s
 
 
 ## Citations
+
+@misc{zhao2023lookahead,
+      title={Lookahead: An Inference Acceleration Framework for Large Language Model with Lossless Generation Accuracy}, 
+      author={Yao Zhao and Zhitian Xie and Chenyi Zhuang and Jinjie Gu},
+      year={2023},
+      eprint={2312.12728},
+      archivePrefix={arXiv},
+      primaryClass={cs.IR}
+}
