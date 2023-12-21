@@ -56,8 +56,11 @@ Note that our work is different from the other method named [lookahead decoding]
 
 ### hierarchical multi-branch draft
 
-<img src="./lookahead/etc/draft.png" width="50%">
+<div align=center>
 
+<img src="./lookahead/etc/draft.png" width="100%">
+
+</div>
 
 
 
