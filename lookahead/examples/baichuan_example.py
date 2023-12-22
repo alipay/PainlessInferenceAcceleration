@@ -11,13 +11,15 @@ import torch
 from transformers import AutoTokenizer
 
 
-sys.path.append('..')
-from common.lookahead_cache import LookaheadCache
-from models.baichuan.modeling_baichuan import BaichuanForCausalLM
-from models.baichuan.tokenization_baichuan import BaichuanTokenizer
+# sys.path.append('..')
+from lookahead.common.lookahead_cache import LookaheadCache
+from lookahead.models.baichuan.modeling_baichuan import BaichuanForCausalLM
+from lookahead.models.baichuan.tokenization_baichuan import BaichuanTokenizer
 from transformers.generation.utils import GenerationConfig
 
-model_dir = 'your/model/path'
+# model_dir = 'your/model/path'
+model_dir = '/mntnlp/common_base_model/Baichuan2-7B-Chat'
+
 dtype = torch.float16 if torch.cuda.is_available() else torch.float32
 model = BaichuanForCausalLM.from_pretrained(model_dir
                                             , cache_dir='../'

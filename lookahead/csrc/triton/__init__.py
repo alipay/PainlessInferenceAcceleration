@@ -1,4 +1,1 @@
-# -*- coding: utf-8 -*-
-"""
-Copyright (c) Ant Financial Service Group and its affiliates.
-"""
+from .rms_norm import rmsnorm_wrapper, rmsnorm_torch_precise
