@@ -5,11 +5,11 @@ Copyright (c) Ant Financial Service Group and its affiliates.
 
 import sys
 
-sys.path.append('../../lookahead')
+# sys.path.append('../../lookahead')
 import unittest
 import numpy as np
 
-from common.lookahead_cache import Tree
+from lookahead.common.lookahead_cache import Tree
 
 
 class TestsCache(unittest.TestCase):

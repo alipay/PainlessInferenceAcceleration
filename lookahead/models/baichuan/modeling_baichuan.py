@@ -37,9 +37,9 @@ from transformers.generation.utils import GenerationConfig
 from transformers.modeling_outputs import BaseModelOutputWithPast, CausalLMOutputWithPast
 from transformers.utils import logging, ContextManagers
 
-from common.pretrained_model import LookaheadPreTrainedModel
-from models.baichuan.configuration_baichuan import BaichuanConfig
-from models.baichuan.generation_utils import build_chat_input, TextIterStreamer
+from lookahead.common.pretrained_model import LookaheadPreTrainedModel
+from lookahead.models.baichuan.configuration_baichuan import BaichuanConfig
+from lookahead.models.baichuan.generation_utils import build_chat_input, TextIterStreamer
 
 logger = logging.get_logger(__name__)
 

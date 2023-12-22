@@ -39,8 +39,8 @@ from transformers.utils import ModelOutput, logging
 logger = logging.get_logger(__name__)
 
 from transformers.generation.configuration_utils import GenerationConfig
-from common.lookahead_cache import LookaheadCache
-from common.lookahead_generation_utils import GenerationMode, LookaheadDecoderOnlyOutput
+from lookahead.common.lookahead_cache import LookaheadCache
+from lookahead.common.lookahead_generation_utils import GenerationMode, LookaheadDecoderOnlyOutput
 
 
 class LookaheadPreTrainedModel(PreTrainedModel):

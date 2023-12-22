@@ -2,16 +2,17 @@
 """
 Copyright (c) Ant Financial Service Group and its affiliates.
 """
-
 import sys
 
-sys.path.append('../../lookahead')
+# sys.path.append('../../lookahead')
 import torch
 import unittest
 import triton
 
-from csrc.triton.rms_norm import rmsnorm_wrapper, rmsnorm_torch_precise
-
+# from csrc.triton.rms_norm import rmsnorm_wrapper, rmsnorm_torch_precise
+# import lookahead
+# from lookahead.csrc.triton.rms_norm import rmsnorm_wrapper, rmsnorm_torch_precise
+from lookahead.csrc import rmsnorm_wrapper, rmsnorm_torch_precise
 
 class TestsCache(unittest.TestCase):
 
