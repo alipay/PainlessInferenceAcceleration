@@ -22,17 +22,25 @@ Performance is measured by token/s(tokens per second) of generation tokens.
 
 ### Public datasets and models
 
-| model          | dataset       | GPU           | 🤗 transformers | Lookahead    |
-|----------------|---------------|---------------|-----------------|--------------|
-| Llama2-chat-7b | Dolly-15k     | A100-80G      | 40.6            | 83.7(x2.06)  |
-| Llama2-chat-13b| Dolly-15k     | A100-80G      | 34.0            | 71.7(x2.00)  |
-| ChatGLM2-6b    | Dolly-15k     | A100-80G      | 41.6            | 88.1(x2.12)  |
-| Llama2-chat-7b | GSM-8k        | A100-80G      | 41.4            | 111.3(x2.69) |
-| Llama2-chat-13b| GSM-8k        | A100-80G      | 31.2            | 71.1(x2.28)  |
-| ChatGLM2-6b    | GSM-8k        | A100-80G      | 43.9            | 89.2(x2.03)  |
+We use the first 1000 samples for evaluation and the rest for trie-tree cache construction. The hyper-parameters are `decoding_length=64` and `branch_lenght=8`. 
+
+| model                  | dataset       | GPU           | 🤗 transformers | lookahead    |
+|------------------------|---------------|---------------|-----------------|--------------|
+| Llama2-chat-7b         | Dolly-15k     | A100-80G      | 40.6            | 83.7(x2.06)  |
+| Llama2-chat-7b+op_fuse | Dolly-15k     | A100-80G      | 50.4            | 106.8(x2.12) |
+| Llama2-chat-13b        | Dolly-15k     | A100-80G      | 34.0            | 71.7(x2.11)  |
+| Llama2-chat-13b+op_fuse| Dolly-15k     | A100-80G      | 39.9            | 84.6(x2.12)  |
+| ChatGLM2-6b            | Dolly-15k     | A100-80G      | 45.6            | 108.4(x2.38) |
+| Llama2-chat-7b         | GSM-8k        | A100-80G      | 41.4            | 111.3(x2.69) |
+| Llama2-chat-7b+op_fuse | GSM-8k        | A100-80G      | 53.7            | 149.6(x2.79) |
+| Llama2-chat-13b        | GSM-8k        | A100-80G      | 31.2            | 71.1(x2.28)  |
+| Llama2-chat-13b+op_fuse| GSM-8k        | A100-80G      | 42.9            | 103.4(x2.41) |
+| ChatGLM2-6b            | GSM-8k        | A100-80G      | 43.3            | 94.0(x2.17)  |
 
 
 ### Private datasets and models
+
+We use the first 1000 samples for evaluation and the rest for trie-tree cache construction. The hyper-parameters are `decoding_length=128` and `branch_lenght=32`.
 
 Our method could obtain significant acceleration in RAG (Retrieval Augmented Generation) scenarios. However, there is no real-life datasets avaiable currently. Therefore, we only evaluate on our private datasets and models. 
 AntGLM-10B is a LLM developed by Ant Group with [GLM](https://huggingface.co/THUDM/glm-10b-chinese) architecture. 
@@ -58,7 +66,7 @@ Note that our work is different from the other method named [lookahead decoding]
 
 <div align=center>
 
-<img src="./lookahead/etc/draft.png" width="100%">
+<img src="./pia/lookahead/figures/draft.png" width="100%">
 
 </div>
 
