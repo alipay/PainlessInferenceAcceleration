@@ -11,10 +11,10 @@ import torch
 from transformers import AutoTokenizer
 from transformers.generation import GenerationConfig
 
-sys.path.append('..')
-from common.pretrained_model import LookaheadCache
-from models.qwen.modeling_qwen import QWenLMHeadModel
-from models.qwen.tokenization_qwen import QWenTokenizer
+# sys.path.append('..')
+from pia.common.pretrained_model import LookaheadCache
+from pia.models.qwen.modeling_qwen import QWenLMHeadModel
+from pia.models.qwen.tokenization_qwen import QWenTokenizer
 
 model_dir = 'your/model/path'
 dtype = torch.float16 if torch.cuda.is_available() else torch.float32

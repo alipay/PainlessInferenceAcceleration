@@ -22,7 +22,7 @@ from transformers.modeling_outputs import (
     CausalLMOutputWithPast,
 )
 # from transformers.modeling_utils import PreTrainedModel
-from common.pretrained_model import LookaheadPreTrainedModel
+from pia.common.pretrained_model import LookaheadPreTrainedModel
 from transformers.utils import logging
 
 try:

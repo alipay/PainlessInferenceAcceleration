@@ -8,10 +8,10 @@ import sys
 import time
 import torch
 
-sys.path.append('..')
-from common.pretrained_model import LookaheadCache
-from models.glm.modeling_glm import GLMForConditionalGeneration
-from models.glm.tokenization_glm import GLMChineseTokenizer
+# sys.path.append('..')
+from pia.common.pretrained_model import LookaheadCache
+from pia.models.glm.modeling_glm import GLMForConditionalGeneration
+from pia.models.glm.tokenization_glm import GLMChineseTokenizer
 
 
 model_dir = 'your/model/path'

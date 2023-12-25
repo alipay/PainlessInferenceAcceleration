@@ -12,7 +12,7 @@ import triton
 # from csrc.triton.rms_norm import rmsnorm_wrapper, rmsnorm_torch_precise
 # import lookahead
 # from lookahead.csrc.triton.rms_norm import rmsnorm_wrapper, rmsnorm_torch_precise
-from lookahead.csrc import rmsnorm_wrapper, rmsnorm_torch_precise
+from pia.csrc import rmsnorm_wrapper, rmsnorm_torch_precise
 
 class TestsCache(unittest.TestCase):
 

@@ -8,7 +8,7 @@ from typing import Optional, Tuple, List, Callable, Dict, Any
 import torch
 import torch.nn.functional as F
 import torch.utils.checkpoint
-from models.chatglm.configuration_chatglm import ChatGLMConfig
+from pia.models.chatglm.configuration_chatglm import ChatGLMConfig
 from torch import nn
 from torch.nn import CrossEntropyLoss, LayerNorm
 from torch.nn.utils import skip_init
@@ -21,7 +21,7 @@ from transformers.modeling_outputs import (
 from transformers.utils import logging
 
 # from transformers.modeling_utils import PreTrainedModel
-from common.pretrained_model import LookaheadPreTrainedModel
+from pia.common.pretrained_model import LookaheadPreTrainedModel
 
 # flags required to enable jit fusion kernels
 

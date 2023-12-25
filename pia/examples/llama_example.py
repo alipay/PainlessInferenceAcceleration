@@ -11,9 +11,9 @@ import time
 import torch
 from transformers import AutoTokenizer
 
-sys.path.append('..')
-from common.lookahead_cache import LookaheadCache
-from models.llama.modeling_llama import LlamaForCausalLM
+# sys.path.append('..')
+from pia.common.lookahead_cache import LookaheadCache
+from pia.models.llama.modeling_llama import LlamaForCausalLM
 
 model_dir = 'meta-llama/Llama-2-7b-chat'
 dtype = torch.float16 if torch.cuda.is_available() else torch.float32

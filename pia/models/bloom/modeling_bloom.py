@@ -36,7 +36,7 @@ from transformers.models.bloom.configuration_bloom import BloomConfig
 from transformers.utils import logging
 
 # from transformers.modeling_utils import PreTrainedModel
-from common.pretrained_model import LookaheadPreTrainedModel
+from pia.common.pretrained_model import LookaheadPreTrainedModel
 
 logger = logging.get_logger(__name__)
 

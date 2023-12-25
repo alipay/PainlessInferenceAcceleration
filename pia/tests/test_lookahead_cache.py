@@ -9,7 +9,7 @@ import sys
 import unittest
 import numpy as np
 
-from lookahead.common.lookahead_cache import Tree
+from pia.common.lookahead_cache import Tree
 
 
 class TestsCache(unittest.TestCase):
