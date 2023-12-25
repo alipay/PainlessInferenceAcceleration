@@ -9,13 +9,14 @@ import sys
 import time
 import torch
 
-# sys.path.append('..')
 
 from pia.lookahead.common.lookahead_cache import LookaheadCache
 from pia.lookahead.models.glm.tokenization_glm import GLMChineseTokenizer
 from pia.lookahead.models.glm.modeling_glm_batch import GLMForConditionalGeneration
+from pia.lookahead.examples import local_path_dict
 
-model_dir = 'your/model/path'
+model_dir = local_path_dict.get('glm', 'your/model/path') 
+
 model = GLMForConditionalGeneration.from_pretrained(model_dir
                                                     , cache_dir='../'
                                                     , offload_folder='./'

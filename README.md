@@ -65,11 +65,8 @@ Note that our work is different from the other method named [lookahead decoding]
 ### hierarchical multi-branch draft
 
 <div align=center>
-
 <img src="./pia/lookahead/figures/draft.png" width="100%">
-
 </div>
-
 
 
 ## Lincense （使用协议）
@@ -87,14 +84,12 @@ Below is an example for the simplest use of `lookahead` to inference:
 
 ```python
 
-import sys
 import torch
 from transformers import AutoTokenizer
 
 
-sys.path.append('.') 
-from common.lookahead_cache import LookaheadCache
-from models.llama.modeling_llama import LlamaForCausalLM
+from pia.lookahead.common.lookahead_cache import LookaheadCache
+from pia.lookahead.models.llama.modeling_llama import LlamaForCausalLM
 
 model_dir = 'meta-llama/Llama-2-7b-chat-hf'
 model = LlamaForCausalLM.from_pretrained(model_dir
@@ -121,10 +116,10 @@ To use `lookahead` with other models, we can run the scripts in the path `exampl
 Each supported models are included and  can be used for correctness evaluation.
 
 ```shell
-git clone xxx
-cd pia
-pip install -r requirements.txt
-cd lookahead/examples
+git clone https://github.com/alipay/PainlessInferenceAcceleration.git
+cd PainlessInferenceAcceleration
+python setup.py install
+cd pia/lookahead/examples
 python llama_example.py
 ```
 

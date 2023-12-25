@@ -8,8 +8,7 @@ import sys
 import torch
 from transformers import AutoTokenizer
 
-sys.path.append('..')
-from common.lookahead_cache import LookaheadCache
+from pia.lookahead.common.lookahead_cache import LookaheadCache
 from benchmark import Benchmark
 
 
@@ -60,25 +59,22 @@ class GlmBenchmark(Benchmark):
         return input_ids, position_ids, attention_mask
 
 
-model_dir = 'your/model/path/glm10b'
-prompt_dir = 'your/dataset'
+model_dir = 'your/model/path'
+"""
+generate answers first if only prompts are available, answers in the warmup samples are used for constructing trie-tree cache
+prompt_dir = 'your/prompt/dir'
+dataset_dir = 'your/answer/dir'
+worker.save_answers(prompt_dir, answer_dir, prompt_name='your/prompt/field/name', batch_size=1, max_count=None)
+"""
+dataset_dir = 'your/dataset/path'
 
 worker = GlmBenchmark(log_dir='antglm_benchmark')
 worker.initialize(model_dir=model_dir, token_dir=model_dir)
-worker.load_prompts(prompt_dir=prompt_dir)
+worker.load_prompts(prompt_dir=dataset_dir)
 
-prompt = '杭州在哪里？'
 max_length = 256
 chat_count = 1000
 warmup_count = 10000
-
-# runable check
-worker.chat(prompt,
-            max_length=max_length,
-            use_lookahead=False,
-            decoding_length=15,
-            branch_length=4,
-            debug_lookahead=False)
 
 # test correctness with lookahead decoding
 worker.batch_chat(worker.prompts[:10],

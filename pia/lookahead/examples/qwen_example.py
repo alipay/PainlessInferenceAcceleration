@@ -11,12 +11,13 @@ import torch
 from transformers import AutoTokenizer
 from transformers.generation import GenerationConfig
 
-# sys.path.append('..')
 from pia.lookahead.common.pretrained_model import LookaheadCache
 from pia.lookahead.models.qwen.modeling_qwen import QWenLMHeadModel
 from pia.lookahead.models.qwen.tokenization_qwen import QWenTokenizer
+from pia.lookahead.examples import local_path_dict
 
-model_dir = 'your/model/path'
+model_dir = local_path_dict.get('qwen', 'your/model/path') 
+
 dtype = torch.float16 if torch.cuda.is_available() else torch.float32
 model = QWenLMHeadModel.from_pretrained(model_dir
                                        , cache_dir='../'
@@ -35,7 +36,7 @@ model.lookahead_cache = lookahead_cache
 prompt = "杭州在哪里？"
 device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
 
-for use_lookahead in [False, False, True]:
+for use_lookahead in [False, False, True, True]:
     debug_lookahead = False
     decoding_length = 64
     branch_length = 12
