@@ -9,7 +9,7 @@ with pathlib.Path("requirements.txt").open() as f:
 
 
 setup(
-    name="lookahead",
+    name="pia",
     version="0.0.2",
     license="CC-BY-4.0",
     license_files=("LICENSE",),
