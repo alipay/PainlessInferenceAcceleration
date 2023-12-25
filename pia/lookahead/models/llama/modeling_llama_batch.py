@@ -35,11 +35,8 @@ from transformers.utils import add_start_docstrings, add_start_docstrings_to_mod
     replace_return_docstrings
 
 # from transformers.modeling_utils import PreTrainedModel
-from common.pretrained_model_batch import LookaheadPreTrainedModel
-# from flash_attn import flash_attn_qkvpacked_func, flash_attn_func, flash_attn_with_kvcache
-# from atorch.modules.transformer.layers import flash_attn_with_mask_bias
-# from flash_attn.flash_attn_triton import _flash_attn_forward
-from csrc.triton.rms_norm import rmsnorm_wrapper
+from pia.lookahead.common.pretrained_model_batch import LookaheadPreTrainedModel
+from pia.lookahead.csrc.triton.rms_norm import rmsnorm_wrapper
 
 os.environ['TOKENIZERS_PARALLELISM'] = 'false'
 

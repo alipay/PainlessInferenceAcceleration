@@ -9,16 +9,15 @@ import time
 
 import torch
 from transformers import AutoTokenizer
+from transformers.generation.utils import GenerationConfig
 
 
-# sys.path.append('..')
 from pia.lookahead.common.lookahead_cache import LookaheadCache
 from pia.lookahead.models.baichuan.modeling_baichuan import BaichuanForCausalLM
 from pia.lookahead.models.baichuan.tokenization_baichuan import BaichuanTokenizer
-from transformers.generation.utils import GenerationConfig
+from pia.lookahead.examples import local_path_dict
 
-model_dir = 'your/model/path'
-model_dir = '/mntnlp/common_base_model/Baichuan2-7B-Chat'
+model_dir = local_path_dict.get('baichuan', 'your/model/path') 
 
 dtype = torch.float16 if torch.cuda.is_available() else torch.float32
 model = BaichuanForCausalLM.from_pretrained(model_dir

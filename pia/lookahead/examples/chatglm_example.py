@@ -7,13 +7,12 @@ import sys
 import time
 import torch
 
-# sys.path.append('..')
 from pia.lookahead.common.pretrained_model import LookaheadCache
 from pia.lookahead.models.chatglm.tokenization_chatglm import ChatGLMTokenizer
 from pia.lookahead.models.chatglm.modeling_chatglm import ChatGLMForConditionalGeneration
+from pia.lookahead.examples import local_path_dict
 
-# model_dir = 'your/model/path'
-model_dir = '/mntnlp/common_base_model/chatglm2'
+model_dir = local_path_dict.get('chatglm', 'your/model/path') 
 
 tokenizer = ChatGLMTokenizer.from_pretrained(model_dir)
 model = ChatGLMForConditionalGeneration.from_pretrained(model_dir

@@ -8,15 +8,17 @@ import sys
 import torch
 from transformers import AutoTokenizer
 
-sys.path.append('..')
-from common.lookahead_cache import LookaheadCache
+from pia.lookahead.common.lookahead_cache import LookaheadCache
 from benchmark import Benchmark
 
 
 class LlameBenchmark(Benchmark):
 
     def initialize(self, model_dir=None, token_dir=None, **kwargs):
-        from models.llama.modeling_llama import LlamaForCausalLM
+        # org version for llama
+        # from models.llama.modeling_llama import LlamaForCausalLM
+        # fused op version for llama
+        from models.llama.modeling_llama_batch import LlamaForCausalLM 
         model = LlamaForCausalLM.from_pretrained(model_dir
                                                  , cache_dir='../'
                                                  , torch_dtype=torch.float16
@@ -34,25 +36,22 @@ class LlameBenchmark(Benchmark):
         self.eop = None
 
 
-model_dir = 'your/model/path/llama2-7b-chat'
-prompt_dir = '../datasets/dolly_15k_llama2_13b_chat.jsonl'
+model_dir = 'your/model/path'
+"""
+generate answers first if only prompts are available, answers in the warmup samples are used for constructing trie-tree cache
+prompt_dir = 'your/prompt/dir'
+dataset_dir = 'your/answer/dir'
+worker.save_answers(prompt_dir, dataset_dir, prompt_name='your/prompt/field/name', batch_size=1, max_count=None)
+"""
+dataset_dir = '../datasets/gsm_8k_llama2_7b_chat.jsonl'
 
-worker = LlameBenchmark(log_dir='llama_benchmakr')
+worker = LlameBenchmark(log_dir='llama_benchmark')
 worker.initialize(model_dir=model_dir, token_dir=model_dir)
-worker.load_prompts(prompt_dir=prompt_dir)
+worker.load_prompts(prompt_dir=dataset_dir)
 
-# runable check
-prompt = '杭州在哪里？'
 max_length = 256
 chat_count = 1000
 warmup_count = 10000
-
-worker.chat(prompt,
-            max_length=max_length,
-            use_lookahead=False,
-            decoding_length=15,
-            branch_length=4,
-            debug_lookahead=False)
 
 # test correctness with lookahead decoding
 worker.batch_chat(worker.prompts[:10],

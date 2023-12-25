@@ -10,11 +10,12 @@ import time
 import torch
 from transformers import AutoTokenizer
 
-# sys.path.append('..')
 from pia.lookahead.common.pretrained_model import LookaheadCache
 from pia.lookahead.models.gptj.modeling_gptj import GPTJForCausalLM
+from pia.lookahead.examples import local_path_dict
 
-model_dir = 'your/model/path'
+model_dir = local_path_dict.get('gptj', 'your/model/path') 
+
 dtype = torch.float16 if torch.cuda.is_available() else torch.float32
 model = GPTJForCausalLM.from_pretrained(model_dir
                                        , cache_dir='../'
