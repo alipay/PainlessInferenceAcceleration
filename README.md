@@ -62,11 +62,13 @@ With the efficient hierarchical structure, we can lookahead tens fo branches, th
 Note that our work is different from the other method named [lookahead decoding](https://github.com/hao-ai-lab/LookaheadDecoding). 
 
 
-### hierarchical multi-branch draft
+### Hierarchical multi-branch draft
 
-<div align=center>
+<!-- <div align=center>
 <img src="./pia/lookahead/figures/draft.png" width="100%">
-</div>
+</div> -->
+
+![draft](./pia/lookahead/figures/draft.png)
 
 
 ## Lincense （使用协议）
