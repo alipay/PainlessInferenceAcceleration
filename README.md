@@ -64,11 +64,11 @@ Note that our work is different from the other method named [lookahead decoding]
 
 ### Hierarchical multi-branch draft
 
-<!-- <div align=center>
-<img src="./pia/lookahead/figures/draft.png" width="100%">
-</div> -->
-
+<div align=center>
+<!-- <img src="./pia/lookahead/figures/draft.png" width="100%"> -->
 ![draft](./pia/lookahead/figures/draft.png)
+</div>
+
 
 
 ## Lincense （使用协议）
