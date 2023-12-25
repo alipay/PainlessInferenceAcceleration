@@ -10,9 +10,9 @@ import time
 import torch
 from transformers import AutoTokenizer
 
-sys.path.append('..')
-from common.pretrained_model import LookaheadCache
-from models.gpt2.modeling_gpt2 import GPT2LMHeadModel
+# sys.path.append('..')
+from pia.common.pretrained_model import LookaheadCache
+from pia.models.gpt2.modeling_gpt2 import GPT2LMHeadModel
 
 model_dir = 'your/model/path'
 dtype = torch.float16 if torch.cuda.is_available() else torch.float32

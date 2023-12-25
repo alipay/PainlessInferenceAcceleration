@@ -35,8 +35,8 @@ from transformers.utils import (
 )
 
 # from transformers.modeling_utils import PreTrainedModel, SequenceSummary
-from common.pretrained_model import LookaheadPreTrainedModel, LookaheadCache
-from models.glm.configuration_glm import GLMConfig
+from pia.common.pretrained_model import LookaheadPreTrainedModel, LookaheadCache
+from pia.models.glm.configuration_glm import GLMConfig
 
 logger = logging.get_logger(__name__)
 

@@ -11,9 +11,9 @@ import time
 import torch
 from transformers import AutoTokenizer
 
-sys.path.append('..')
-from common.pretrained_model import LookaheadCache
-from models.opt.modeling_opt import OPTForCausalLM
+# sys.path.append('..')
+from pia.common.pretrained_model import LookaheadCache
+from pia.models.opt.modeling_opt import OPTForCausalLM
 
 model_dir = 'your/model/path'
 
