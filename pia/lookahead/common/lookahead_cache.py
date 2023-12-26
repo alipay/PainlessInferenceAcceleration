@@ -342,6 +342,8 @@ class LookaheadCache():
         self.default_mask = np.ones((1, 1), dtype=np.int64)
 
     def put(self, token_ids, branch_length=8, final=False, mode='output', idx=-1):
+        if self.eos in token_ids:
+            token_ids = token_ids[:token_ids.index(self.eos)]
         if len(token_ids) >= 2:
             ts = len(token_ids)   # ts: token_ids size
 
@@ -368,6 +370,8 @@ class LookaheadCache():
     def stream_put(self, token_ids, branch_length=8, final=False, mode='output', idx=0):
         # idx is only used for caching output_ids
         assert mode == 'output' and idx >= 0
+        if self.eos in token_ids:
+            token_ids = token_ids[:token_ids.index(self.eos)]
         self._output_ids[idx].extend(token_ids)
         output_ids = self._output_ids[idx]
         ts = len(output_ids)
