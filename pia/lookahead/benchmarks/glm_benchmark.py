@@ -26,9 +26,8 @@ class GlmBenchmark(Benchmark):
         tokenizer = GLMChineseTokenizer.from_pretrained(model_dir)
         tokenizer.pad_token = tokenizer.eos_token
 
-        # stop_ids = tokenizer.convert_tokens_to_ids(self.stop_words)
-        # lookahead_cache = LookaheadCache(eos=tokenizer.eos_token_id, stop_words=stop_ids)
-        lookahead_cache = LookaheadCache(eos=50005, stop_words={43359, 43360, 43361, 43362})
+        stop_ids = tokenizer.convert_tokens_to_ids(self.stop_words+['的','是'])
+        lookahead_cache = LookaheadCache(eos=tokenizer.eop_token_id, stop_words=stop_ids)
         model.lookahead_cache = lookahead_cache
         self.model = model
         self.tokenizer = tokenizer

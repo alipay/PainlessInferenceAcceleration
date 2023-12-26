@@ -21,7 +21,8 @@ model = ChatGLMForConditionalGeneration.from_pretrained(model_dir
                                                                 , low_cpu_mem_usage=True
                                                                 , device_map='auto'
                                                                 )
-lookahead_cache = LookaheadCache(eos=50005, stop_words={43359, 43360, 43361, 43362})
+stop_ids = set(tokenizer.convert_tokens_to_ids([',', '.', ' ', '，','。']))
+lookahead_cache = LookaheadCache(eos=tokenizer.eos_token_id, stop_words=stop_ids)
 model.lookahead_cache = lookahead_cache
 
 # prompt = "Hello, I'm am conscious and"
