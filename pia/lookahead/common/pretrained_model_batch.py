@@ -71,7 +71,7 @@ class LookaheadPreTrainedModel(PreTrainedModel):
                         and hasattr(generation_config, 'decoding_kwargs') \
                         and generation_config.decoding_kwargs.get('use_lookahead', False) \
                         and generation_config.decoding_kwargs.get('decoding_length', 64) > 1 \
-                        and generation_config.decoding_kwargs.get('branch_length', 12) > 1:
+                        and generation_config.decoding_kwargs.get('branch_length', 12) > 0:
                     generation_mode = GenerationMode.LOOKAHEAD_GENERATION
                 else:
                     generation_mode = GenerationMode.GREEDY_SEARCH
@@ -80,7 +80,7 @@ class LookaheadPreTrainedModel(PreTrainedModel):
                         and hasattr(generation_config, 'decoding_kwargs') \
                         and generation_config.decoding_kwargs.get('use_lookahead', False) \
                         and generation_config.decoding_kwargs.get('decoding_length', 64) > 1 \
-                        and generation_config.decoding_kwargs.get('branch_length', 12) > 1:
+                        and generation_config.decoding_kwargs.get('branch_length', 12) > 0:
                     generation_mode = GenerationMode.LOOKAHEAD_GENERATION
                 else:
                     generation_mode = GenerationMode.SAMPLE
