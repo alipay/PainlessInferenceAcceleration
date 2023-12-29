@@ -8,6 +8,9 @@
    A toolkit for LLM inference without 😭 . Currently it contains our work LOOKAHEAD, a framework which accelerates LLM inference without loss of accuracy, other works will release soon.
 </p>
 
+[[Paper](https://arxiv.org/abs/2312.12728)]
+
+
 ## News or Update
 
 TODO1: support the latest version  [🤗 transformers](https://github.com/huggingface/transformers) ]. Currently it's based on 4.30.2.
@@ -22,20 +25,20 @@ Performance is measured by token/s(tokens per second) of generation tokens.
 
 ### Public datasets and models
 
-We use the first 1000 samples for evaluation and the rest for trie-tree cache construction. The hyper-parameters are `decoding_length=64` and `branch_lenght=8`. `fused` tag indicates several operators are fused for llama, the implementation can be found in `modeling_llama_batch.py`.
+We use the first 1000 samples for evaluation and the rest for trie-tree cache construction. The hyper-parameters are `decoding_length=64` and `branch_lenght=8`. The tag `fused` indicates operators are fused with triton, the implementation can be found in `modeling_llama_batch.py`.
 
 | model                  | dataset       | GPU           | 🤗 transformers | lookahead    |
 |------------------------|---------------|---------------|-----------------|--------------|
-| Llama2-chat-7b         | Dolly-15k     | A100-80G      | 40.6            | 83.7(x2.06)  |
-| Llama2-chat-7b(fused)  | Dolly-15k     | A100-80G      | 50.4            | 106.8(x2.12) |
-| Llama2-chat-13b        | Dolly-15k     | A100-80G      | 34.0            | 71.7(x2.11)  |
-| Llama2-chat-13b(fused) | Dolly-15k     | A100-80G      | 39.9            | 84.6(x2.12)  |
-| ChatGLM2-6b            | Dolly-15k     | A100-80G      | 45.6            | 108.4(x2.38) |
-| Llama2-chat-7b         | GSM-8k        | A100-80G      | 41.4            | 111.3(x2.69) |
-| Llama2-chat-7b(fused)  | GSM-8k        | A100-80G      | 53.7            | 149.6(x2.79) |
-| Llama2-chat-13b        | GSM-8k        | A100-80G      | 31.2            | 71.1(x2.28)  |
-| Llama2-chat-13b(fused) | GSM-8k        | A100-80G      | 42.9            | 103.4(x2.41) |
-| ChatGLM2-6b            | GSM-8k        | A100-80G      | 43.3            | 94.0(x2.17)  |
+| Llama2-chat-7b         | Dolly-15k     | A100-80G      | 40.6            | 83.7 (x2.06)  |
+| Llama2-chat-7b(fused)  | Dolly-15k     | A100-80G      | 50.4            | 106.8 (x2.12) |
+| Llama2-chat-13b        | Dolly-15k     | A100-80G      | 34.0            | 71.7 (x2.11)  |
+| Llama2-chat-13b(fused) | Dolly-15k     | A100-80G      | 39.9            | 84.6 (x2.12)  |
+| ChatGLM2-6b            | Dolly-15k     | A100-80G      | 45.6            | 108.4 (x2.38) |
+| Llama2-chat-7b         | GSM-8k        | A100-80G      | 41.4            | 111.3 (x2.69) |
+| Llama2-chat-7b(fused)  | GSM-8k        | A100-80G      | 53.7            | 149.6 (x2.79) |
+| Llama2-chat-13b        | GSM-8k        | A100-80G      | 31.2            | 71.1 (x2.28)  |
+| Llama2-chat-13b(fused) | GSM-8k        | A100-80G      | 42.9            | 103.4 (x2.41) |
+| ChatGLM2-6b            | GSM-8k        | A100-80G      | 43.3            | 94.0 (x2.17)  |
 
 
 ### Private datasets and models
@@ -180,7 +183,7 @@ class LlamaModel(LlamaPreTrainedModel):
             position_ids = torch.sum(attention_mask, dim=-1).squeeze(1) - 1
             attention_mask = (1.0-attention_mask.to(inputs_embeds.dtype)) * torch.finfo(inputs_embeds.dtype).min
         else:
-            # without lookahead
+            # without lookahead, reuse the original code lines
             if position_ids is None:
                 device = input_ids.device if input_ids is not None else inputs_embeds.device
                 position_ids = torch.arange(
@@ -190,7 +193,6 @@ class LlamaModel(LlamaPreTrainedModel):
             else:
                 position_ids = position_ids.view(-1, seq_length).long()
 
-            # embed positions
             if attention_mask is None:
                 attention_mask = torch.ones(
                     (batch_size, seq_length_with_past), dtype=torch.bool, device=inputs_embeds.device
