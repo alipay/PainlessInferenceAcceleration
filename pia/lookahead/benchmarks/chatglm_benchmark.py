@@ -15,8 +15,8 @@ from benchmark import Benchmark
 class ChatglmBenchmark(Benchmark):
 
     def initialize(self, model_dir=None, token_dir=None, **kwargs):
-        from models.chatglm.modeling_chatglm import ChatGLMForConditionalGeneration
-        from models.chatglm.tokenization_chatglm import ChatGLMTokenizer
+        from pia.lookahead.models.chatglm.modeling_chatglm import ChatGLMForConditionalGeneration
+        from pia.lookahead.models.chatglm.tokenization_chatglm import ChatGLMTokenizer
         model = ChatGLMForConditionalGeneration.from_pretrained(model_dir
                                                  , cache_dir='../'
                                                  , torch_dtype=torch.float16
@@ -28,7 +28,7 @@ class ChatglmBenchmark(Benchmark):
         model.lookahead_cache = lookahead_cache
         self.model = model
         self.tokenizer = tokenizer
-        self.eos = 2
+        self.eos = tokenizer.eos_token_id
         self.eop = 50006
 
     def tokenize(self, prompt, max_length=256):
@@ -59,7 +59,7 @@ warmup_count = 10000
 # test correctness with lookahead decoding
 worker.batch_chat(worker.prompts[:10],
                   max_length=max_length,
-                  decoding_length=15,
+                  decoding_length=16,
                   branch_length=4,
                   debug_lookahead=False,
                   erase=True,

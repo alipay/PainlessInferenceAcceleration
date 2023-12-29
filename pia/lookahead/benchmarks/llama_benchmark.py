@@ -16,9 +16,9 @@ class LlameBenchmark(Benchmark):
 
     def initialize(self, model_dir=None, token_dir=None, **kwargs):
         # org version for llama
-        # from models.llama.modeling_llama import LlamaForCausalLM
+        # from pia.lookahead.models.llama.modeling_llama import LlamaForCausalLM
         # fused op version for llama
-        from models.llama.modeling_llama_batch import LlamaForCausalLM 
+        from pia.lookahead.models.llama.modeling_llama_batch import LlamaForCausalLM 
         model = LlamaForCausalLM.from_pretrained(model_dir
                                                  , cache_dir='../'
                                                  , torch_dtype=torch.float16
@@ -43,7 +43,9 @@ prompt_dir = 'your/prompt/dir'
 dataset_dir = 'your/answer/dir'
 worker.save_answers(prompt_dir, dataset_dir, prompt_name='your/prompt/field/name', batch_size=1, max_count=None)
 """
-dataset_dir = '../datasets/gsm_8k_llama2_7b_chat.jsonl'
+
+# the dataset can be found in lookahead/datasets/dataset.py
+dataset_dir = 'dolly_15k_llama2_7b_chat.jsonl'
 
 worker = LlameBenchmark(log_dir='llama_benchmark')
 worker.initialize(model_dir=model_dir, token_dir=model_dir)
@@ -56,7 +58,7 @@ warmup_count = 10000
 # test correctness with lookahead decoding
 worker.batch_chat(worker.prompts[:10],
                   max_length=max_length,
-                  decoding_length=15,
+                  decoding_length=16,
                   branch_length=4,
                   debug_lookahead=False,
                   erase=True,
