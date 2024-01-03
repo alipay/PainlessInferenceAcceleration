@@ -1,2 +1,2 @@
-pytest==7.4.3
+pytest
 transformers==4.30.2
