@@ -44,8 +44,8 @@ from pia.lookahead.common.lookahead_generation_utils import GenerationMode, Look
 
 
 class LookaheadPreTrainedModel(PreTrainedModel):
-    _batch_generate = True
-    _stream_generate = False
+    _batch_generation = True
+    _stream_generation = False
 
     def __init__(self, config):
         super().__init__(config=config)
@@ -227,7 +227,8 @@ class LookaheadPreTrainedModel(PreTrainedModel):
         model_kwargs = generation_config.update(**kwargs)  # All unused kwargs must be model kwargs
         generation_config.validate()
         self._validate_model_kwargs(model_kwargs.copy())
-        generation_config.decoding_kwargs = model_kwargs.get('decoding_kwargs', {})
+        if not hasattr(generation_config, 'decoding_kwargs'):
+            generation_config.decoding_kwargs = model_kwargs.get('decoding_kwargs', {})
 
         # 2. Set generation parameters if not already defined
         logits_processor = logits_processor if logits_processor is not None else LogitsProcessorList()
@@ -1249,17 +1250,6 @@ class LookaheadPreTrainedModel(PreTrainedModel):
             # input_ids = torch.cat([input_ids, next_tokens], dim=-1)
             if streamer is not None:
                 streamer.put(next_tokens.cpu())
-
-                # batch_indices = model_kwargs['decoding_kwargs']['batch_indices']
-                # yield_output = [[] for _ in range(input_bs)]
-                # for k, tids in enumerate(next_token_list):
-                #     tids = [x for x in tids if x != -1]
-                #     batch_index = batch_indices[k]
-                #     yield_output[batch_index] = tids
-                #     if decoding_mode != 'llma':
-                #         lookahead_cache.stream_put(tids, branch_length=branch_length + 1, final=False, mode='output',
-                #                                 idx=batch_index)
-                # yield yield_output
 
             batch_indices = model_kwargs['decoding_kwargs']['batch_indices']
             for k, tids in enumerate(next_token_list):
