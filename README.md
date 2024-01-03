@@ -144,7 +144,7 @@ To support a customize model, usually we only need add a few lines, here is a ex
 
 ```python
 
-from common.pretrained_model import LookaheadPreTrainedModel
+from pia.lookahead.common.pretrained_model import LookaheadPreTrainedModel
 class LlamaPreTrainedModel(LookaheadPreTrainedModel):
     '''
     other code
@@ -217,6 +217,7 @@ We currently support a range of models, including Llama, OPT, Bloom, GPTJ, GPT2,
 
 Tests can be run with:
 ```shell
+cd pia/lookahead
 pytest tests/ -s
 ```
 
