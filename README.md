@@ -29,15 +29,15 @@ We use the first 1000 samples for evaluation and the rest for trie-tree cache co
 
 | model                  | dataset       | GPU           | 🤗 transformers | lookahead    |
 |------------------------|---------------|---------------|-----------------|--------------|
-| Llama2-chat-7b         | Dolly-15k     | A100-80G      | 40.6            | 83.7 (x2.06)  |
-| Llama2-chat-7b(fused)  | Dolly-15k     | A100-80G      | 50.4            | 106.8 (x2.12) |
-| Llama2-chat-13b        | Dolly-15k     | A100-80G      | 34.0            | 71.7 (x2.11)  |
-| Llama2-chat-13b(fused) | Dolly-15k     | A100-80G      | 39.9            | 84.6 (x2.12)  |
+| Llama2-7b-chat         | Dolly-15k     | A100-80G      | 40.6            | 83.7 (x2.06)  |
+| Llama2-7b-chat(fused)  | Dolly-15k     | A100-80G      | 50.4            | 106.8 (x2.12) |
+| Llama2-13b-chat        | Dolly-15k     | A100-80G      | 34.0            | 71.7 (x2.11)  |
+| Llama2-13b-chat(fused) | Dolly-15k     | A100-80G      | 39.9            | 84.6 (x2.12)  |
 | ChatGLM2-6b            | Dolly-15k     | A100-80G      | 45.6            | 108.4 (x2.38) |
-| Llama2-chat-7b         | GSM-8k        | A100-80G      | 41.4            | 111.3 (x2.69) |
-| Llama2-chat-7b(fused)  | GSM-8k        | A100-80G      | 53.7            | 149.6 (x2.79) |
-| Llama2-chat-13b        | GSM-8k        | A100-80G      | 31.2            | 71.1 (x2.28)  |
-| Llama2-chat-13b(fused) | GSM-8k        | A100-80G      | 42.9            | 103.4 (x2.41) |
+| Llama2-7b-chat         | GSM-8k        | A100-80G      | 41.4            | 111.3 (x2.69) |
+| Llama2-7b-chat(fused)  | GSM-8k        | A100-80G      | 53.7            | 149.6 (x2.79) |
+| Llama2-13b-chat        | GSM-8k        | A100-80G      | 31.2            | 71.1 (x2.28)  |
+| Llama2-13b-chat(fused) | GSM-8k        | A100-80G      | 42.9            | 103.4 (x2.41) |
 | ChatGLM2-6b            | GSM-8k        | A100-80G      | 43.3            | 94.0 (x2.17)  |
 
 
