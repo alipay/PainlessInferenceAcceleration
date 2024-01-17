@@ -38,7 +38,7 @@ attention_mask = inputs.attention_mask.cuda()
 position_ids = None
 
 # first time without lookahead
-for use_lookahead in [False, True]:
+for use_lookahead in [False]:
     debug_lookahead = False
     decoding_length = 63
     branch_length = 12
