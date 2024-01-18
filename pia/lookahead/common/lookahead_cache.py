@@ -326,7 +326,7 @@ class Tree():
 
 
 class LookaheadCache():
-    def __init__(self, debug=False, eos=2, stop_words=None, max_node=512, max_output_node=256):
+    def __init__(self, debug=False, eos=2, stop_word_ids=None, max_node=512, max_output_node=256):
         self.debug = debug
         self.eos = eos
         self.max_node = max_node
@@ -335,7 +335,7 @@ class LookaheadCache():
         self._output_ids = defaultdict(list)
         self._update_trees = set()
         self._update_input_trees = set()
-        self.stop_words = stop_words if stop_words is not None else {}
+        self.stop_word_ids = stop_word_ids if stop_word_ids is not None else {}
         self.default_mask = np.ones((1, 1), dtype=np.int64)
 
     def put(self, token_ids, branch_length=8, final=False, mode='output', idx=-1):
@@ -409,7 +409,7 @@ class LookaheadCache():
             tree = self.mem.get(t, None)
             if tree is not None:
                 ids = token_ids[i + 1:]
-                if t in self.stop_words and len(ids) == 0:
+                if t in self.stop_word_ids and len(ids) == 0:
                     continue
                 decoding_ids, decoding_masks, sizes = tree.get(ids,
                                                                max_size=decoding_length,
@@ -492,7 +492,7 @@ class LookaheadCache():
             tree = self.mem.get(t, None)
             if tree is not None:
                 ids = token_ids[i + 1:]
-                if t in self.stop_words and len(ids) == 0:
+                if t in self.stop_word_ids and len(ids) == 0:
                     continue
                 decoding_ids, decoding_masks, sizes = tree.get_one_branch(ids,
                                                                           max_length=branch_length,

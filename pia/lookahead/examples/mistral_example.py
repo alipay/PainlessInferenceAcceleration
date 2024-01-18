@@ -1,6 +1,7 @@
 from transformers import AutoTokenizer
 from pia.lookahead.models.mistral.modeling_mistral import MistralForCausalLM
 from pia.lookahead.examples import local_path_dict
+from pia.lookahead.common.lookahead_cache import LookaheadCache
 import time
 import torch
 
@@ -8,10 +9,16 @@ import torch
 model_dir = local_path_dict.get('mistral', 'your/model/path') 
 tokenizer = AutoTokenizer.from_pretrained(model_dir)
 model = MistralForCausalLM.from_pretrained(model_dir,
+                                           cache_dir='../',
                                            trust_remote_code=False,
                                            low_cpu_mem_usage=True,
                                            torch_dtype=torch.float16,
                                            device_map="auto")
+
+
+tokenizer.pad_token = tokenizer.eos_token
+tokenizer.padding_side = 'left'
+stop_word_ids = set(tokenizer.convert_tokens_to_ids([',', '.', ' ']))
 
 prompt = "Hello, I'm am conscious and"
 inputs = tokenizer(prompt, return_tensors="pt")
@@ -20,8 +27,8 @@ attention_mask = inputs.attention_mask.cuda()
 position_ids = None
 
 for use_lookahead in [False, True]:
-    debug_lookahead = False
-    decoding_length = 63
+    debug_lookahead = True
+    decoding_length = 5
     branch_length = 12
     ts = time.time()
     max_new_tokens = 256
@@ -29,7 +36,8 @@ for use_lookahead in [False, True]:
                        "debug_lookahead": debug_lookahead,
                        "decoding_mode": 'hier',
                        "decoding_length": decoding_length,
-                       "branch_length": branch_length}
+                       "branch_length": branch_length,
+                       "stop_word_ids": stop_word_ids}
     outputs = model.generate(input_ids=input_ids,
                              attention_mask=attention_mask,
                              position_ids=position_ids,
