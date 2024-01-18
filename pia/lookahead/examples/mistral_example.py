@@ -26,9 +26,9 @@ input_ids = inputs.input_ids.cuda()
 attention_mask = inputs.attention_mask.cuda()
 position_ids = None
 
-for use_lookahead in [False, True]:
+for use_lookahead in [False, False, True, True]:
     debug_lookahead = True
-    decoding_length = 5
+    decoding_length =63
     branch_length = 12
     ts = time.time()
     max_new_tokens = 256
