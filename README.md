@@ -133,11 +133,7 @@ To use `lookahead` with other models, we can run the scripts in the path `exampl
 Each supported models are included and  can be used for correctness evaluation.
 
 ```shell
-git clone https://github.com/alipay/PainlessInferenceAcceleration.git
-cd PainlessInferenceAcceleration
-python setup.py install
-cd pia/lookahead/examples
-python llama_example.py
+python [model name]_example.py
 ```
 
 To evaluation speedup of `lookahead`, we can run the scripts in the path `benchmarks/`,
