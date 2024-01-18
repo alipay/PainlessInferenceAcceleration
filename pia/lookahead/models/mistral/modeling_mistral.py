@@ -801,7 +801,7 @@ MISTRAL_START_DOCSTRING = r"""
     "The bare Mistral Model outputting raw hidden-states without any specific head on top.",
     MISTRAL_START_DOCSTRING,
 )
-class MistralPreTrainedModel(PreTrainedModel):
+class MistralPreTrainedModel(LookaheadPreTrainedModel):
     config_class = MistralConfig
     base_model_prefix = "model"
     supports_gradient_checkpointing = True
