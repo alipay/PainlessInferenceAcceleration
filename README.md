@@ -79,7 +79,17 @@ Note that our work is different from the other method named [lookahead decoding]
 
 使用本项目前，请先阅读LICENSE.txt。如果您不同意该使用协议中列出的条款、法律免责声明和许可，您将不得使用本项目中的这些内容。
 
+## Installation
 
+1. Clone this repository and navigate to PainlessInferenceAcceleration
+```
+git clone https://github.com/alipay/PainlessInferenceAcceleration.git
+cd PainlessInferenceAcceleration
+```
+2. Install Package
+```
+python setup.py install
+```
 
 ## Quick Start
 
