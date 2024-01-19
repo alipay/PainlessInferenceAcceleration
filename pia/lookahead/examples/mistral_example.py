@@ -1,7 +1,12 @@
+# -*- coding: utf-8 -*-
+"""
+Copyright (c) Ant Financial Service Group and its affiliates.
+"""
+
+
 from transformers import AutoTokenizer
 from pia.lookahead.models.mistral.modeling_mistral import MistralForCausalLM
 from pia.lookahead.examples import local_path_dict
-from pia.lookahead.common.lookahead_cache import LookaheadCache
 import time
 import torch
 
@@ -27,7 +32,7 @@ attention_mask = inputs.attention_mask.cuda()
 position_ids = None
 
 for use_lookahead in [False, False, True, True]:
-    debug_lookahead = True
+    debug_lookahead = False
     decoding_length =63
     branch_length = 12
     ts = time.time()
