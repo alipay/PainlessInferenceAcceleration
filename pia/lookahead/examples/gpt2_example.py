@@ -10,11 +10,11 @@ import time
 import torch
 from transformers import AutoTokenizer
 
-# sys.path.append('..')
 from pia.lookahead.common.pretrained_model import LookaheadCache
 from pia.lookahead.models.gpt2.modeling_gpt2 import GPT2LMHeadModel
+from pia.lookahead.examples import local_path_dict
 
-model_dir = 'your/model/path'
+model_dir = local_path_dict.get('gpt2', 'your/model/path') 
 dtype = torch.float16 if torch.cuda.is_available() else torch.float32
 model = GPT2LMHeadModel.from_pretrained(model_dir
                                        , cache_dir='../'
@@ -25,9 +25,7 @@ model = GPT2LMHeadModel.from_pretrained(model_dir
 tokenizer = AutoTokenizer.from_pretrained(model_dir)
 tokenizer.pad_token = tokenizer.eos_token
 tokenizer.padding_side = 'left'
-stop_ids = set(tokenizer.convert_tokens_to_ids([',', '.', ' ']))
-lookahead_cache = LookaheadCache(eos=tokenizer.eos_token_id, stop_words=stop_ids)
-model.lookahead_cache = lookahead_cache
+stop_word_ids = set(tokenizer.convert_tokens_to_ids([',', '.', ' ']))
 
 prompt = "Hello, I'm am conscious and"
 inputs = tokenizer(prompt, return_tensors="pt")
@@ -46,7 +44,9 @@ for use_lookahead in [False, False, True, True]:
                        "debug_lookahead": debug_lookahead,
                        "decoding_mode": 'hier',
                        "decoding_length": decoding_length,
-                       "branch_length": branch_length}
+                       "branch_length": branch_length,
+                       "stop_word_ids": stop_word_ids}}
+                       
     outputs = model.generate(input_ids=input_ids,
                              attention_mask=attention_mask,
                              position_ids=position_ids,

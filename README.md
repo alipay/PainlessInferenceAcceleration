@@ -8,6 +8,9 @@
    A toolkit for LLM inference without 😭 . Currently it contains our work LOOKAHEAD, a framework which accelerates LLM inference without loss of accuracy, other works will release soon.
 </p>
 
+[[Paper](https://arxiv.org/abs/2312.12728)]
+
+
 ## News or Update
 
 TODO1: support the latest version  [🤗 transformers](https://github.com/huggingface/transformers) ]. Currently it's based on 4.30.2.
@@ -22,20 +25,20 @@ Performance is measured by token/s(tokens per second) of generation tokens.
 
 ### Public datasets and models
 
-We use the first 1000 samples for evaluation and the rest for trie-tree cache construction. The hyper-parameters are `decoding_length=64` and `branch_lenght=8`. `fused` tag indicates several operators are fused for llama, the implementation can be found in `modeling_llama_batch.py`.
+We use the first 1000 samples for evaluation and the rest for trie-tree cache construction. The hyper-parameters are `decoding_length=64` and `branch_lenght=8`. The tag `fused` indicates operators are fused with triton, the implementation can be found in `modeling_llama_batch.py`.
 
 | model                  | dataset       | GPU           | 🤗 transformers | lookahead    |
 |------------------------|---------------|---------------|-----------------|--------------|
-| Llama2-chat-7b         | Dolly-15k     | A100-80G      | 40.6            | 83.7(x2.06)  |
-| Llama2-chat-7b(fused)  | Dolly-15k     | A100-80G      | 50.4            | 106.8(x2.12) |
-| Llama2-chat-13b        | Dolly-15k     | A100-80G      | 34.0            | 71.7(x2.11)  |
-| Llama2-chat-13b(fused) | Dolly-15k     | A100-80G      | 39.9            | 84.6(x2.12)  |
-| ChatGLM2-6b            | Dolly-15k     | A100-80G      | 45.6            | 108.4(x2.38) |
-| Llama2-chat-7b         | GSM-8k        | A100-80G      | 41.4            | 111.3(x2.69) |
-| Llama2-chat-7b(fused)  | GSM-8k        | A100-80G      | 53.7            | 149.6(x2.79) |
-| Llama2-chat-13b        | GSM-8k        | A100-80G      | 31.2            | 71.1(x2.28)  |
-| Llama2-chat-13b(fused) | GSM-8k        | A100-80G      | 42.9            | 103.4(x2.41) |
-| ChatGLM2-6b            | GSM-8k        | A100-80G      | 43.3            | 94.0(x2.17)  |
+| Llama2-chat-7b         | Dolly-15k     | A100-80G      | 40.6            | 83.7 (x2.06)  |
+| Llama2-chat-7b(fused)  | Dolly-15k     | A100-80G      | 50.4            | 106.8 (x2.12) |
+| Llama2-chat-13b        | Dolly-15k     | A100-80G      | 34.0            | 71.7 (x2.11)  |
+| Llama2-chat-13b(fused) | Dolly-15k     | A100-80G      | 39.9            | 84.6 (x2.12)  |
+| ChatGLM2-6b            | Dolly-15k     | A100-80G      | 45.6            | 108.4 (x2.38) |
+| Llama2-chat-7b         | GSM-8k        | A100-80G      | 41.4            | 111.3 (x2.69) |
+| Llama2-chat-7b(fused)  | GSM-8k        | A100-80G      | 53.7            | 149.6 (x2.79) |
+| Llama2-chat-13b        | GSM-8k        | A100-80G      | 31.2            | 71.1 (x2.28)  |
+| Llama2-chat-13b(fused) | GSM-8k        | A100-80G      | 42.9            | 103.4 (x2.41) |
+| ChatGLM2-6b            | GSM-8k        | A100-80G      | 43.3            | 94.0 (x2.17)  |
 
 
 ### Private datasets and models
@@ -62,13 +65,14 @@ With the efficient hierarchical structure, we can lookahead tens fo branches, th
 Note that our work is different from the other method named [lookahead decoding](https://github.com/hao-ai-lab/LookaheadDecoding). 
 
 
-### hierarchical multi-branch draft
+### Hierarchical multi-branch draft
 
-<div align=center>
-
+<!-- <div align=center>
 <img src="./pia/lookahead/figures/draft.png" width="100%">
+</div> -->
 
-</div>
+![draft](./pia/lookahead/figures/draft.png)
+
 
 
 
@@ -78,7 +82,17 @@ Note that our work is different from the other method named [lookahead decoding]
 
 使用本项目前，请先阅读LICENSE.txt。如果您不同意该使用协议中列出的条款、法律免责声明和许可，您将不得使用本项目中的这些内容。
 
+## Installation
 
+1. Clone this repository and navigate to PainlessInferenceAcceleration
+```
+git clone https://github.com/alipay/PainlessInferenceAcceleration.git
+cd PainlessInferenceAcceleration
+```
+2. Install Package
+```
+python setup.py install
+```
 
 ## Quick Start
 
@@ -87,14 +101,12 @@ Below is an example for the simplest use of `lookahead` to inference:
 
 ```python
 
-import sys
 import torch
 from transformers import AutoTokenizer
 
 
-sys.path.append('.') 
-from common.lookahead_cache import LookaheadCache
-from models.llama.modeling_llama import LlamaForCausalLM
+from pia.lookahead.common.lookahead_cache import LookaheadCache
+from pia.lookahead.models.llama.modeling_llama import LlamaForCausalLM
 
 model_dir = 'meta-llama/Llama-2-7b-chat-hf'
 model = LlamaForCausalLM.from_pretrained(model_dir
@@ -121,10 +133,10 @@ To use `lookahead` with other models, we can run the scripts in the path `exampl
 Each supported models are included and  can be used for correctness evaluation.
 
 ```shell
-git clone xxx
-cd pia
-pip install -r requirements.txt
-cd lookahead/examples
+git clone https://github.com/alipay/PainlessInferenceAcceleration.git
+cd PainlessInferenceAcceleration
+python setup.py install
+cd pia/lookahead/examples
 python llama_example.py
 ```
 
@@ -142,7 +154,7 @@ To support a customize model, usually we only need add a few lines, here is a ex
 
 ```python
 
-from common.pretrained_model import LookaheadPreTrainedModel
+from pia.lookahead.common.pretrained_model import LookaheadPreTrainedModel
 class LlamaPreTrainedModel(LookaheadPreTrainedModel):
     '''
     other code
@@ -181,7 +193,7 @@ class LlamaModel(LlamaPreTrainedModel):
             position_ids = torch.sum(attention_mask, dim=-1).squeeze(1) - 1
             attention_mask = (1.0-attention_mask.to(inputs_embeds.dtype)) * torch.finfo(inputs_embeds.dtype).min
         else:
-            # without lookahead
+            # without lookahead, reuse the original code lines
             if position_ids is None:
                 device = input_ids.device if input_ids is not None else inputs_embeds.device
                 position_ids = torch.arange(
@@ -191,7 +203,6 @@ class LlamaModel(LlamaPreTrainedModel):
             else:
                 position_ids = position_ids.view(-1, seq_length).long()
 
-            # embed positions
             if attention_mask is None:
                 attention_mask = torch.ones(
                     (batch_size, seq_length_with_past), dtype=torch.bool, device=inputs_embeds.device
@@ -216,6 +227,7 @@ We currently support a range of models, including Llama, OPT, Bloom, GPTJ, GPT2,
 
 Tests can be run with:
 ```shell
+cd pia/lookahead
 pytest tests/ -s
 ```
 

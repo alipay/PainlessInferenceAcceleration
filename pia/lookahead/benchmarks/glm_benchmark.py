@@ -8,16 +8,15 @@ import sys
 import torch
 from transformers import AutoTokenizer
 
-sys.path.append('..')
-from common.lookahead_cache import LookaheadCache
+from pia.lookahead.common.lookahead_cache import LookaheadCache
 from benchmark import Benchmark
 
 
 class GlmBenchmark(Benchmark):
 
     def initialize(self, model_dir=None, token_dir=None, **kwargs):
-        from models.glm.modeling_glm import GLMForConditionalGeneration
-        from models.glm.tokenization_glm import GLMChineseTokenizer
+        from pia.lookahead.models.glm.modeling_glm import GLMForConditionalGeneration
+        from pia.lookahead.models.glm.tokenization_glm import GLMChineseTokenizer
         model = GLMForConditionalGeneration.from_pretrained(model_dir
                                                             , cache_dir='../'
                                                             , offload_folder='./'
@@ -27,13 +26,12 @@ class GlmBenchmark(Benchmark):
         tokenizer = GLMChineseTokenizer.from_pretrained(model_dir)
         tokenizer.pad_token = tokenizer.eos_token
 
-        # stop_ids = tokenizer.convert_tokens_to_ids(self.stop_words)
-        # lookahead_cache = LookaheadCache(eos=tokenizer.eos_token_id, stop_words=stop_ids)
-        lookahead_cache = LookaheadCache(eos=50005, stop_words={43359, 43360, 43361, 43362})
+        stop_ids = tokenizer.convert_tokens_to_ids(self.stop_words+['的','是'])
+        lookahead_cache = LookaheadCache(eos=tokenizer.eop_token_id, stop_words=stop_ids)
         model.lookahead_cache = lookahead_cache
         self.model = model
         self.tokenizer = tokenizer
-        self.eos = 50005
+        self.eos = tokenizer.eop_token_id
         self.eop = 50006
 
     def tokenize(self, prompt, max_length=256):
@@ -60,30 +58,27 @@ class GlmBenchmark(Benchmark):
         return input_ids, position_ids, attention_mask
 
 
-model_dir = 'your/model/path/glm10b'
-prompt_dir = 'your/dataset'
+model_dir = 'your/model/path'
+"""
+generate answers first if only prompts are available, answers in the warmup samples are used for constructing trie-tree cache
+prompt_dir = 'your/prompt/dir'
+dataset_dir = 'your/answer/dir'
+worker.save_answers(prompt_dir, answer_dir, prompt_name='your/prompt/field/name', batch_size=1, max_count=None)
+"""
+dataset_dir = 'your/dataset/path'
 
 worker = GlmBenchmark(log_dir='antglm_benchmark')
 worker.initialize(model_dir=model_dir, token_dir=model_dir)
-worker.load_prompts(prompt_dir=prompt_dir)
+worker.load_prompts(prompt_dir=dataset_dir)
 
-prompt = '杭州在哪里？'
 max_length = 256
 chat_count = 1000
 warmup_count = 10000
 
-# runable check
-worker.chat(prompt,
-            max_length=max_length,
-            use_lookahead=False,
-            decoding_length=15,
-            branch_length=4,
-            debug_lookahead=False)
-
 # test correctness with lookahead decoding
 worker.batch_chat(worker.prompts[:10],
                   max_length=max_length,
-                  decoding_length=15,
+                  decoding_length=16,
                   branch_length=4,
                   debug_lookahead=False,
                   erase=True,

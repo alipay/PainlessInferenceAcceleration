@@ -9,12 +9,11 @@ import time
 import torch
 from transformers import AutoTokenizer
 
-# sys.path.append('..')
 from pia.lookahead.common.lookahead_cache import LookaheadCache
 from pia.lookahead.models.llama.modeling_llama_batch import LlamaForCausalLM
+from pia.lookahead.examples import local_path_dict
 
-model_dir = 'meta-llama/Llama-2-7b-chat'
-
+model_dir = local_path_dict.get('llama', 'your/model/path') 
 dtype = torch.float16 if torch.cuda.is_available() else torch.float32
 model = LlamaForCausalLM.from_pretrained(model_dir
                                          , cache_dir='../'

@@ -16,7 +16,6 @@ from pstats import SortKey
 
 import torch
 
-sys.path.append('..')
 
 # os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 # os.environ['CUDA_LAUNCH_BLOCKING'] = '1'

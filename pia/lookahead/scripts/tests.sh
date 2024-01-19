@@ -12,10 +12,4 @@ python baichuan_example.py &&
 python bloom_example.py && 
 python gptj_example.py && 
 python gpt2_example.py && 
-python qwen_example.py &&
-
-cd ../benchmarks &&
-python glm_benchmark.py &&
-python chatglm_benchmark.py &&
-python llama_benchmark.py
-
+python qwen_example.py

@@ -7,13 +7,14 @@ import sys
 import time
 import torch
 
-# sys.path.append('..')
 from pia.lookahead.common.pretrained_model import LookaheadCache
 from pia.lookahead.models.chatglm.tokenization_chatglm import ChatGLMTokenizer
+#if using chatglm3
+# from pia.lookahead.models.chatglm.tokenization_chatglm_3 import ChatGLMTokenizer
 from pia.lookahead.models.chatglm.modeling_chatglm import ChatGLMForConditionalGeneration
+from pia.lookahead.examples import local_path_dict
 
-# model_dir = 'your/model/path'
-model_dir = '/mntnlp/common_base_model/chatglm2'
+model_dir = local_path_dict.get('chatglm', 'your/model/path') 
 
 tokenizer = ChatGLMTokenizer.from_pretrained(model_dir)
 model = ChatGLMForConditionalGeneration.from_pretrained(model_dir
@@ -22,8 +23,7 @@ model = ChatGLMForConditionalGeneration.from_pretrained(model_dir
                                                                 , low_cpu_mem_usage=True
                                                                 , device_map='auto'
                                                                 )
-lookahead_cache = LookaheadCache(eos=50005, stop_words={43359, 43360, 43361, 43362})
-model.lookahead_cache = lookahead_cache
+stop_word_ids = set(tokenizer.convert_tokens_to_ids([',', '.', ' ']))
 
 # prompt = "Hello, I'm am conscious and"
 prompt = "杭州在哪里？"
@@ -34,7 +34,7 @@ attention_mask = inputs.attention_mask.cuda()
 position_ids = None
 
 device = model.device
-debug_lookahead = True
+debug_lookahead = False
 decoding_length = 64
 branch_length = 12
 max_new_tokens = 128
@@ -46,7 +46,8 @@ for use_lookahead in [False,False,True,True]:
                        "debug_lookahead": debug_lookahead,
                        "decoding_mode": 'hier',
                        "decoding_length": decoding_length,
-                       "branch_length": branch_length}
+                       "branch_length": branch_length,
+                       "stop_word_ids": stop_word_ids}
     outputs = model.generate(input_ids=input_ids,
                              attention_mask=attention_mask,
                              position_ids=position_ids,
