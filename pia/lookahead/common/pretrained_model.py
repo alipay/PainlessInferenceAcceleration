@@ -674,8 +674,8 @@ class LookaheadPreTrainedModel(PreTrainedModel):
         branch_length = decoding_kwargs.get('branch_length', 12)
         decoding_mode = decoding_kwargs.get('decoding_mode', 'hier')
         max_length = decoding_kwargs.get('max_length', 2048)
-        update_branch_length = min(branch_length, max_length - input_ids.size(-1))
-        assert update_branch_length > 0, f'{branch_length=} {max_length=} {input_ids.size(-1)=} {update_branch_length=}'
+        update_branch_length = min(branch_length, max_length - input_ids.size(-1) - 1)
+        assert update_branch_length >= 0, f'{branch_length=} {max_length=} {input_ids.size(-1)=} {update_branch_length=}'
 
         if past_key_values is None:
             if inputs_embeds is not None and input_ids is not None:
@@ -879,6 +879,8 @@ class LookaheadPreTrainedModel(PreTrainedModel):
                 k = k[:, :, :prefix_and_next_count + max_match_count]
                 v = v[:, :, :prefix_and_next_count + max_match_count]
             else:
+                if kv_idx.device != k.device:
+                    kv_idx = kv_idx.to(k.device)
                 k = torch.concat([k[:, :, :prefix_and_next_count], k[:, :, kv_idx]], 2)
                 v = torch.concat([v[:, :, :prefix_and_next_count], v[:, :, kv_idx]], 2)
             update_past_key_values.append((k, v))
@@ -996,6 +998,9 @@ class LookaheadPreTrainedModel(PreTrainedModel):
 
         if not hasattr(self, 'lookahead_cache'):
             self.lookahead_cache = LookaheadCache()
+        
+        self.lookahead_cache.eos = eos_token_id
+        self.lookahead_cache.stop_word_ids = model_kwargs['decoding_kwargs'].get('stop_word_ids', {})
 
         logits_processor = logits_processor if logits_processor is not None else LogitsProcessorList()
         stopping_criteria = stopping_criteria if stopping_criteria is not None else StoppingCriteriaList()

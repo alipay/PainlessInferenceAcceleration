@@ -12,5 +12,7 @@ local_path_dict = {
     'gptj': '/mntnlp/common_base_model/gpt-j-6b',
     'llama':  '/mntnlp/common_base_model/llama2-7b-chat',
     'opt':  '/mntnlp/common_base_model/opt_6b7',
-    'qwen': '/mntnlp/common_base_model/Qwen-7B-Chat'
+    'qwen': '/mntnlp/common_base_model/Qwen-7B-Chat',
+    'mistral': '/mntnlp/common_base_model/mistralai__Mistral-7B-v0.1',
+    'mixtral': '/mntnlp/common_base_model/Mixtral-8x7B-Instruct-v0.1'
 }
