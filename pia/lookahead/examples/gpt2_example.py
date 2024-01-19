@@ -20,12 +20,12 @@ model = GPT2LMHeadModel.from_pretrained(model_dir
                                        , cache_dir='../'
                                        , torch_dtype=dtype
                                        , low_cpu_mem_usage=True
-                                       , device_map='auto'
+                                       , device_map={"":"cuda:0"}
                                        )
 tokenizer = AutoTokenizer.from_pretrained(model_dir)
 tokenizer.pad_token = tokenizer.eos_token
 tokenizer.padding_side = 'left'
-stop_word_ids = set(tokenizer.convert_tokens_to_ids([',', '.', ' ']))
+stop_words = set(tokenizer.convert_tokens_to_ids([',', '.', ' ']))
 
 prompt = "Hello, I'm am conscious and"
 inputs = tokenizer(prompt, return_tensors="pt")
@@ -35,7 +35,7 @@ attention_mask = inputs.attention_mask.to(device)
 position_ids = None
 
 for use_lookahead in [False, False, True, True]:
-    debug_lookahead = True
+    debug_lookahead = False
     decoding_length = 64
     branch_length = 12
     ts = time.time()
@@ -45,7 +45,7 @@ for use_lookahead in [False, False, True, True]:
                        "decoding_mode": 'hier',
                        "decoding_length": decoding_length,
                        "branch_length": branch_length,
-                       "stop_word_ids": stop_word_ids}}
+                       "stop_words": stop_words}
                        
     outputs = model.generate(input_ids=input_ids,
                              attention_mask=attention_mask,

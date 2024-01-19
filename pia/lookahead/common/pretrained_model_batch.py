@@ -1082,9 +1082,6 @@ class LookaheadPreTrainedModel(PreTrainedModel):
         ```"""
         # init values
 
-        if not hasattr(self, 'lookahead_cache'):
-            self.lookahead_cache = LookaheadCache()
-
         logits_processor = logits_processor if logits_processor is not None else LogitsProcessorList()
         stopping_criteria = stopping_criteria if stopping_criteria is not None else StoppingCriteriaList()
         if max_length is not None:
@@ -1111,6 +1108,12 @@ class LookaheadPreTrainedModel(PreTrainedModel):
             if return_dict_in_generate is not None
             else self.generation_config.return_dict_in_generate
         )
+
+        # init lookahead cache
+        if not hasattr(self, 'lookahead_cache'):
+            self.lookahead_cache = LookaheadCache()
+        self.lookahead_cache.eos_ids = eos_token_id
+        self.lookahead_cache.stop_words = model_kwargs['decoding_kwargs'].get('stop_words', {})
 
         # init attention / hidden states / scores tuples
         scores = () if (return_dict_in_generate and output_scores) else None
