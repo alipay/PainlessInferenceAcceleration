@@ -190,7 +190,6 @@ class QWenAttention(nn.Module):
         self.num_heads = config.num_attention_heads
         self.head_dim = self.hidden_size // self.num_heads
 
-        # self.use_flash_attn = config.use_flash_attn
         self.use_flash_attn = False
         self.scale_attn_weights = True
 
@@ -1006,7 +1005,6 @@ class QWenLMHeadModel(QWenPreTrainedModel):
             **kwargs,
     ) -> Tuple[str, HistoryType]:
         generation_config = generation_config if generation_config is not None else self.generation_config
-
         assert stream is _SENTINEL, _ERROR_STREAM_IN_CHAT
         assert generation_config.chat_format == 'chatml', _ERROR_BAD_CHAT_FORMAT
         if history is None:
@@ -1025,7 +1023,7 @@ class QWenLMHeadModel(QWenPreTrainedModel):
             max_window_size=max_window_size,
             chat_format=generation_config.chat_format,
         )
-
+        
         stop_words_ids.extend(get_stop_words_ids(
             generation_config.chat_format, tokenizer
         ))
@@ -1037,7 +1035,6 @@ class QWenLMHeadModel(QWenPreTrainedModel):
             generation_config=generation_config,
             **kwargs,
         )
-
         response = decode_tokens(
             outputs[0],
             tokenizer,
@@ -1244,18 +1241,31 @@ def apply_rotary_pos_emb(t, freqs):
         return torch.cat((t_, t_pass_), dim=-1).type_as(t)
 
 
-class RMSNorm(torch.nn.Module):
-    def __init__(self, dim: int, eps: float = 1e-6):
+# class RMSNorm(torch.nn.Module):
+#     def __init__(self, dim: int, eps: float = 1e-6):
+#         super().__init__()
+#         self.eps = eps
+#         self.weight = nn.Parameter(torch.ones(dim))
+
+#     def _norm(self, x):
+#         return x * torch.rsqrt(x.pow(2).mean(-1, keepdim=True) + self.eps)
+
+#     def forward(self, x):
+#         if rms_norm is not None and x.is_cuda:
+#             return rms_norm(x, self.weight, self.eps)
+#         else:
+#             output = self._norm(x.float()).type_as(x)
+#             return output * self.weight
+
+class RMSNorm(nn.Module):
+    def __init__(self, dim, eps=1e-6):
         super().__init__()
-        self.eps = eps
         self.weight = nn.Parameter(torch.ones(dim))
+        self.variance_epsilon = eps
 
-    def _norm(self, x):
-        return x * torch.rsqrt(x.pow(2).mean(-1, keepdim=True) + self.eps)
+    def forward(self, hidden_states):
+        input_dtype = hidden_states.dtype
+        variance = hidden_states.to(torch.float32).pow(2).mean(-1, keepdim=True)
+        hidden_states = hidden_states * torch.rsqrt(variance + self.variance_epsilon)
 
-    def forward(self, x):
-        if rms_norm is not None and x.is_cuda:
-            return rms_norm(x, self.weight, self.eps)
-        else:
-            output = self._norm(x.float()).type_as(x)
-            return output * self.weight
+        return (self.weight * hidden_states).to(input_dtype)
