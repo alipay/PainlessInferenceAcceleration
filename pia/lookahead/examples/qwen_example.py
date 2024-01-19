@@ -16,7 +16,8 @@ from pia.lookahead.models.qwen.modeling_qwen import QWenLMHeadModel
 from pia.lookahead.models.qwen.tokenization_qwen import QWenTokenizer
 from pia.lookahead.examples import local_path_dict
 
-model_dir = local_path_dict.get('qwen', 'your/model/path') 
+# model_dir = local_path_dict.get('qwen', 'your/model/path') 
+model_dir = '/mntnlp/liangchen/qwen/Qwen__Qwen-7B-Chat-Int4'
 
 dtype = torch.float16 if torch.cuda.is_available() else torch.float32
 model = QWenLMHeadModel.from_pretrained(model_dir

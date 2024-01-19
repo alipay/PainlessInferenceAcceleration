@@ -1,27 +1,24 @@
-from transformers import AutoTokenizer
+from transformers import AutoTokenizer, BitsAndBytesConfig, AutoConfig
 import torch
 import time 
-
 from pia.lookahead.models.mixtral.modeling_mixtral import MixtralForCausalLM
 
 model_dir = "/mntnlp/common_base_model/Mixtral-8x7B-Instruct-v0.1"
-# config = AutoConfig.from_pretrained('/mntnlp/common_base_model/Mixtral-8x7B-Instruct-v0.1')
 tokenizer = AutoTokenizer.from_pretrained(model_dir)
-model = MixtralForCausalLM.from_pretrained(model_dir,
-                                           trust_remote_code=False,
-                                           low_cpu_mem_usage=True,
-                                           torch_dtype=torch.float16,
-                                           device_map="auto")
 
+# from accelerate import init_empty_weights, infer_auto_device_map
+# config = AutoConfig.from_pretrained('/mntnlp/common_base_model/Mixtral-8x7B-Instruct-v0.1')
+# with init_empty_weights():
+#     model = MixtralForCausalLM(config)
+# device_map = infer_auto_device_map(model, no_split_module_classes=["MixtralDecoderLayer"])
 
-# prompt = "Hello, I'm am conscious and"
-# inputs = tokenizer(prompt, return_tensors="pt")
-# inputs['input_ids'] = inputs.input_ids.cuda()
-# inputs['attention_mask'] = inputs.attention_mask.cuda()
-# position_ids = None
+model = MixtralForCausalLM.from_pretrained(model_dir
+                                            , cache_dir='./'
+                                            , torch_dtype=torch.float16
+                                            , low_cpu_mem_usage=True
+                                            , device_map="auto")
 
-
-# model(**inputs)
+# print(model.device_map)
 
 prompt = "Hello, I'm am conscious and"
 inputs = tokenizer(prompt, return_tensors="pt")
@@ -29,7 +26,7 @@ input_ids = inputs.input_ids.cuda()
 attention_mask = inputs.attention_mask.cuda()
 position_ids = None
 
-for use_lookahead in [False, True]:
+for use_lookahead in [False, False, True, True]:
     debug_lookahead = False
     decoding_length = 63
     branch_length = 12

@@ -1,10 +1,10 @@
 import os
+import torch
 from typing import List, Optional, Union, Dict
-
 from sentencepiece import SentencePieceProcessor
 from transformers import PreTrainedTokenizer
+from transformers.utils import logging, PaddingStrategy
 from transformers.tokenization_utils_base import EncodedInput, BatchEncoding
-from transformers.utils import PaddingStrategy
 
 
 class SPTokenizer:
@@ -65,23 +65,32 @@ class ChatGLMTokenizer(PreTrainedTokenizer):
 
     model_input_names = ["input_ids", "attention_mask", "position_ids"]
 
-    def __init__(self, vocab_file, padding_side="left", **kwargs):
-        super().__init__()
+    def __init__(self, vocab_file, padding_side="left", clean_up_tokenization_spaces=False, **kwargs):
         self.name = "GLMTokenizer"
-        self.padding_side = padding_side
+
         self.vocab_file = vocab_file
         self.tokenizer = SPTokenizer(vocab_file)
+        #ref https://huggingface.co/THUDM/chatglm2-6b/discussions/99/files
+        kwargs.pop("eos_token", None)
+        kwargs.pop("pad_token", None)
+        kwargs.pop("unk_token", None)
+        super().__init__(padding_side=padding_side, clean_up_tokenization_spaces=clean_up_tokenization_spaces, **kwargs)
         self.special_tokens = {
             "<bos>": self.tokenizer.bos_id,
             "<eos>": self.tokenizer.eos_id,
             "<pad>": self.tokenizer.pad_id
         }
+        # super().__init__(padding_side=padding_side, clean_up_tokenization_spaces=clean_up_tokenization_spaces, **kwargs)
 
     def get_command(self, token):
         if token in self.special_tokens:
             return self.special_tokens[token]
         assert token in self.tokenizer.special_tokens, f"{token} is not a special token for {self.name}"
         return self.tokenizer.special_tokens[token]
+
+    @property
+    def unk_token(self) -> str:
+        return "<unk>"
 
     @property
     def pad_token(self) -> str:
