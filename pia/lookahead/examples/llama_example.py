@@ -27,9 +27,7 @@ model = LlamaForCausalLM.from_pretrained(model_dir
 tokenizer = AutoTokenizer.from_pretrained(model_dir)
 tokenizer.pad_token = tokenizer.eos_token
 tokenizer.padding_side = 'left'
-stop_ids = set(tokenizer.convert_tokens_to_ids([',', '.', ' ']))
-lookahead_cache = LookaheadCache(eos=tokenizer.eos_token_id, stop_words=stop_ids)
-model.lookahead_cache = lookahead_cache
+stop_word_ids = set(tokenizer.convert_tokens_to_ids([',', '.', ' ']))
 
 prompt = "Hello, I'm am conscious and"
 inputs = tokenizer(prompt, return_tensors="pt")
@@ -38,7 +36,7 @@ attention_mask = inputs.attention_mask.cuda()
 position_ids = None
 
 # first time without lookahead
-for use_lookahead in [False, True]:
+for use_lookahead in [False, False, True, True]:
     debug_lookahead = False
     decoding_length = 63
     branch_length = 12
@@ -48,7 +46,9 @@ for use_lookahead in [False, True]:
                        "debug_lookahead": debug_lookahead,
                        "decoding_mode": 'hier',
                        "decoding_length": decoding_length,
-                       "branch_length": branch_length}
+                       "branch_length": branch_length,
+                       "stop_word_ids": stop_word_ids}
+
     outputs = model.generate(input_ids=input_ids,
                              attention_mask=attention_mask,
                              position_ids=position_ids,

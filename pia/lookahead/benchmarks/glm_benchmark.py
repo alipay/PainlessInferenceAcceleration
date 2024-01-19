@@ -15,8 +15,8 @@ from benchmark import Benchmark
 class GlmBenchmark(Benchmark):
 
     def initialize(self, model_dir=None, token_dir=None, **kwargs):
-        from models.glm.modeling_glm import GLMForConditionalGeneration
-        from models.glm.tokenization_glm import GLMChineseTokenizer
+        from pia.lookahead.models.glm.modeling_glm import GLMForConditionalGeneration
+        from pia.lookahead.models.glm.tokenization_glm import GLMChineseTokenizer
         model = GLMForConditionalGeneration.from_pretrained(model_dir
                                                             , cache_dir='../'
                                                             , offload_folder='./'
@@ -26,13 +26,12 @@ class GlmBenchmark(Benchmark):
         tokenizer = GLMChineseTokenizer.from_pretrained(model_dir)
         tokenizer.pad_token = tokenizer.eos_token
 
-        # stop_ids = tokenizer.convert_tokens_to_ids(self.stop_words)
-        # lookahead_cache = LookaheadCache(eos=tokenizer.eos_token_id, stop_words=stop_ids)
-        lookahead_cache = LookaheadCache(eos=50005, stop_words={43359, 43360, 43361, 43362})
+        stop_ids = tokenizer.convert_tokens_to_ids(self.stop_words+['的','是'])
+        lookahead_cache = LookaheadCache(eos=tokenizer.eop_token_id, stop_words=stop_ids)
         model.lookahead_cache = lookahead_cache
         self.model = model
         self.tokenizer = tokenizer
-        self.eos = 50005
+        self.eos = tokenizer.eop_token_id
         self.eop = 50006
 
     def tokenize(self, prompt, max_length=256):
@@ -79,7 +78,7 @@ warmup_count = 10000
 # test correctness with lookahead decoding
 worker.batch_chat(worker.prompts[:10],
                   max_length=max_length,
-                  decoding_length=15,
+                  decoding_length=16,
                   branch_length=4,
                   debug_lookahead=False,
                   erase=True,
