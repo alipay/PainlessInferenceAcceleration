@@ -24,7 +24,8 @@ model = GLMForConditionalGeneration.from_pretrained(model_dir
 tokenizer = GLMChineseTokenizer.from_pretrained(model_dir)
 tokenizer.pad_token = tokenizer.eos_token
 tokenizer.padding_side = 'left'
-lookahead_cache = LookaheadCache(eos=50005, stop_words={43359, 43360, 43361, 43362})
+stop_ids = set(tokenizer.convert_tokens_to_ids([',', '.', ' ', '，','。','的','是']))
+lookahead_cache = LookaheadCache(eos=tokenizer.eop_token_id, stop_words=stop_ids)
 model.lookahead_cache = lookahead_cache
 
 for block in model.glm.transformer.layers:
