@@ -1,24 +1,26 @@
+# -*- coding: utf-8 -*-
+"""
+Copyright (c) Ant Financial Service Group and its affiliates.
+"""
+
+
 from transformers import AutoTokenizer, BitsAndBytesConfig, AutoConfig
 import torch
 import time 
 from pia.lookahead.models.mixtral.modeling_mixtral import MixtralForCausalLM
+from pia.lookahead.examples import local_path_dict
 
-model_dir = "/mntnlp/common_base_model/Mixtral-8x7B-Instruct-v0.1"
+
+model_dir = local_path_dict.get('mixtral', 'your/model/path') 
 tokenizer = AutoTokenizer.from_pretrained(model_dir)
 
-# from accelerate import init_empty_weights, infer_auto_device_map
-# config = AutoConfig.from_pretrained('/mntnlp/common_base_model/Mixtral-8x7B-Instruct-v0.1')
-# with init_empty_weights():
-#     model = MixtralForCausalLM(config)
-# device_map = infer_auto_device_map(model, no_split_module_classes=["MixtralDecoderLayer"])
-
+# note: this model cannot be fully loaded into a A100, refer to mixtral_example_int4.py for solution
 model = MixtralForCausalLM.from_pretrained(model_dir
                                             , cache_dir='./'
                                             , torch_dtype=torch.float16
                                             , low_cpu_mem_usage=True
                                             , device_map="auto")
 
-# print(model.device_map)
 
 prompt = "Hello, I'm am conscious and"
 inputs = tokenizer(prompt, return_tensors="pt")
