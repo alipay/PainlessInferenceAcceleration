@@ -9,6 +9,8 @@ import torch
 
 from pia.lookahead.common.pretrained_model import LookaheadCache
 from pia.lookahead.models.chatglm.tokenization_chatglm import ChatGLMTokenizer
+#if using chatglm3
+# from pia.lookahead.models.chatglm.tokenization_chatglm_3 import ChatGLMTokenizer
 from pia.lookahead.models.chatglm.modeling_chatglm import ChatGLMForConditionalGeneration
 from pia.lookahead.examples import local_path_dict
 
@@ -21,7 +23,8 @@ model = ChatGLMForConditionalGeneration.from_pretrained(model_dir
                                                                 , low_cpu_mem_usage=True
                                                                 , device_map='auto'
                                                                 )
-lookahead_cache = LookaheadCache(eos=50005, stop_words={43359, 43360, 43361, 43362})
+stop_ids = set(tokenizer.convert_tokens_to_ids([',', '.', ' ', '，','。']))
+lookahead_cache = LookaheadCache(eos=tokenizer.eos_token_id, stop_words=stop_ids)
 model.lookahead_cache = lookahead_cache
 
 # prompt = "Hello, I'm am conscious and"

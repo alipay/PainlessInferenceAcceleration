@@ -71,7 +71,7 @@ class LookaheadPreTrainedModel(PreTrainedModel):
                         and hasattr(generation_config, 'decoding_kwargs') \
                         and generation_config.decoding_kwargs.get('use_lookahead', False) \
                         and generation_config.decoding_kwargs.get('decoding_length', 64) > 1 \
-                        and generation_config.decoding_kwargs.get('branch_length', 12) > 1:
+                        and generation_config.decoding_kwargs.get('branch_length', 12) > 0:
                     generation_mode = GenerationMode.LOOKAHEAD_GENERATION
                 else:
                     generation_mode = GenerationMode.GREEDY_SEARCH
@@ -80,7 +80,7 @@ class LookaheadPreTrainedModel(PreTrainedModel):
                         and hasattr(generation_config, 'decoding_kwargs') \
                         and generation_config.decoding_kwargs.get('use_lookahead', False) \
                         and generation_config.decoding_kwargs.get('decoding_length', 64) > 1 \
-                        and generation_config.decoding_kwargs.get('branch_length', 12) > 1:
+                        and generation_config.decoding_kwargs.get('branch_length', 12) > 0:
                     generation_mode = GenerationMode.LOOKAHEAD_GENERATION
                 else:
                     generation_mode = GenerationMode.SAMPLE
@@ -819,11 +819,12 @@ class LookaheadPreTrainedModel(PreTrainedModel):
             max_match_count = 0
             max_decoding_ids_slice = None
             max_next_token_slice = None
+  
             for i in range(len(decoding_ids)):
                 mask_indices = np.nonzero(decoding_mask[i + 1, 1:])[0]
-                decoding_ids_slice = [decoding_ids[j] for j in mask_indices]
+                decoding_ids_slice = [decoding_ids[j] for j in mask_indices] 
                 next_token_slice = [next_token_list[0]] + [next_token_list[j + 1] for j in mask_indices]
-
+                
                 c = len(decoding_ids_slice)
                 for j, p in enumerate(decoding_ids_slice):
                     if next_token_slice[j] != p:
@@ -835,6 +836,8 @@ class LookaheadPreTrainedModel(PreTrainedModel):
                 if c >= max_match_count:
                     max_decoding_ids_slice = decoding_ids_slice
                     max_next_token_slice = next_token_slice
+                # if decoding_kwargs['eos'] in decoding_ids:
+                #     max_match_count = 0
 
             prefix_plus_count = input_ids.size(-1)
             match_idx = np.nonzero(decoding_mask[max_match_index + 1, 1:])[0][:max_match_count]
