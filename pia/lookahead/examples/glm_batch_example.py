@@ -9,13 +9,14 @@ import sys
 import time
 import torch
 
-# sys.path.append('..')
 
 from pia.lookahead.common.lookahead_cache import LookaheadCache
 from pia.lookahead.models.glm.tokenization_glm import GLMChineseTokenizer
 from pia.lookahead.models.glm.modeling_glm_batch import GLMForConditionalGeneration
+from pia.lookahead.examples import local_path_dict
 
-model_dir = 'your/model/path'
+model_dir = local_path_dict.get('glm', 'your/model/path') 
+
 model = GLMForConditionalGeneration.from_pretrained(model_dir
                                                     , cache_dir='../'
                                                     , offload_folder='./'
@@ -25,7 +26,8 @@ model = GLMForConditionalGeneration.from_pretrained(model_dir
 assert hasattr(model, '_batch_generate') and model._batch_generate
 tokenizer = GLMChineseTokenizer.from_pretrained(model_dir)
 tokenizer.pad_token = tokenizer.eos_token
-lookahead_cache = LookaheadCache(eos=50005, stop_words={43359, 43360, 43361, 43362})
+stop_ids = set(tokenizer.convert_tokens_to_ids([',', '.', ' ', '，','。','的','是']))
+lookahead_cache = LookaheadCache(eos=tokenizer.eop_token_id, stop_words=stop_ids)
 model.lookahead_cache = lookahead_cache
 
 # prompt = "Hello, I'm am conscious and"

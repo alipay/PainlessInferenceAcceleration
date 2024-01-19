@@ -41,7 +41,7 @@ def preprocess_jsonl(src_dir, dst_dir, ds='coig', max_count=None):
 
     jsons = []
     for p in prompts:
-        jsons.append(json.dumps({'prompt': q}))
+        jsons.append(json.dumps({'prompt': p}))
     with open(dst_dir, 'w') as f:
         f.write('\n'.join(jsons))
 
@@ -62,7 +62,7 @@ def preprocess_csv(src_dir, dst_dir, ds=None, max_count=None):
 
 def preprocess_dolly(src_dir, dst_dir, ds='dolly', max_count=None):
     lines = open(src_dir).readlines()
-    prompts = []
+    outputs = []
     if ds == 'alpaca':
         jsons = json.loads('\n'.join(lines))
     else:
@@ -71,6 +71,7 @@ def preprocess_dolly(src_dir, dst_dir, ds='dolly', max_count=None):
         ins = line["instruction"]
         inputs = line['context'] if ds == 'dolly' else line['input']
         answer = line['response'] if ds == 'dolly' else line['output']
+        cat = line['category'] if ds == 'dolly' else 'default'
 
         if len(inputs) == 0:
             template = (
@@ -88,15 +89,14 @@ def preprocess_dolly(src_dir, dst_dir, ds='dolly', max_count=None):
             prompt = template.format(instruction=ins, input=inputs)
 
         prompt = prompt.replace('\n', '')
-        if len(prompt) >= 4096:
-            continue
-        prompts.append(prompt)
 
-        if max_count is not None and len(prompts) >= max_count:
+        outputs.append(json.dumps({'prompt': prompt, 'response': answer ,'cat': cat }))
+
+        if max_count is not None and len(outputs) >= max_count:
             break
 
-    jsons = []
-    for p in prompts:
-        jsons.append(json.dumps({'prompt': p}))
     with open(dst_dir, 'w') as f:
-        f.write('\n'.join(jsons))
+        f.write('\n'.join(outputs))
+
+
+

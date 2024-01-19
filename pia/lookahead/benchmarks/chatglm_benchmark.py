@@ -8,30 +8,27 @@ import sys
 import torch
 from transformers import AutoTokenizer
 
-sys.path.append('..')
-from common.lookahead_cache import LookaheadCache
+from pia.lookahead.common.lookahead_cache import LookaheadCache
 from benchmark import Benchmark
 
 
 class ChatglmBenchmark(Benchmark):
 
     def initialize(self, model_dir=None, token_dir=None, **kwargs):
-        from models.chatglm.modeling_chatglm import ChatGLMForConditionalGeneration
-        from models.chatglm.tokenization_chatglm import ChatGLMTokenizer
+        from pia.lookahead.models.chatglm.modeling_chatglm import ChatGLMForConditionalGeneration
+        from pia.lookahead.models.chatglm.tokenization_chatglm import ChatGLMTokenizer
         model = ChatGLMForConditionalGeneration.from_pretrained(model_dir
                                                  , cache_dir='../'
                                                  , torch_dtype=torch.float16
                                                  , low_cpu_mem_usage=True
                                                  , device_map='auto')
         tokenizer = ChatGLMTokenizer.from_pretrained(token_dir)
-        # tokenizer.pad_token = tokenizer.eos_token
-        # tokenizer.padding_side = 'left'
         stop_ids = tokenizer.convert_tokens_to_ids(self.stop_words)
         lookahead_cache = LookaheadCache(eos=tokenizer.eos_token_id, stop_words=stop_ids)
         model.lookahead_cache = lookahead_cache
         self.model = model
         self.tokenizer = tokenizer
-        self.eos = 2
+        self.eos = tokenizer.eos_token_id
         self.eop = 50006
 
     def tokenize(self, prompt, max_length=256):
@@ -42,29 +39,27 @@ class ChatglmBenchmark(Benchmark):
         return input_ids, position_ids, attention_mask
 
 
-model_dir = 'your/model/path/chatglm2'
-prompt_dir = '../datasets/dolly_15k_llama2_13b_chat.jsonl'
+model_dir = 'your/model/path'
+"""
+generate answers first if only prompts are available, answers in the warmup samples are used for constructing trie-tree cache
+prompt_dir = 'your/prompt/dir'
+dataset_dir = 'your/dataset/dir'
+worker.save_answers(prompt_dir, dataset_dir, prompt_name='your/prompt/field/name', batch_size=1, max_count=None)
+"""
+dateset_dir = 'your/dataset/path'
 
 worker = ChatglmBenchmark(log_dir='chatglm_benchmark')
 worker.initialize(model_dir=model_dir, token_dir=model_dir)
-worker.load_prompts(prompt_dir=prompt_dir)
+worker.load_prompts(prompt_dir=dateset_dir)
 
-# runable check
-prompt = '杭州在哪里？'
 max_length = 256
 chat_count = 1000
 warmup_count = 10000
-worker.chat(prompt,
-            max_length=max_length,
-            use_lookahead=False,
-            decoding_length=15,
-            branch_length=4,
-            debug_lookahead=False)
 
 # test correctness with lookahead decoding
 worker.batch_chat(worker.prompts[:10],
                   max_length=max_length,
-                  decoding_length=15,
+                  decoding_length=16,
                   branch_length=4,
                   debug_lookahead=False,
                   erase=True,
