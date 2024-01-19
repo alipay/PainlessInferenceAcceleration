@@ -1,42 +1,34 @@
-# -*- coding: utf-8 -*-
-"""
-Copyright (c) Ant Financial Service Group and its affiliates.
-"""
-
-
-import os
-import sys
+from transformers import AutoTokenizer
+from pia.lookahead.models.mistral.modeling_mistral import MistralForCausalLM
+from pia.lookahead.examples import local_path_dict
+from pia.lookahead.common.lookahead_cache import LookaheadCache
 import time
 import torch
-from transformers import AutoTokenizer
 
-from pia.lookahead.common.pretrained_model import LookaheadCache
-from pia.lookahead.models.gpt2.modeling_gpt2 import GPT2LMHeadModel
-from pia.lookahead.examples import local_path_dict
 
-model_dir = local_path_dict.get('gpt2', 'your/model/path') 
-dtype = torch.float16 if torch.cuda.is_available() else torch.float32
-model = GPT2LMHeadModel.from_pretrained(model_dir
-                                       , cache_dir='../'
-                                       , torch_dtype=dtype
-                                       , low_cpu_mem_usage=True
-                                       , device_map='auto'
-                                       )
+model_dir = local_path_dict.get('mistral', 'your/model/path') 
 tokenizer = AutoTokenizer.from_pretrained(model_dir)
+model = MistralForCausalLM.from_pretrained(model_dir,
+                                           cache_dir='../',
+                                           trust_remote_code=False,
+                                           low_cpu_mem_usage=True,
+                                           torch_dtype=torch.float16,
+                                           device_map="auto")
+
+
 tokenizer.pad_token = tokenizer.eos_token
 tokenizer.padding_side = 'left'
 stop_word_ids = set(tokenizer.convert_tokens_to_ids([',', '.', ' ']))
 
 prompt = "Hello, I'm am conscious and"
 inputs = tokenizer(prompt, return_tensors="pt")
-device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
-input_ids = inputs.input_ids.to(device)
-attention_mask = inputs.attention_mask.to(device)
+input_ids = inputs.input_ids.cuda()
+attention_mask = inputs.attention_mask.cuda()
 position_ids = None
 
 for use_lookahead in [False, False, True, True]:
     debug_lookahead = True
-    decoding_length = 64
+    decoding_length =63
     branch_length = 12
     ts = time.time()
     max_new_tokens = 256
@@ -45,8 +37,7 @@ for use_lookahead in [False, False, True, True]:
                        "decoding_mode": 'hier',
                        "decoding_length": decoding_length,
                        "branch_length": branch_length,
-                       "stop_word_ids": stop_word_ids}}
-                       
+                       "stop_word_ids": stop_word_ids}
     outputs = model.generate(input_ids=input_ids,
                              attention_mask=attention_mask,
                              position_ids=position_ids,
@@ -56,7 +47,7 @@ for use_lookahead in [False, False, True, True]:
                              max_new_tokens=max_new_tokens,
                              repetition_penalty=1.0,
                              do_sample=False,
-                             decoding_kwargs=decoding_kwargs,
+                             decoding_kwargs=decoding_kwargs
                              )
     output_ids = outputs
     input_length = input_ids.size(-1)
@@ -71,3 +62,4 @@ for use_lookahead in [False, False, True, True]:
     print(f'prompt:{prompt}')
     print(f'input text:{input_text}')
     print(f'output text:{output_text}')
+

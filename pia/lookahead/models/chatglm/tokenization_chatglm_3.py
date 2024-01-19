@@ -1,3 +1,4 @@
+import json
 import os
 import torch
 from typing import List, Optional, Union, Dict
@@ -20,7 +21,8 @@ class SPTokenizer:
         self.pad_id: int = self.sp_model.unk_id()
         assert self.sp_model.vocab_size() == self.sp_model.get_piece_size()
 
-        special_tokens = ["[MASK]", "[gMASK]", "[sMASK]", "sop", "eop"]
+        special_tokens = ["[MASK]", "[gMASK]", "[sMASK]", "sop", "eop", "<|system|>", "<|user|>", "<|assistant|>",
+                          "<|observation|>"]
         self.special_tokens = {}
         self.index_special_tokens = {}
         for token in special_tokens:
@@ -41,7 +43,18 @@ class SPTokenizer:
         return t
 
     def decode(self, t: List[int]) -> str:
-        return self.sp_model.decode(t)
+        text, buffer = "", []
+        for token in t:
+            if token in self.index_special_tokens:
+                if buffer:
+                    text += self.sp_model.decode(buffer)
+                    buffer = []
+                text += self.index_special_tokens[token]
+            else:
+                buffer.append(token)
+        if buffer:
+            text += self.sp_model.decode(buffer)
+        return text
 
     def decode_tokens(self, tokens: List[str]) -> str:
         text = self.sp_model.DecodePieces(tokens)
@@ -55,7 +68,9 @@ class SPTokenizer:
 
     def convert_id_to_token(self, index):
         """Converts an index (integer) in a token (str) using the vocab."""
-        if index in self.index_special_tokens or index in [self.eos_id, self.bos_id, self.pad_id] or index < 0:
+        if index in self.index_special_tokens:
+            return self.index_special_tokens[index]
+        if index in [self.eos_id, self.bos_id, self.pad_id] or index < 0:
             return ""
         return self.sp_model.IdToPiece(index)
 
@@ -70,17 +85,12 @@ class ChatGLMTokenizer(PreTrainedTokenizer):
 
         self.vocab_file = vocab_file
         self.tokenizer = SPTokenizer(vocab_file)
-        #ref https://huggingface.co/THUDM/chatglm2-6b/discussions/99/files
-        kwargs.pop("eos_token", None)
-        kwargs.pop("pad_token", None)
-        kwargs.pop("unk_token", None)
-        super().__init__(padding_side=padding_side, clean_up_tokenization_spaces=clean_up_tokenization_spaces, **kwargs)
         self.special_tokens = {
             "<bos>": self.tokenizer.bos_id,
             "<eos>": self.tokenizer.eos_id,
             "<pad>": self.tokenizer.pad_id
         }
-        # super().__init__(padding_side=padding_side, clean_up_tokenization_spaces=clean_up_tokenization_spaces, **kwargs)
+        super().__init__(padding_side=padding_side, clean_up_tokenization_spaces=clean_up_tokenization_spaces, **kwargs)
 
     def get_command(self, token):
         if token in self.special_tokens:
@@ -135,13 +145,11 @@ class ChatGLMTokenizer(PreTrainedTokenizer):
     def save_vocabulary(self, save_directory, filename_prefix=None):
         """
         Save the vocabulary and special tokens file to a directory.
-
         Args:
             save_directory (`str`):
                 The directory in which to save the vocabulary.
             filename_prefix (`str`, *optional*):
                 An optional prefix to add to the named of the saved files.
-
         Returns:
             `Tuple(str)`: Paths to the files saved.
         """
@@ -164,14 +172,25 @@ class ChatGLMTokenizer(PreTrainedTokenizer):
         prefix_tokens = [self.get_command("[gMASK]"), self.get_command("sop")]
         return prefix_tokens
 
-    def build_prompt(self, query, history=None):
+    def build_single_message(self, role, metadata, message):
+        assert role in ["system", "user", "assistant", "observation"], role
+        role_tokens = [self.get_command(f"<|{role}|>")] + self.tokenizer.encode(f"{metadata}\n")
+        message_tokens = self.tokenizer.encode(message)
+        tokens = role_tokens + message_tokens
+        return tokens
+
+    def build_chat_input(self, query, history=None, role="user"):
         if history is None:
             history = []
-        prompt = ""
-        for i, (old_query, response) in enumerate(history):
-            prompt += "[Round {}]\n\n问：{}\n\n答：{}\n\n".format(i + 1, old_query, response)
-        prompt += "[Round {}]\n\n问：{}\n\n答：".format(len(history) + 1, query)
-        return prompt
+        input_ids = []
+        for item in history:
+            content = item["content"]
+            if item["role"] == "system" and "tools" in item:
+                content = content + "\n" + json.dumps(item["tools"], indent=4, ensure_ascii=False)
+            input_ids.extend(self.build_single_message(item["role"], item.get("metadata", ""), content))
+        input_ids.extend(self.build_single_message(role, "", query))
+        input_ids.extend([self.get_command("<|assistant|>")])
+        return self.batch_encode_plus([input_ids], return_tensors="pt", is_split_into_words=True)
 
     def build_inputs_with_special_tokens(
             self, token_ids_0: List[int], token_ids_1: Optional[List[int]] = None
@@ -179,16 +198,13 @@ class ChatGLMTokenizer(PreTrainedTokenizer):
         """
         Build model inputs from a sequence or a pair of sequence for sequence classification tasks by concatenating and
         adding special tokens. A BERT sequence has the following format:
-
         - single sequence: `[CLS] X [SEP]`
         - pair of sequences: `[CLS] A [SEP] B [SEP]`
-
         Args:
             token_ids_0 (`List[int]`):
                 List of IDs to which the special tokens will be added.
             token_ids_1 (`List[int]`, *optional*):
                 Optional second list of IDs for sequence pairs.
-
         Returns:
             `List[int]`: List of [input IDs](../glossary#input-ids) with the appropriate special tokens.
         """
@@ -208,19 +224,16 @@ class ChatGLMTokenizer(PreTrainedTokenizer):
     ) -> dict:
         """
         Pad encoded inputs (on left/right and up to predefined length or max length in the batch)
-
         Args:
             encoded_inputs:
                 Dictionary of tokenized inputs (`List[int]`) or batch of tokenized inputs (`List[List[int]]`).
             max_length: maximum length of the returned list and optionally padding length (see below).
                 Will truncate by taking into account the special tokens.
             padding_strategy: PaddingStrategy to use for padding.
-
                 - PaddingStrategy.LONGEST Pad to the longest sequence in the batch
                 - PaddingStrategy.MAX_LENGTH: Pad to the max length (default)
                 - PaddingStrategy.DO_NOT_PAD: Do not pad
                 The tokenizer padding sides are defined in self.padding_side:
-
                     - 'left': pads on the left of the sequences
                     - 'right': pads on the right of the sequences
             pad_to_multiple_of: (optional) Integer if set will pad the sequence to a multiple of the provided value.
