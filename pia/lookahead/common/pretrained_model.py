@@ -879,6 +879,8 @@ class LookaheadPreTrainedModel(PreTrainedModel):
                 k = k[:, :, :prefix_and_next_count + max_match_count]
                 v = v[:, :, :prefix_and_next_count + max_match_count]
             else:
+                if kv_idx.device != k.device:
+                    kv_idx = kv_idx.to(k.device)
                 k = torch.concat([k[:, :, :prefix_and_next_count], k[:, :, kv_idx]], 2)
                 v = torch.concat([v[:, :, :prefix_and_next_count], v[:, :, kv_idx]], 2)
             update_past_key_values.append((k, v))
