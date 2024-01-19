@@ -326,21 +326,22 @@ class Tree():
 
 
 class LookaheadCache():
-    def __init__(self, debug=False, eos=2, stop_word_ids=None, max_node=512, max_output_node=256):
+    def __init__(self, debug=False, eos_ids=(2,), stop_words=None, max_node=512, max_output_node=256):
         self.debug = debug
-        self.eos = eos
+        self.eos_ids = eos_ids if eos_ids is not None else [None]
         self.max_node = max_node
         self.max_output_node = max_output_node
         self.mem = {}
         self._output_ids = defaultdict(list)
         self._update_trees = set()
         self._update_input_trees = set()
-        self.stop_word_ids = stop_word_ids if stop_word_ids is not None else {}
+        self.stop_words = stop_words if stop_words is not None else {}
         self.default_mask = np.ones((1, 1), dtype=np.int64)
 
     def put(self, token_ids, branch_length=8, final=False, mode='output', idx=-1):
-        if self.eos in token_ids:
-            token_ids = token_ids[:token_ids.index(self.eos)]
+        for eos in self.eos_ids:
+            if eos in token_ids:
+                token_ids = token_ids[:token_ids.index(eos)]
         if len(token_ids) >= 2:
             ts = len(token_ids)  # ts: token_ids size
 
@@ -367,8 +368,9 @@ class LookaheadCache():
     def stream_put(self, token_ids, branch_length=8, final=False, mode='output', idx=0):
         # idx is only used for caching output_ids
         assert mode == 'output' and idx >= 0
-        if self.eos in token_ids:
-            token_ids = token_ids[:token_ids.index(self.eos)]
+        for eos in self.eos_ids:
+            if eos in token_ids:
+                token_ids = token_ids[:token_ids.index(eos)]
         self._output_ids[idx].extend(token_ids)
         output_ids = self._output_ids[idx]
         ts = len(output_ids)
@@ -409,7 +411,7 @@ class LookaheadCache():
             tree = self.mem.get(t, None)
             if tree is not None:
                 ids = token_ids[i + 1:]
-                if t in self.stop_word_ids and len(ids) == 0:
+                if t in self.stop_words and len(ids) == 0:
                     continue
                 decoding_ids, decoding_masks, sizes = tree.get(ids,
                                                                max_size=decoding_length,
@@ -492,7 +494,7 @@ class LookaheadCache():
             tree = self.mem.get(t, None)
             if tree is not None:
                 ids = token_ids[i + 1:]
-                if t in self.stop_word_ids and len(ids) == 0:
+                if t in self.stop_words and len(ids) == 0:
                     continue
                 decoding_ids, decoding_masks, sizes = tree.get_one_branch(ids,
                                                                           max_length=branch_length,
@@ -546,7 +548,7 @@ class LookaheadCache():
             org_size = len(decoding_ids)
             gap = max_size - org_size
             if gap > 0:
-                decoding_ids.extend([self.eos] * gap)
+                decoding_ids.extend([0] * gap)
             cur = decoding_cursors[i]
             decoding_masks[i, :org_size, cur - min_cur:cur - min_cur + org_size] = decoding_mask_list[i]
             decoding_masks[i, :, :cur - min_cur + 1] = 1

@@ -1035,6 +1035,7 @@ class QWenLMHeadModel(QWenPreTrainedModel):
             generation_config=generation_config,
             **kwargs,
         )
+        # response = tokenizer.decode(outputs[0])
         response = decode_tokens(
             outputs[0],
             tokenizer,
@@ -1171,6 +1172,8 @@ class QWenLMHeadModel(QWenPreTrainedModel):
     #         **kwargs,
     #     )
 
+    def _decoding_args(self):
+        return ['decoding_kwargs', 'stop_words_ids']
 
 class RotaryEmbedding(torch.nn.Module):
     def __init__(self, dim, base=10000):

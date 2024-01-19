@@ -22,20 +22,17 @@ model = GLMForConditionalGeneration.from_pretrained(model_dir
                                                     , offload_folder='./'
                                                     , torch_dtype=torch.float16
                                                     , low_cpu_mem_usage=True
-                                                    , device_map='auto')
-assert hasattr(model, '_batch_generate') and model._batch_generate
+                                                    , device_map={"":"cuda:0"})
 tokenizer = GLMChineseTokenizer.from_pretrained(model_dir)
 tokenizer.pad_token = tokenizer.eos_token
-stop_ids = set(tokenizer.convert_tokens_to_ids([',', '.', ' ', '，','。','的','是']))
-lookahead_cache = LookaheadCache(eos=tokenizer.eop_token_id, stop_words=stop_ids)
-model.lookahead_cache = lookahead_cache
+stop_words = set(tokenizer.convert_tokens_to_ids([',', '.', ' ', '，','。','的','是']))
 
 # prompt = "Hello, I'm am conscious and"
 prompt = ["杭州在哪里？[gMASK]", "西湖在哪个省？[gMASK]"]
 inputs = tokenizer(prompt, return_tensors="pt", padding=True, truncation=False, )
 
 device = model.device
-debug_lookahead = True
+debug_lookahead = False
 decoding_length = 64
 branch_length = 12
 max_new_tokens = 128
@@ -52,7 +49,8 @@ for use_lookahead in [False, False, True, True]:
                        "debug_lookahead": debug_lookahead,
                        "decoding_mode": 'hier',
                        "decoding_length": decoding_length,
-                       "branch_length": branch_length}
+                       "branch_length": branch_length,
+                       "stop_words": stop_words}
     outputs = model.generate(input_ids=input_ids,
                              attention_mask=attention_mask,
                              position_ids=position_ids,
