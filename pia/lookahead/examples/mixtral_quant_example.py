@@ -3,14 +3,13 @@
 Copyright (c) Ant Financial Service Group and its affiliates.
 """
 
-
-from transformers import AutoTokenizer, BitsAndBytesConfig, AutoConfig
-import torch
 import time 
+import torch
+from transformers import AutoTokenizer, BitsAndBytesConfig, AutoConfig
 from pia.lookahead.models.mixtral.modeling_mixtral import MixtralForCausalLM
 from pia.lookahead.examples import local_path_dict
 
-
+# only worker with transformers>=4.36.0
 model_dir = local_path_dict.get('mixtral', 'your/model/path') 
 tokenizer = AutoTokenizer.from_pretrained(model_dir)
 
@@ -24,7 +23,6 @@ model = MixtralForCausalLM.from_pretrained(model_dir,
                                            quantization_config=quantization_config, 
                                            torch_dtype=torch.float16)
 
-
 prompt = "Hello, I'm am conscious and"
 inputs = tokenizer(prompt, return_tensors="pt")
 input_ids = inputs.input_ids.cuda()
@@ -33,7 +31,7 @@ position_ids = None
 
 for use_lookahead in [False, False, True, True]:
     debug_lookahead = False
-    decoding_length = 63
+    decoding_length = 64
     branch_length = 12
     ts = time.time()
     max_new_tokens = 256

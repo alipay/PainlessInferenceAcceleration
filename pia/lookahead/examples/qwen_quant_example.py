@@ -16,22 +16,17 @@ from pia.lookahead.models.qwen.modeling_qwen import QWenLMHeadModel
 from pia.lookahead.models.qwen.tokenization_qwen import QWenTokenizer
 from pia.lookahead.examples import local_path_dict
 
-model_dir = local_path_dict.get('qwen', 'your/model/path') 
 
-dtype = torch.float16 if torch.cuda.is_available() else torch.float32
-model = QWenLMHeadModel.from_pretrained(model_dir
-                                       , cache_dir='../'
-                                       , torch_dtype=dtype
-                                       , fp16=True
-                                       , low_cpu_mem_usage=True
-                                       , device_map={"":"cuda:0"}
-                                       ).cuda().eval()
-model.generation_config = GenerationConfig.from_pretrained(model_dir, trust_remote_code=True)
+model_dir = local_path_dict.get('qwen_quant', 'your/model/path') 
 
+# test with transformers==4.36.0
+model = QWenLMHeadModel.from_pretrained(model_dir,
+                                        device_map="auto",
+                                        trust_remote_code=True
+                                       )
 
 tokenizer = QWenTokenizer.from_pretrained(model_dir)
-stop_words = set(tokenizer.convert_tokens_to_ids([',', '.', ' ', '，','。']))
-
+stop_words = [tokenizer.encode(x)[0] for x in [',', '.', ' ', '，','。']]
 
 # prompt = "杭州在哪里？"
 prompt = "编一个200字左右的儿童故事"
@@ -50,6 +45,7 @@ for use_lookahead in [False, False, True, True]:
                        "stop_words": stop_words}
     model.generation_config.decoding_kwargs=decoding_kwargs
     model.generation_config.do_sample=False
+    model.generation_config.repetition_penalty=None  # repetition_penalty is not fully supported currently, will fix in the future
     ts = time.time()
     response, history = model.chat(tokenizer, prompt, history=None, eos_token_id=151645)
     te = time.time()

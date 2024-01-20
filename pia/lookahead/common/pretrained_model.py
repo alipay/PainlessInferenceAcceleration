@@ -839,15 +839,15 @@ class LookaheadPreTrainedModel(PreTrainedModel):
                 # if decoding_kwargs['eos'] in decoding_ids:
                 #     max_match_count = 0
 
-            prefix_plus_count = input_ids.size(-1)
+            prefix_and_next_count = input_ids.size(-1)
             match_idx = np.nonzero(decoding_mask[max_match_index + 1, 1:])[0][:max_match_count]
             if len(decoding_ids) != max_match_count:
                 past = model_kwargs["past_key_values"]
                 device = past[0][0].device
-                kv_idx = torch.tensor(match_idx + prefix_plus_count, dtype=torch.long, device=device)
+                kv_idx = torch.tensor(match_idx + prefix_and_next_count, dtype=torch.long, device=device)
                 model_kwargs["past_key_values"] = self._update_cache(past,
                                                                      kv_idx,
-                                                                     prefix_and_next_count=prefix_plus_count,
+                                                                     prefix_and_next_count=prefix_and_next_count,
                                                                      max_match_count=max_match_count,
                                                                      max_match_index=max_match_index)
 
@@ -996,11 +996,6 @@ class LookaheadPreTrainedModel(PreTrainedModel):
         ```"""
         # init values
 
-        if not hasattr(self, 'lookahead_cache'):
-            self.lookahead_cache = LookaheadCache()
-        
-        self.lookahead_cache.eos = eos_token_id
-        self.lookahead_cache.stop_word_ids = model_kwargs['decoding_kwargs'].get('stop_word_ids', {})
 
         logits_processor = logits_processor if logits_processor is not None else LogitsProcessorList()
         stopping_criteria = stopping_criteria if stopping_criteria is not None else StoppingCriteriaList()
@@ -1028,6 +1023,12 @@ class LookaheadPreTrainedModel(PreTrainedModel):
             if return_dict_in_generate is not None
             else self.generation_config.return_dict_in_generate
         )
+
+        # init lookahead cache
+        if not hasattr(self, 'lookahead_cache'):
+            self.lookahead_cache = LookaheadCache()
+        self.lookahead_cache.eos_ids = eos_token_id
+        self.lookahead_cache.stop_words = model_kwargs['decoding_kwargs'].get('stop_words', {})
 
         # init attention / hidden states / scores tuples
         scores = () if (return_dict_in_generate and output_scores) else None
@@ -1259,9 +1260,8 @@ class LookaheadPreTrainedModel(PreTrainedModel):
                 decoder_model_args = set(inspect.signature(decoder.forward).parameters)
                 model_args |= {f"decoder_{x}" for x in decoder_model_args}
 
-        decoding_kwargs = ['decoding_kwargs','stop_words_ids']
         for key, value in model_kwargs.items():
-            if value is not None and key not in model_args and key not in decoding_kwargs:
+            if value is not None and key not in model_args and key not in self._decoding_args():
                 unused_model_args.append(key)
 
         if unused_model_args:
@@ -1269,3 +1269,6 @@ class LookaheadPreTrainedModel(PreTrainedModel):
                 f"The following `model_kwargs` are not used by the model: {unused_model_args} (note: typos in the"
                 " generate arguments will also show up in this list)"
             )
+
+    def _decoding_args(self):
+        return ['decoding_kwargs']
