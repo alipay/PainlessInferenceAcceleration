@@ -45,7 +45,7 @@ for use_lookahead in [False, False, True, True]:
                        "stop_words": stop_words}
     model.generation_config.decoding_kwargs=decoding_kwargs
     model.generation_config.do_sample=False
-    model.generation_config.repetition_penalty=None  # repetition_penalty is not fully supported
+    model.generation_config.repetition_penalty=None  # repetition_penalty is not fully supported currently, will fix in the future
     ts = time.time()
     response, history = model.chat(tokenizer, prompt, history=None, eos_token_id=151645)
     te = time.time()
