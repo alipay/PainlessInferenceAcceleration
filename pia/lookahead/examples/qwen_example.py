@@ -30,7 +30,7 @@ model.generation_config = GenerationConfig.from_pretrained(model_dir, trust_remo
 
 
 tokenizer = QWenTokenizer.from_pretrained(model_dir)
-stop_words = set(tokenizer.convert_tokens_to_ids([',', '.', ' ', '，','。']))
+stop_words = [tokenizer.encode(x)[0] for x in [',', '.', ' ', '，','。']]
 
 
 # prompt = "杭州在哪里？"
@@ -50,6 +50,7 @@ for use_lookahead in [False, False, True, True]:
                        "stop_words": stop_words}
     model.generation_config.decoding_kwargs=decoding_kwargs
     model.generation_config.do_sample=False
+    model.generation_config.repetition_penalty=None  # repetition_penalty is not fully supported currently, will fix in the future
     ts = time.time()
     response, history = model.chat(tokenizer, prompt, history=None, eos_token_id=151645)
     te = time.time()
