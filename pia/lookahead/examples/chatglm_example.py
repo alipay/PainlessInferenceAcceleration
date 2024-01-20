@@ -21,9 +21,9 @@ model = ChatGLMForConditionalGeneration.from_pretrained(model_dir
                                                                 , cache_dir='./'
                                                                 , torch_dtype=torch.float16
                                                                 , low_cpu_mem_usage=True
-                                                                , device_map='auto'
+                                                                , device_map={"":"cuda:0"}
                                                                 )
-stop_word_ids = set(tokenizer.convert_tokens_to_ids([',', '.', ' ']))
+stop_words = set(tokenizer.convert_tokens_to_ids([',', '.', ' ']))
 
 # prompt = "Hello, I'm am conscious and"
 prompt = "杭州在哪里？"
@@ -47,7 +47,7 @@ for use_lookahead in [False,False,True,True]:
                        "decoding_mode": 'hier',
                        "decoding_length": decoding_length,
                        "branch_length": branch_length,
-                       "stop_word_ids": stop_word_ids}
+                       "stop_words": stop_words}
     outputs = model.generate(input_ids=input_ids,
                              attention_mask=attention_mask,
                              position_ids=position_ids,

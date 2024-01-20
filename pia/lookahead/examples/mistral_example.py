@@ -3,14 +3,13 @@
 Copyright (c) Ant Financial Service Group and its affiliates.
 """
 
-
+import time
+import torch
 from transformers import AutoTokenizer
 from pia.lookahead.models.mistral.modeling_mistral import MistralForCausalLM
 from pia.lookahead.examples import local_path_dict
-import time
-import torch
 
-
+# only worker with transformers>=4.36.0
 model_dir = local_path_dict.get('mistral', 'your/model/path') 
 tokenizer = AutoTokenizer.from_pretrained(model_dir)
 model = MistralForCausalLM.from_pretrained(model_dir,
@@ -18,12 +17,12 @@ model = MistralForCausalLM.from_pretrained(model_dir,
                                            trust_remote_code=False,
                                            low_cpu_mem_usage=True,
                                            torch_dtype=torch.float16,
-                                           device_map="auto")
+                                           device_map={"":"cuda:0"})
 
 
 tokenizer.pad_token = tokenizer.eos_token
 tokenizer.padding_side = 'left'
-stop_word_ids = set(tokenizer.convert_tokens_to_ids([',', '.', ' ']))
+stop_words = set(tokenizer.convert_tokens_to_ids([',', '.', ' ']))
 
 prompt = "Hello, I'm am conscious and"
 inputs = tokenizer(prompt, return_tensors="pt")
@@ -42,7 +41,7 @@ for use_lookahead in [False, False, True, True]:
                        "decoding_mode": 'hier',
                        "decoding_length": decoding_length,
                        "branch_length": branch_length,
-                       "stop_word_ids": stop_word_ids}
+                       "stop_words": stop_words}
     outputs = model.generate(input_ids=input_ids,
                              attention_mask=attention_mask,
                              position_ids=position_ids,
