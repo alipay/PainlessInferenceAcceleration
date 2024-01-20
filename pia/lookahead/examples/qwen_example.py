@@ -33,11 +33,12 @@ tokenizer = QWenTokenizer.from_pretrained(model_dir)
 stop_words = set(tokenizer.convert_tokens_to_ids([',', '.', ' ', '，','。']))
 
 
-prompt = "杭州在哪里？"
+# prompt = "杭州在哪里？"
+prompt = "编一个200字左右的儿童故事"
 device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
 
 for use_lookahead in [False, False, True, True]:
-    debug_lookahead = True
+    debug_lookahead = False
     decoding_length = 64
     branch_length = 12
     max_new_tokens = 256
@@ -52,4 +53,4 @@ for use_lookahead in [False, False, True, True]:
     ts = time.time()
     response, history = model.chat(tokenizer, prompt, history=None, eos_token_id=151645)
     te = time.time()
-    print(f'lookahead:{use_lookahead} time:{te - ts:.3f}s response:{response}\n\n\n')
+    print(f'lookahead:{use_lookahead} time:{te - ts:.3f}s speed:{len(response)/(te-ts):.1f}c/s response:{response}\n\n\n')
