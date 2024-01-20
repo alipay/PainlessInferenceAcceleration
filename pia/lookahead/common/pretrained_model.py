@@ -839,15 +839,15 @@ class LookaheadPreTrainedModel(PreTrainedModel):
                 # if decoding_kwargs['eos'] in decoding_ids:
                 #     max_match_count = 0
 
-            prefix_plus_count = input_ids.size(-1)
+            prefix_and_next_count = input_ids.size(-1)
             match_idx = np.nonzero(decoding_mask[max_match_index + 1, 1:])[0][:max_match_count]
             if len(decoding_ids) != max_match_count:
                 past = model_kwargs["past_key_values"]
                 device = past[0][0].device
-                kv_idx = torch.tensor(match_idx + prefix_plus_count, dtype=torch.long, device=device)
+                kv_idx = torch.tensor(match_idx + prefix_and_next_count, dtype=torch.long, device=device)
                 model_kwargs["past_key_values"] = self._update_cache(past,
                                                                      kv_idx,
-                                                                     prefix_and_next_count=prefix_plus_count,
+                                                                     prefix_and_next_count=prefix_and_next_count,
                                                                      max_match_count=max_match_count,
                                                                      max_match_index=max_match_index)
 
