@@ -19,22 +19,21 @@ from pia.lookahead.examples import local_path_dict
 
 model_dir = local_path_dict.get('qwen_quant', 'your/model/path') 
 
-# test with transformers==4.36.0
 model = QWenLMHeadModel.from_pretrained(model_dir,
                                         device_map="auto",
                                         trust_remote_code=True
                                        )
+model.generation_config = GenerationConfig.from_pretrained(model_dir, trust_remote_code=True)
 
 tokenizer = QWenTokenizer.from_pretrained(model_dir)
 stop_words = [tokenizer.encode(x)[0] for x in [',', '.', ' ', '，','。']]
 
 # prompt = "杭州在哪里？"
 prompt = "编一个200字左右的儿童故事"
-device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
 
 for use_lookahead in [False, False, True, True]:
     debug_lookahead = False
-    decoding_length = 64
+    decoding_length = 128
     branch_length = 12
     max_new_tokens = 256
     decoding_kwargs = {"use_lookahead": use_lookahead,
@@ -49,4 +48,5 @@ for use_lookahead in [False, False, True, True]:
     ts = time.time()
     response, history = model.chat(tokenizer, prompt, history=None, eos_token_id=151645)
     te = time.time()
-    print(f'lookahead:{use_lookahead} time:{te - ts:.3f}s speed:{len(response)/(te-ts):.1f}c/s response:{response}\n\n\n')
+    token_count = len(tokenizer.encode(response))
+    print(f'lookahead:{use_lookahead} time:{te - ts:.3f}s speed:{token_count/(te-ts):.1f}token/s response:{response}\n\n\n')
