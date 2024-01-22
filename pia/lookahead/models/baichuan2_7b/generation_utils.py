@@ -80,3 +80,4 @@ class TextIterStreamer:
             raise StopIteration()
         else:
             return value
+
