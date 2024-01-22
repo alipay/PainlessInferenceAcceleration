@@ -1,10 +1,7 @@
-try:
-    import bitsandbytes as bnb
-    from bitsandbytes.nn.modules import Params4bit, Int8Params
-except ImportError:
-    print('import bitsandbytes Error')
-import torch
-
+import bitsandbytes as bnb
+from accelerate import init_empty_weights
+from bitsandbytes.nn.modules import Params4bit, Int8Params
+import torch 
 
 def Params4bitCuda(self, device):
     self.data = self.data.cuda(device)
@@ -16,7 +13,6 @@ def Params4bitCuda(self, device):
     self.quant_state[6] = self.quant_state[6].cuda(device)
     return self
 
-
 class Linear4bitOnline(torch.nn.Module):
     def __init__(self, weight, bias, quant_type):
         super().__init__()
@@ -24,7 +20,7 @@ class Linear4bitOnline(torch.nn.Module):
             weight.data, requires_grad=False, compress_statistics=True, quant_type=quant_type
         )
         self.compute_dtype = None
-        # self.weight.cuda(weight.device)
+        #self.weight.cuda(weight.device)
         self.bias = bias
 
     def forward(self, x: torch.Tensor):
@@ -48,17 +44,16 @@ class Linear4bitOnline(torch.nn.Module):
         out = out.to(inp_dtype)
 
         return out
-
-
+    
 class Linear8bitLtOnline(torch.nn.Module):
     def __init__(
-            self,
-            weight,
-            bias,
-            has_fp16_weights=True,
-            memory_efficient_backward=False,
-            threshold=0.0,
-            index=None,
+        self,
+        weight,
+        bias,
+        has_fp16_weights=True,
+        memory_efficient_backward=False,
+        threshold=0.0,
+        index=None,
     ):
         super().__init__()
         assert (
@@ -95,7 +90,7 @@ class Linear8bitLtOnline(torch.nn.Module):
         # weights are cast automatically as Int8Params, but the bias has to be cast manually
         if self.bias is not None and self.bias.dtype != x.dtype:
             self.bias.data = self.bias.data.to(x.dtype)
-
+        
         out = bnb.matmul(x, self.weight, bias=self.bias, state=self.state)
 
         if not self.state.has_fp16_weights:
@@ -105,55 +100,53 @@ class Linear8bitLtOnline(torch.nn.Module):
                 del self.state.CB
                 self.weight.data = self.state.CxB
         return out
-
-
+    
 def quantize_offline(model, bits: int):
     assert (bits == 4), f'bits: {bits} is not supported'
-
+    
     for i, layer in enumerate(model.model.layers):
         layer.self_attn.W_pack = bnb.nn.Linear4bit(
-            layer.self_attn.W_pack.weight.shape[1],
-            layer.self_attn.W_pack.weight.shape[0],
-            False,
-            torch.float16,
-            compress_statistics=True,
-            quant_type="nf4",
-        )
+                            layer.self_attn.W_pack.weight.shape[1],
+                            layer.self_attn.W_pack.weight.shape[0],
+                            False,
+                            torch.float16,
+                            compress_statistics=True,
+                            quant_type="nf4",
+                        )
         layer.self_attn.o_proj = bnb.nn.Linear4bit(
-            layer.self_attn.o_proj.weight.shape[1],
-            layer.self_attn.o_proj.weight.shape[0],
-            False,
-            torch.float16,
-            compress_statistics=True,
-            quant_type="nf4",
-        )
+                            layer.self_attn.o_proj.weight.shape[1],
+                            layer.self_attn.o_proj.weight.shape[0],
+                            False,
+                            torch.float16,
+                            compress_statistics=True,
+                            quant_type="nf4",
+                        )
 
         layer.mlp.gate_proj = bnb.nn.Linear4bit(
-            layer.mlp.gate_proj.weight.shape[1],
-            layer.mlp.gate_proj.weight.shape[0],
-            False,
-            torch.float16,
-            compress_statistics=True,
-            quant_type="nf4",
-        )
+                            layer.mlp.gate_proj.weight.shape[1],
+                            layer.mlp.gate_proj.weight.shape[0],
+                            False,
+                            torch.float16,
+                            compress_statistics=True,
+                            quant_type="nf4",
+                        )
         layer.mlp.down_proj = bnb.nn.Linear4bit(
-            layer.mlp.down_proj.weight.shape[1],
-            layer.mlp.down_proj.weight.shape[0],
-            False,
-            torch.float16,
-            compress_statistics=True,
-            quant_type="nf4",
-        )
+                            layer.mlp.down_proj.weight.shape[1],
+                            layer.mlp.down_proj.weight.shape[0],
+                            False,
+                            torch.float16,
+                            compress_statistics=True,
+                            quant_type="nf4",
+                        )
         layer.mlp.up_proj = bnb.nn.Linear4bit(
-            layer.mlp.up_proj.weight.shape[1],
-            layer.mlp.up_proj.weight.shape[0],
-            False,
-            torch.float16,
-            compress_statistics=True,
-            quant_type="nf4",
-        )
+                            layer.mlp.up_proj.weight.shape[1],
+                            layer.mlp.up_proj.weight.shape[0],
+                            False,
+                            torch.float16,
+                            compress_statistics=True,
+                            quant_type="nf4",
+                        )
     return model
-
 
 def quantize_online(model, bits: int):
     def quant(weight, bias=None):
@@ -170,7 +163,7 @@ def quantize_online(model, bits: int):
             linear = Linear4bitOnline(
                 weight,
                 bias,
-                quant_type="nf4",  # fp4/nf4
+                quant_type="nf4", #fp4/nf4
             )
         else:
             raise ValueError("quantize only support 4/8 bit")
@@ -184,42 +177,35 @@ def quantize_online(model, bits: int):
         layer.mlp.up_proj = quant(layer.mlp.up_proj.weight)
     return model
 
-
 def init_model_weight_int4(config, model, state_dict):
-    # replace Params4bit.cuda with Params4bitCuda
+    #replace Params4bit.cuda with Params4bitCuda
     Params4bit.cuda = Params4bitCuda
 
     for i in range(config.num_hidden_layers):
         weight_data = state_dict[f'model.layers.{i}.self_attn.W_pack.weight.data']
         weight_quant_state = state_dict[f'model.layers.{i}.self_attn.W_pack.weight.quant_state']
-        model.model.layers[i].self_attn.W_pack.weight = Params4bit(weight_data, requires_grad=False,
-                                                                   quant_state=weight_quant_state)
-
+        model.model.layers[i].self_attn.W_pack.weight = Params4bit(weight_data, requires_grad=False, quant_state=weight_quant_state)
+        
         weight_data = state_dict[f'model.layers.{i}.self_attn.o_proj.weight.data']
         weight_quant_state = state_dict[f'model.layers.{i}.self_attn.o_proj.weight.quant_state']
-        model.model.layers[i].self_attn.o_proj.weight = Params4bit(weight_data, requires_grad=False,
-                                                                   quant_state=weight_quant_state)
-
+        model.model.layers[i].self_attn.o_proj.weight = Params4bit(weight_data, requires_grad=False, quant_state=weight_quant_state)
+        
         weight_data = state_dict[f'model.layers.{i}.mlp.gate_proj.weight.data']
         weight_quant_state = state_dict[f'model.layers.{i}.mlp.gate_proj.weight.quant_state']
-        model.model.layers[i].mlp.gate_proj.weight = Params4bit(weight_data, requires_grad=False,
-                                                                quant_state=weight_quant_state)
-
+        model.model.layers[i].mlp.gate_proj.weight = Params4bit(weight_data, requires_grad=False, quant_state=weight_quant_state)
+        
         weight_data = state_dict[f'model.layers.{i}.mlp.up_proj.weight.data']
         weight_quant_state = state_dict[f'model.layers.{i}.mlp.up_proj.weight.quant_state']
-        model.model.layers[i].mlp.up_proj.weight = Params4bit(weight_data, requires_grad=False,
-                                                              quant_state=weight_quant_state)
-
+        model.model.layers[i].mlp.up_proj.weight = Params4bit(weight_data, requires_grad=False, quant_state=weight_quant_state)
+        
         weight_data = state_dict[f'model.layers.{i}.mlp.down_proj.weight.data']
         weight_quant_state = state_dict[f'model.layers.{i}.mlp.down_proj.weight.quant_state']
-        model.model.layers[i].mlp.down_proj.weight = Params4bit(weight_data, requires_grad=False,
-                                                                quant_state=weight_quant_state)
-
+        model.model.layers[i].mlp.down_proj.weight = Params4bit(weight_data, requires_grad=False, quant_state=weight_quant_state)
+        
         model.model.layers[i].input_layernorm.weight = state_dict[f'model.layers.{i}.input_layernorm.weight']
-        model.model.layers[i].post_attention_layernorm.weight = state_dict[
-            f'model.layers.{i}.post_attention_layernorm.weight']
-
+        model.model.layers[i].post_attention_layernorm.weight = state_dict[f'model.layers.{i}.post_attention_layernorm.weight']
+    
     model.model.embed_tokens.weight = state_dict['model.embed_tokens.weight']
     model.model.norm.weight = state_dict['model.norm.weight']
-    model.lm_head.weight = state_dict['lm_head.weight']
+    model.lm_head.weight = state_dict['lm_head.weight'] 
     return model
