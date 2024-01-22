@@ -8,8 +8,6 @@ import time
 import torch
 
 from pia.lookahead.common.pretrained_model import LookaheadCache
-# from pia.lookahead.models.chatglm.tokenization_chatglm import ChatGLMTokenizer
-#if using chatglm3
 from pia.lookahead.models.chatglm.tokenization_chatglm_3 import ChatGLMTokenizer
 from pia.lookahead.models.chatglm.modeling_chatglm import ChatGLMForConditionalGeneration
 from pia.lookahead.examples import local_path_dict
@@ -28,7 +26,6 @@ stop_words = set(tokenizer.convert_tokens_to_ids([',', '.', ' ']))
 # prompt = "Hello, I'm am conscious and"
 prompt = "杭州在哪里？"
 
-# inputs = model.build_inputs(tokenizer, prompt, history=[])
 inputs = tokenizer.build_chat_input(prompt, history=[])
 input_ids = inputs.input_ids.cuda()
 attention_mask = inputs.attention_mask.cuda()
@@ -52,11 +49,12 @@ for use_lookahead in [False,False,True,True]:
                        "decoding_length": decoding_length,
                        "branch_length": branch_length,
                        "stop_words": stop_words}
+                       
     outputs = model.generate(input_ids=input_ids,
                              attention_mask=attention_mask,
                              position_ids=position_ids,
                              pad_token_id=tokenizer.eos_token_id,
-                             eos_token_id=tokenizer.eos_token_id,
+                             eos_token_id=eos_token_id,
                              use_cache=True,
                              max_new_tokens=max_new_tokens,
                              repetition_penalty=1.0,
