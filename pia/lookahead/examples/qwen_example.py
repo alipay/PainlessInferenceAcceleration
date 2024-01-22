@@ -49,9 +49,10 @@ for use_lookahead in [False, False, True, True]:
                        "branch_length": branch_length,
                        "stop_words": stop_words}
     model.generation_config.decoding_kwargs=decoding_kwargs
-    model.generation_config.do_sample=False
+    model.generation_config.do_sample=False  # default is True for qwen, result in different responses in every generation
     model.generation_config.repetition_penalty=None  # repetition_penalty is not fully supported currently, will fix in the future
     ts = time.time()
     response, history = model.chat(tokenizer, prompt, history=None, eos_token_id=151645)
     te = time.time()
-    print(f'lookahead:{use_lookahead} time:{te - ts:.3f}s speed:{len(response)/(te-ts):.1f}c/s response:{response}\n\n\n')
+    token_count = len(tokenizer.encode(response))
+    print(f'lookahead:{use_lookahead} time:{te - ts:.3f}s speed:{token_count/(te-ts):.1f}token/s response:{response}\n\n\n')
