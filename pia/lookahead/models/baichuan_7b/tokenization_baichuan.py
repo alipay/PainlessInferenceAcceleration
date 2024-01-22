@@ -1,5 +1,4 @@
-# Copyright 2023 Baichuan Inc. All Rights Reserved.
-
+# coding=utf-8
 # Copyright 2022 EleutherAI and the HuggingFace Inc. team. All rights reserved.
 #
 # This code is based on EleutherAI's GPT-NeoX library and the GPT-NeoX
@@ -40,9 +39,9 @@ PRETRAINED_VOCAB_FILES_MAP = {
 PRETRAINED_POSITIONAL_EMBEDDINGS_SIZES = {}
 
 
-class BaichuanTokenizer(PreTrainedTokenizer):
+class BaiChuanTokenizer(PreTrainedTokenizer):
     """
-    Construct a Baichuan tokenizer. Based on byte-level Byte-Pair-Encoding.
+    Construct a BaiChuan tokenizer. Based on byte-level Byte-Pair-Encoding.
 
     Args:
         vocab_file (`str`):
@@ -72,12 +71,11 @@ class BaichuanTokenizer(PreTrainedTokenizer):
         eos_token = AddedToken(eos_token, lstrip=False, rstrip=False) if isinstance(eos_token, str) else eos_token
         unk_token = AddedToken(unk_token, lstrip=False, rstrip=False) if isinstance(unk_token, str) else unk_token
         pad_token = AddedToken(pad_token, lstrip=False, rstrip=False) if isinstance(pad_token, str) else pad_token
-        
         self.vocab_file = vocab_file
         self.add_bos_token = add_bos_token
         self.add_eos_token = add_eos_token
         self.sp_model = spm.SentencePieceProcessor(**self.sp_model_kwargs)
-        self.sp_model.Load(vocab_file)        
+        self.sp_model.Load(vocab_file)
         
         super().__init__(
             bos_token=bos_token,
