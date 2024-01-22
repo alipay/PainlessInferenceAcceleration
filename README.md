@@ -13,11 +13,14 @@
 
 ## News or Update
 
-TODO1: support the latest version  [🤗 transformers](https://github.com/huggingface/transformers) ]. Currently it's based on 4.30.2.
+<del> TODO1: support the latest version  [🤗 transformers](https://github.com/huggingface/transformers) ]. Currently it's based on 4.30.2. </del>
 
 TODO2: integrate our work [FastCoT](https://arxiv.org/pdf/2311.08263.pdf)
 
+## Known issuss
 
+1. repetition_penalty is not fully supported, we will fix it in the future.
+2. lookahead may generate responses different from original ones due to low-precise data type (i.e., fp16 or bf16), the responses would be the same with fp32.
 
 ## Performance Comparison
 
