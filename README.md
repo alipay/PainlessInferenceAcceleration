@@ -45,7 +45,7 @@ We use the first 1000 samples for evaluation and the rest for trie-tree cache co
 
 We use the first 1000 samples for evaluation and the rest for trie-tree cache construction. The hyper-parameters are `decoding_length=128` and `branch_lenght=32`.
 
-Our method could obtain significant acceleration in RAG (Retrieval Augmented Generation) scenarios. However, there is no real-life datasets avaiable currently. Therefore, we only evaluate on our private datasets and models. 
+Our method could obtain significant acceleration in RAG (Retrieval Augmented Generation) scenarios. However, there is no real-life datasets available currently. Therefore, we only evaluate on our private datasets and models. 
 AntGLM-10B is a LLM developed by Ant Group with [GLM](https://huggingface.co/THUDM/glm-10b-chinese) architecture. 
 
 | model          | scenarios       | GPU           | 🤗 transformers | Lookahead    |
