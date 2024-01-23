@@ -406,7 +406,6 @@ class LookaheadCache():
 
         decoding_ids = None
         sizes = [0, 0]
-        match_count = len(token_ids)
         for i, t in enumerate(token_ids):
             tree = self.mem.get(t, None)
             if tree is not None:
@@ -421,7 +420,6 @@ class LookaheadCache():
                                                                mode=mode,
                                                                idx=idx)
                 s = len(decoding_ids)
-                match_count = len(token_ids) - i
                 # token count is enough, not need retrieve again
                 if s >= branch_length:
                     break
@@ -434,7 +432,7 @@ class LookaheadCache():
     def par_get(self, token_ids, decoding_length=16, branch_length=8, min_input_size=0, min_output_size=0, mode='mix',
                 idx=0):
 
-        output_ids, decoding_masks, decoding_lengths = self.trie_get(token_ids,
+        output_ids, decoding_masks, decoding_lengths = self.hier_get(token_ids,
                                                                      decoding_length=decoding_length,
                                                                      branch_length=branch_length,
                                                                      min_input_size=min_input_size,

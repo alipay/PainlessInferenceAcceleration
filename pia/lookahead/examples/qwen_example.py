@@ -11,7 +11,6 @@ import torch
 from transformers import AutoTokenizer
 from transformers.generation import GenerationConfig
 
-from pia.lookahead.common.pretrained_model import LookaheadCache
 from pia.lookahead.models.qwen.modeling_qwen import QWenLMHeadModel
 from pia.lookahead.models.qwen.tokenization_qwen import QWenTokenizer
 from pia.lookahead.examples import local_path_dict
