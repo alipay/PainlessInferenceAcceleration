@@ -765,7 +765,7 @@ class LookaheadPreTrainedModel(PreTrainedModel):
             is_encoder_decoder: bool = False,
             standardize_cache_format: bool = False,
             logits_processor: Optional[LogitsProcessorList] = None,
-            input_ids: Optional[torch.Tensor] = None,
+            input_ids: Optional[torch.LongTensor] = None,
     ) -> Dict[str, Any]:
         # update past_key_values
         model_kwargs["past_key_values"] = self._extract_past_from_model_output(
@@ -773,101 +773,112 @@ class LookaheadPreTrainedModel(PreTrainedModel):
         )
 
         decoding_kwargs = model_kwargs['decoding_kwargs']
-        decoding_ids = decoding_kwargs.get('decoding_ids', [])
-        if len(decoding_ids) <= 1:
-            next_token_logits = outputs.logits[:, -1:, :]
-            # pre-process distribution
-            # next_tokens_scores = logits_processor(input_ids, next_token_logits)
-            bs, nt, nv = next_token_logits.shape
-            next_tokens_scores = logits_processor(input_ids, next_token_logits.squeeze(1)).unsqueeze(1)
+        draft_ids = decoding_kwargs.get('decoding_ids', [])[1:]
 
+        if len(draft_ids) == 0:
+            # logits.shape: [bs, n, voc]
+            next_token_logits = outputs.logits[:, -1, :]
+            # pre-process distribution
+            next_tokens_scores = logits_processor(input_ids, next_token_logits)
             if decoding_kwargs.get('do_sample', False):
                 probs = nn.functional.softmax(next_tokens_scores, dim=-1)
-                next_tokens = torch.multinomial(probs.view(bs * nt, nv), num_samples=1).view(bs, nt)
+                next_tokens = torch.multinomial(probs, num_samples=1)
             else:
-                next_tokens = torch.argmax(next_tokens_scores, dim=-1, keepdim=False).long()
+                next_tokens = torch.argmax(next_tokens_scores, dim=-1, keepdim=True).long()
+            next_token_list = next_tokens.tolist()
             model_kwargs['next_tokens'] = next_tokens
             model_kwargs['next_tokens_scores'] = next_tokens_scores
-            next_token_list = next_tokens.tolist()
             model_kwargs['next_token_list'] = next_token_list
-            decoding_kwargs['input_id_list'][0].extend(next_token_list[0])
+            # decoding_kwargs['input_id_list'][0].extend(next_token_list[0])
             decoding_kwargs['dls'].append(1)
             decoding_kwargs['edls'].append(1)
             if decoding_kwargs.get('debug_lookahead', False):
                 decoding_qids = decoding_kwargs.get('decoding_qids', [])
                 print(f'size:0 query:{decoding_qids} next_token:{next_token_list[0]}')
         else:
-            # TODO: accurate logit_processor
-            # next_tokens_scores = logits_processor(input_ids, outputs.logits)
-            bs, nt, nv = outputs.logits.shape
-            next_tokens_scores = logits_processor(input_ids.repeat(1, nt).view(bs * nt, -1),
-                                                  outputs.logits.view(bs * nt, -1)).view(bs, nt, -1)
+            draft_masks = decoding_kwargs['decoding_masks'][1:, 1:]
+            branch_lengths = np.sum(draft_masks, axis=1)
+            max_branch_length = np.max(branch_lengths)
+            last = branch_lengths[0]
+            leaf_indices = []
+            for i, l in enumerate(branch_lengths):
+                if i == 0 or l > last:
+                    continue
+                leaf_indices.append(i-1)
+                last = i
+            leaf_indices.append(-1)
+            leaf_draft_masks = draft_masks[leaf_indices]
+            leaf_branch_lengths = branch_lengths[leaf_indices]
+            seg = [0] + np.cumsum(leaf_branch_lengths).tolist()
+            nonzero_indices = np.nonzero(leaf_draft_masks)[1].tolist()
+            mask_indices = [nonzero_indices[seg[i]:seg[i+1]] for i in range(len(seg)-1)]
+            draft_branches = [[draft_ids[i] for i in indices] for indices in mask_indices]
+            logits = outputs.logits
 
-            if decoding_kwargs.get('do_sample', False):
-                probs = nn.functional.softmax(next_tokens_scores, dim=-1)
-                bs, nt, nv = probs.shape
-                next_tokens = torch.multinomial(probs.view(bs * nt, nv), num_samples=1).view(bs, nt)
-            else:
-                next_tokens = torch.argmax(next_tokens_scores, dim=-1, keepdim=False).long()
+            next_token_list = []
+            next_token_tensors = []
+            next_token_indices = []
+            branch = None
+            for i in range(-1, max_branch_length):
+                if i == -1:
+                    logit_index = 0
+                else:
+                    logit_index = mask_indices[0][i]+1
 
-            next_token_list = next_tokens.tolist()[0]
-            decoding_ids = decoding_kwargs['decoding_ids'][1:]
-            decoding_mask = decoding_kwargs['decoding_masks']
-            sizes = decoding_kwargs['sizes']
+                next_token_logits = logits[:, logit_index]
+                next_tokens_scores = logits_processor(input_ids, next_token_logits)
+                if decoding_kwargs.get('do_sample', False):
+                    probs = nn.functional.softmax(next_tokens_scores, dim=-1)
+                    next_tokens = torch.multinomial(probs, num_samples=1)
+                else:
+                    next_tokens = torch.argmax(next_tokens_scores, dim=-1, keepdim=True).long()
+                next_token_id = next_tokens.tolist()[0][0]
+                next_token_tensors.append(next_tokens)
+                next_token_list.append(next_token_id)
+                next_token_indices.append(logit_index)
 
-            max_match_index = 0
-            max_match_count = 0
-            max_decoding_ids_slice = None
-            max_next_token_slice = None
-  
-            for i in range(len(decoding_ids)):
-                mask_indices = np.nonzero(decoding_mask[i + 1, 1:])[0]
-                decoding_ids_slice = [decoding_ids[j] for j in mask_indices] 
-                next_token_slice = [next_token_list[0]] + [next_token_list[j + 1] for j in mask_indices]
-                
-                c = len(decoding_ids_slice)
-                for j, p in enumerate(decoding_ids_slice):
-                    if next_token_slice[j] != p:
-                        c = j
-                        break
-                if c > max_match_count:
-                    max_match_count = c
-                    max_match_index = i
-                if c >= max_match_count:
-                    max_decoding_ids_slice = decoding_ids_slice
-                    max_next_token_slice = next_token_slice
-                # if decoding_kwargs['eos'] in decoding_ids:
-                #     max_match_count = 0
+                if i == max_branch_length-1:
+                    break
 
-            prefix_and_next_count = input_ids.size(-1)
-            match_idx = np.nonzero(decoding_mask[max_match_index + 1, 1:])[0][:max_match_count]
-            if len(decoding_ids) != max_match_count:
+                update_mask_indices = []
+                update_draft_branches = []
+                for j, branch in enumerate(draft_branches):
+                    if len(branch) > i+1 and branch[i+1] == next_token_id:
+                        update_mask_indices.append(mask_indices[j])
+                        update_draft_branches.append(branch)
+
+                if len(update_mask_indices) == 0:
+                    break
+                mask_indices = update_mask_indices
+                draft_branches = update_draft_branches
+
+            next_tokens = torch.cat(next_token_tensors, 1).to(input_ids.device)
+            max_match_count = len(next_token_list) - 1
+            max_match_index = next_token_indices[-1]
+            if len(draft_ids) != max_match_count:
                 past = model_kwargs["past_key_values"]
                 device = past[0][0].device
-                kv_idx = torch.tensor(match_idx + prefix_and_next_count, dtype=torch.long, device=device)
+                context_length = input_ids.size(-1)
+                # ignore the first idx as it will be accepted all the time
+                next_token_indices = torch.tensor(next_token_indices[1:], dtype=torch.long, device=device)-1
+                kv_idx = next_token_indices + context_length
                 model_kwargs["past_key_values"] = self._update_cache(past,
                                                                      kv_idx,
-                                                                     prefix_and_next_count=prefix_and_next_count,
+                                                                     prefix_and_next_count=context_length,
                                                                      max_match_count=max_match_count,
                                                                      max_match_index=max_match_index)
-
-            next_token_list = [next_token_list[0:1] + [next_token_list[x + 1] for x in match_idx]]
-            next_tokens = torch.tensor(next_token_list, dtype=torch.long, device=input_ids.device)
             model_kwargs['next_tokens'] = next_tokens
-            model_kwargs['next_token_list'] = next_token_list
-            decoding_kwargs['input_id_list'][0].extend(next_token_list[0])
-            decoding_kwargs['dls'].append(len(decoding_ids))
+            model_kwargs['next_token_list'] = [next_token_list]
+            decoding_kwargs['dls'].append(len(draft_ids)+1)
             decoding_kwargs['edls'].append(max_match_count + 1)
             if decoding_kwargs.get('debug_lookahead', False):
-                lengths = np.sum(decoding_mask, axis=1) - 1
-                l = np.concatenate([lengths[:-1][(lengths[1:] - lengths[:-1]) <= 0], lengths[-1:]], axis=0)
-                ls = ','.join(l.astype(np.str_))
+                ls = ','.join(leaf_branch_lengths.astype(np.str_))
                 decoding_qids = decoding_kwargs['decoding_qids']
-                size_str = ','.join([str(x) for x in sizes])
+                size_str = ','.join([str(x) for x in decoding_kwargs['sizes']])
                 print(
-                    f'decoding_length:{len(decoding_ids)+1} accept_length:{max_match_count+1} '
-                    f'query:{decoding_qids} source:{size_str} lengths:{ls} index:{max_match_index} '
-                    f'branch_token:{max_decoding_ids_slice} next_token:{max_next_token_slice}')
+                    f'decoding_length:{len(draft_ids)+1} accept_length:{max_match_count+1} '
+                    f'query:{decoding_qids} hits:{size_str} lengths:{ls} index:{max_match_index} '
+                    f'branch_token:{branch} accept_token:{next_token_list}')
 
         return model_kwargs
 
@@ -1092,7 +1103,7 @@ class LookaheadPreTrainedModel(PreTrainedModel):
 
         assert input_ids.size(0) == 1
         input_id_list = input_ids[0].tolist()
-        decoding_kwargs['input_id_list'] = [input_id_list]
+        # decoding_kwargs['input_id_list'] = [input_id_list]
         branch_length = decoding_kwargs.get('branch_length', 12)
         self.lookahead_cache.put(input_id_list[1:], branch_length=branch_length + 1, mode='input', idx=0)
         ts = time.time()
