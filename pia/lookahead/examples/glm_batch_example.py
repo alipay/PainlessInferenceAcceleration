@@ -10,7 +10,6 @@ import time
 import torch
 
 
-from pia.lookahead.common.lookahead_cache import LookaheadCache
 from pia.lookahead.models.glm.tokenization_glm import GLMChineseTokenizer
 from pia.lookahead.models.glm.modeling_glm_batch import GLMForConditionalGeneration
 from pia.lookahead.examples import local_path_dict

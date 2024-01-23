@@ -10,7 +10,6 @@ import time
 import torch
 from transformers import AutoTokenizer
 
-from pia.lookahead.common.pretrained_model import LookaheadCache
 from pia.lookahead.models.gptj.modeling_gptj import GPTJForCausalLM
 from pia.lookahead.examples import local_path_dict
 

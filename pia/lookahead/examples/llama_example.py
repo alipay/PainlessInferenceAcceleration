@@ -11,7 +11,6 @@ import time
 import torch
 from transformers import AutoTokenizer
 
-from pia.lookahead.common.lookahead_cache import LookaheadCache
 from pia.lookahead.models.llama.modeling_llama import LlamaForCausalLM
 from pia.lookahead.examples import local_path_dict
 

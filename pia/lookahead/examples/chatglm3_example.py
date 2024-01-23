@@ -7,7 +7,6 @@ import sys
 import time
 import torch
 
-from pia.lookahead.common.pretrained_model import LookaheadCache
 from pia.lookahead.models.chatglm.tokenization_chatglm_3 import ChatGLMTokenizer
 from pia.lookahead.models.chatglm.modeling_chatglm import ChatGLMForConditionalGeneration
 from pia.lookahead.examples import local_path_dict

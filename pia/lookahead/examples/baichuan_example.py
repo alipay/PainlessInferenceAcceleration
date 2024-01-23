@@ -12,8 +12,8 @@ from transformers import AutoTokenizer
 from transformers import AutoModelForCausalLM
 from transformers.generation.utils import GenerationConfig
 
-from pia.lookahead.models.baichuan.modeling_baichuan import BaichuanForCausalLM
-from pia.lookahead.models.baichuan.tokenization_baichuan import BaichuanTokenizer
+from pia.lookahead.models.baichuan2_7b.modeling_baichuan import BaichuanForCausalLM
+from pia.lookahead.models.baichuan2_7b.tokenization_baichuan import BaichuanTokenizer
 from pia.lookahead.examples import local_path_dict
 
 model_dir = local_path_dict.get('baichuan', 'your/model/path') 
@@ -23,7 +23,7 @@ model = BaichuanForCausalLM.from_pretrained(model_dir
                                             , cache_dir='../'
                                             , torch_dtype=torch.float16
                                             , low_cpu_mem_usage=True
-                                            , device_map={"":"cuda:0"}
+                                            , device_map={"": "cuda:0"}
                                             , trust_remote_code=True
                                             )
 tokenizer.pad_token = tokenizer.eos_token

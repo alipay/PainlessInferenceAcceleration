@@ -36,7 +36,7 @@ from transformers.utils import add_start_docstrings, add_start_docstrings_to_mod
 
 # from transformers.modeling_utils import PreTrainedModel
 from pia.lookahead.common.pretrained_model_batch import LookaheadPreTrainedModel
-from pia.lookahead.csrc.triton.rms_norm import rmsnorm_wrapper
+# from pia.lookahead.csrc.triton.rms_norm import rmsnorm_wrapper
 
 os.environ['TOKENIZERS_PARALLELISM'] = 'false'
 
@@ -88,7 +88,23 @@ class LlamaRMSNorm(nn.Module):
         self.variance_epsilon = eps
 
     def forward(self, hidden_states):
-        return rmsnorm_wrapper(hidden_states, self.weight, eps=self.variance_epsilon)
+        input_dtype = hidden_states.dtype
+        variance = hidden_states.to(torch.float32).pow(2).mean(-1, keepdim=True)
+        hidden_states = hidden_states * torch.rsqrt(variance + self.variance_epsilon)
+
+        return (self.weight * hidden_states).to(input_dtype)
+
+# class LlamaRMSNorm(nn.Module):
+#     def __init__(self, hidden_size, eps=1e-6):
+#         """
+#         LlamaRMSNorm is equivalent to T5LayerNorm
+#         """
+#         super().__init__()
+#         self.weight = nn.Parameter(torch.ones(hidden_size))
+#         self.variance_epsilon = eps
+#
+#     def forward(self, hidden_states):
+#         return rmsnorm_wrapper(hidden_states, self.weight, eps=self.variance_epsilon)
 
 
 class LlamaRotaryEmbedding(torch.nn.Module):
@@ -354,13 +370,13 @@ class LlamaAttention(nn.Module):
         query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cached, position_ids)
 
         if past_key_value is None:
-            decoding_max_length = decoding_kwargs.get('decoding_max_length', None)
 
             attn_output, attn_weights = self._attn(query_states,
                                                           key_states,
                                                           value_states,
                                                           attention_mask=attention_mask)
 
+            decoding_max_length = decoding_kwargs.get('decoding_max_length', None)
             zeros = torch.zeros([bs, self.num_heads, decoding_max_length - l, self.head_dim],
                                 dtype=hidden_states.dtype, 
                                 device=hidden_states.device)
