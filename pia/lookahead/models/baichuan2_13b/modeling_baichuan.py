@@ -401,7 +401,7 @@ class BaichuanModel(BaichuanPreTrainedModel):
         if attention_mask is not None and len(attention_mask.shape) == 4:
             # lookahead
             # attention_mask:  [bs, 1, src_len, tgt_len]
-            attention_mask = (1.0-attention_mask.to(inputs_embeds.dtype)) * torch.finfo(inputs_embeds.dtype).min + alibi_mask
+            attention_mask = (1.0-attention_mask.to(inputs_embeds.dtype)) * torch.finfo(inputs_embeds.dtype).min + alibi_mask[:,-seq_length:]
         else:
             # non-lookahead
 

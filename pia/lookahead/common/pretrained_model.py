@@ -699,7 +699,7 @@ class LookaheadPreTrainedModel(PreTrainedModel):
                  })
 
             if position_ids is not None:
-                model_inputs["position_ids"] = self._get_position_ids(position_ids, encoding=True, length=length)
+                model_inputs["position_ids"] = self._get_position_ids(position_ids, prefill=True, length=length)
 
         else:
             decoding_qids = input_ids[0, -2:].tolist()
@@ -748,12 +748,12 @@ class LookaheadPreTrainedModel(PreTrainedModel):
             )
             if position_ids is not None:
                 indices = torch.sum(decoding_attention_mask, dim=3).squeeze(1)[0]
-                model_inputs["position_ids"] = self._get_position_ids(position_ids, indices=indices, encoding=False)
+                model_inputs["position_ids"] = self._get_position_ids(position_ids, indices=indices, prefill=False)
 
         return model_inputs
 
-    def _get_position_ids(self, full_position_ids, indices=None, length=None, encoding=True):
-        if encoding:
+    def _get_position_ids(self, full_position_ids, indices=None, length=None, prefill=True):
+        if prefill:
             return full_position_ids[..., :length]
         else:
             return full_position_ids[..., indices]
@@ -778,8 +778,7 @@ class LookaheadPreTrainedModel(PreTrainedModel):
         update_input_ids = input_ids
 
         if len(draft_ids) == 0:
-            # logits.shape: [bs, n, voc]
-            next_token_logits = outputs.logits[:, -1, :]
+            next_token_logits = outputs.logits[:, -1]
             # pre-process distribution
             next_tokens_scores = logits_processor(update_input_ids, next_token_logits)
             if decoding_kwargs.get('do_sample', False):
@@ -787,10 +786,11 @@ class LookaheadPreTrainedModel(PreTrainedModel):
                 next_tokens = torch.multinomial(probs, num_samples=1)
             else:
                 next_tokens = torch.argmax(next_tokens_scores, dim=-1, keepdim=True).long()
+                # print(f'{torch.max(next_tokens_scores,dim=-1)}')
+                # print(f'{next_token_logits[0,:8].tolist()=}')
             next_token_list = next_tokens.tolist()
             update_input_ids = torch.cat([update_input_ids, next_tokens], dim=1)
             model_kwargs['update_input_ids'] = update_input_ids
-            # model_kwargs['next_tokens'] = next_tokens
             model_kwargs['next_tokens_scores'] = next_tokens_scores
             model_kwargs['next_token_list'] = next_token_list
             decoding_kwargs['dls'].append(1)
@@ -820,8 +820,8 @@ class LookaheadPreTrainedModel(PreTrainedModel):
             logits = outputs.logits
 
             next_token_list = []
-            next_token_tensors = []
-            next_token_indices = []
+            # next_token_tensors = []
+            logit_indices = []
             branch = None
             for i in range(-1, max_branch_length):
                 if i == -1:
@@ -836,11 +836,12 @@ class LookaheadPreTrainedModel(PreTrainedModel):
                     next_tokens = torch.multinomial(probs, num_samples=1)
                 else:
                     next_tokens = torch.argmax(next_tokens_scores, dim=-1, keepdim=True).long()
+                    # print(f'{torch.max(next_tokens_scores,dim=-1)}')
+                    # print(f'{next_token_logits[0,:8].tolist()=}')
                 update_input_ids = torch.cat([update_input_ids, next_tokens], dim=1)
                 next_token_id = next_tokens.tolist()[0][0]
-                next_token_tensors.append(next_tokens)
                 next_token_list.append(next_token_id)
-                next_token_indices.append(logit_index)
+                logit_indices.append(logit_index)
 
                 if i == max_branch_length-1:
                     break
@@ -859,18 +860,18 @@ class LookaheadPreTrainedModel(PreTrainedModel):
 
             # next_tokens = torch.cat(next_token_tensors, 1).to(input_ids.device)
             max_match_count = len(next_token_list) - 1
-            max_match_index = next_token_indices[-1]
+            max_match_index = logit_indices[-1] - 1
             if len(draft_ids) != max_match_count:
                 past = model_kwargs["past_key_values"]
                 device = past[0][0].device
                 # ignore the first idx as it will be accepted all the time
-                next_token_indices = torch.tensor(next_token_indices[1:], dtype=torch.long, device=device)-1
-                kv_idx = next_token_indices + context_length
+                kv_idx = torch.tensor(logit_indices[1:], dtype=torch.long, device=device)-1 + context_length
+                continuous = max_match_index + 1 == max_match_count
                 model_kwargs["past_key_values"] = self._update_cache(past,
                                                                      kv_idx,
                                                                      context_length=context_length,
                                                                      max_match_count=max_match_count,
-                                                                     max_match_index=max_match_index)
+                                                                     continuous=continuous)
             # model_kwargs['next_tokens'] = next_tokens
             model_kwargs['next_token_list'] = [next_token_list]
             model_kwargs['update_input_ids'] = update_input_ids
@@ -889,11 +890,11 @@ class LookaheadPreTrainedModel(PreTrainedModel):
 
         return model_kwargs
 
-    def _update_cache(self, past_key_values, kv_idx, context_length=None, max_match_count=None,
-                      max_match_index=None):
+    def _update_cache_with_axis_2(self, past_key_values, kv_idx, context_length=None, 
+                                  max_match_count=None, continuous=False):
         update_past_key_values = []
         for k, v in past_key_values:
-            if max_match_index + 1 == max_match_count:
+            if continuous:
                 k = k[:, :, :context_length + max_match_count]
                 v = v[:, :, :context_length + max_match_count]
             else:
@@ -903,6 +904,44 @@ class LookaheadPreTrainedModel(PreTrainedModel):
                 v = torch.concat([v[:, :, :context_length], v[:, :, kv_idx]], 2)
             update_past_key_values.append((k, v))
         return tuple(update_past_key_values)
+
+    def _update_cache_with_axis_1(self, past_key_values, kv_idx, context_length=None, 
+                                  max_match_count=None, continuous=False):
+        update_past_key_values = []
+        for k, v in past_key_values:
+            if continuous:
+                k = k[:, :context_length + max_match_count]
+                v = v[:, :context_length + max_match_count]
+            else:
+                if kv_idx.device != k.device:
+                    kv_idx = kv_idx.to(k.device)
+                k = torch.concat([k[:, :context_length], k[:, kv_idx]], 1)
+                v = torch.concat([v[:, :context_length], v[:, kv_idx]], 1)
+            update_past_key_values.append((k, v))
+        return tuple(update_past_key_values)
+
+    def _update_cache_with_axis_0(self, past_key_values, kv_idx, context_length=None, 
+                                  max_match_count=None, continuous=False):
+        update_past_key_values = []
+        for k, v in past_key_values:
+            if continuous:
+                k = k[:context_length + max_match_count]
+                v = v[:context_length + max_match_count]
+            else:
+                if kv_idx.device != k.device:
+                    kv_idx = kv_idx.to(k.device)
+                k = torch.concat([k[:context_length], k[kv_idx]], 0)
+                v = torch.concat([v[:context_length], v[kv_idx]], 0)
+            update_past_key_values.append((k, v))
+        return tuple(update_past_key_values)
+
+
+    def _update_cache(self, past_key_values, kv_idx, context_length=None, 
+                      max_match_count=None, continuous=False):
+        return self._update_cache_with_axis_2(past_key_values, kv_idx, 
+                                              context_length=context_length, 
+                                              max_match_count=max_match_count,
+                                              continuous=continuous)
 
     def lookahead_generation(
             self,

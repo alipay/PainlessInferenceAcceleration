@@ -41,7 +41,6 @@ for use_lookahead in [False,False,True,True]:
     ts = time.time()
     decoding_kwargs = {"use_lookahead": use_lookahead,
                        "debug_lookahead": debug_lookahead,
-                       "decoding_mode": 'hier',
                        "decoding_length": decoding_length,
                        "branch_length": branch_length,
                        "stop_words": stop_words}
@@ -58,14 +57,9 @@ for use_lookahead in [False,False,True,True]:
                              )
     output_ids = outputs
     input_length = input_ids.size(-1)
-    output_ids = output_ids[:, input_length:].tolist()
-    # output_ids = output_ids.tolist()
-    output_texts = []
-    output_id_list = []
-    for token_ids in output_ids:
-        output_id_list.append(token_ids)
-        text = tokenizer.decode(token_ids)
-        output_texts.append(text)
-    input_id_list = input_ids.tolist()
+    output_ids = output_ids[0, input_length:].tolist()
+    response = tokenizer.decode(output_ids)
     te = time.time()
-    print(f'use_lookahead:{use_lookahead} time:{te - ts:.3f} output:{output_texts}')
+    token_count = len(output_ids)
+    print(f'lookahead:{use_lookahead} time:{te - ts:.3f}s speed:{token_count/(te-ts):.1f}token/s response:\n{response}\n')
+
