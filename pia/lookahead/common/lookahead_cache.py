@@ -378,6 +378,8 @@ class LookaheadCache():
         if ts > min_branch_length:
             for i in range(ts - min_branch_length):
                 token_id = output_ids[i]
+                if token_id in self.stop_words:
+                    continue
                 tup = output_ids[i + 1:i + branch_length + 1]
                 if self.debug:
                     print(f'input token:{token_id} tokens:{tup}')
