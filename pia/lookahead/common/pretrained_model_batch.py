@@ -829,9 +829,11 @@ class LookaheadPreTrainedModel(PreTrainedModel):
 
                     if decoding_kwargs.get('debug_lookahead', False):
                         decoding_qids = decoding_kwargs['decoding_qids'][batch_index]
+                        tokenizer = decoding_kwargs.get('tokenizer', None)
+                        words = '' if tokenizer is None else tokenizer.decode(next_token_list)
                         print(
-                            f'batch_index:{batch_index} decoding_length:{len(draft_ids)+1} accept_length:{1} '
-                            f'query:{decoding_qids}')
+                            f'batch_index:{batch_index} decoding_length:{len(draft_ids)+1} accept_length:1 '
+                            f'query:{decoding_qids} accept_token:{next_token_id} accept_word:{words}')
                 else:
                     draft_masks = decoding_kwargs['decoding_masks'][batch_index, 1:, cur-min_cur+1:]
                     branch_lengths = np.sum(draft_masks, axis=1)
@@ -916,11 +918,13 @@ class LookaheadPreTrainedModel(PreTrainedModel):
                         ls = ','.join(leaf_branch_lengths.astype(np.str_))
                         decoding_qids = decoding_kwargs['decoding_qids'][batch_index]
                         size_str = ','.join([str(x) for x in decoding_kwargs['hit_sizes'][batch_index]])
+                        tokenizer = decoding_kwargs.get('tokenizer', None)
+                        words = '' if tokenizer is None else tokenizer.decode(next_token_list)
                         print(
                             f'batch_index:{batch_index} decoding_length:{len(draft_ids)+1} '
                             f'accept_length:{max_match_count+1} '
                             f'query:{decoding_qids} hits:{size_str} lengths:{ls} index:{max_match_index} '
-                            f'branch_token:{branch} accept_token:{next_token_list}')
+                            f'branch_token:{branch} accept_token:{next_token_list} accept_word:{words}')
 
         model_kwargs['input_ids'] = input_ids
         decoding_kwargs['decoding_cursors'] = decoding_cursors
