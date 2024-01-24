@@ -14,7 +14,7 @@
 ## *News or Update* 🔥
 - [2024/01] We support Mistral & Mixtral [example](https://github.com/alipay/PainlessInferenceAcceleration/blob/main/pia/lookahead/examples/mixtral_example.py)
 
-- [2023/12] We released our [Lookahead paper](https://arxiv.org/abs/2309.06180) on arXiv!
+- [2023/12] We released our [Lookahead paper](https://arxiv.org/abs/2312.12728) on arXiv!
 
 - [2023/12] PIA released 💪 !!! Fast, Faster, Fastest 🐆 !!!
 
@@ -25,7 +25,7 @@ TODO2: integrate our work [FastCoT](https://arxiv.org/pdf/2311.08263.pdf)
 
 ## Models we support 
 
-- AntGLM
+- GLM
 - Baichuan & Baichuan 2 
 - BLOOM
 - ChatGLM
