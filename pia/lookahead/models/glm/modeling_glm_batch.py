@@ -143,14 +143,6 @@ class SelfAttention(nn.Module):
 
         if past_key_value is None:
             decoding_max_length = decoding_kwargs.get('decoding_max_length', None)
-            # past_key = torch.zeros([bs, decoding_max_length, self.num_heads, self.head_dim],dtype=hidden_states.dtype,device=hidden_states.device)
-            # past_value = torch.zeros([bs, decoding_max_length, self.num_heads, self.head_dim],dtype=hidden_states.dtype,device=hidden_states.device)
-            # kv = torch.zeros([2, bs, self.num_heads, decoding_max_length, self.head_dim],dtype=hidden_states.dtype,device=hidden_states.device)
-            # past_key = past_kv[0]
-            # past_value = past_kv[1]
-            # past_key, past_value = kv.unbind(0)
-            # past_key[:,:,:l] = key
-            # past_value[:,:,:l] = value
             attn_output, attn_weights = self._attn(query, key, value,
                                                    attention_mask=attention_mask)
             zeros = torch.zeros([bs, self.num_heads, decoding_max_length - l, self.head_dim], dtype=hidden_states.dtype,

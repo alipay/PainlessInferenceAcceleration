@@ -36,14 +36,13 @@ attention_mask = inputs.attention_mask.to(device)
 position_ids = None
 
 for use_lookahead in [False,False,True,True]:
-    debug_lookahead = True
+    debug_lookahead = False
     decoding_length = 64
     branch_length = 12
     ts = time.time()
     max_new_tokens = 64
     decoding_kwargs = {"use_lookahead": use_lookahead,
                        "debug_lookahead": debug_lookahead,
-                       "decoding_mode": 'hier',
                        "decoding_length": decoding_length,
                        "branch_length": branch_length,
                        "stop_words": stop_words}
@@ -65,5 +64,5 @@ for use_lookahead in [False,False,True,True]:
     input_text = tokenizer.decode(input_ids[0])
     te = time.time()
     token_count = len(output_ids)
-    print(f'lookahead:{use_lookahead} time:{te - ts:.3f}s speed:{token_count/(te-ts):.1f}token/s response:{output_text}\n\n\n')
+    print(f'lookahead:{use_lookahead} time:{te - ts:.3f}s speed:{token_count/(te-ts):.1f}token/s response:\n{output_text}\n')
 

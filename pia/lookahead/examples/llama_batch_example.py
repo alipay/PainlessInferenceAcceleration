@@ -35,12 +35,12 @@ attention_mask = inputs.attention_mask.to(device)
 position_ids = None
 
 # first time without lookahead
-for use_lookahead in [True, True]:
-    debug_lookahead = True
-    decoding_length = 32
+for use_lookahead in [False, False, True, True]:
+    debug_lookahead = False
+    decoding_length = 64
     branch_length = 8
     ts = time.time()
-    max_new_tokens = 16
+    max_new_tokens = 64
     decoding_kwargs = {"use_lookahead": use_lookahead,
                        "debug_lookahead": debug_lookahead,
                        "decoding_mode": 'hier',
@@ -54,16 +54,16 @@ for use_lookahead in [True, True]:
                              eos_token_id=tokenizer.eos_token_id,
                              use_cache=True,
                              max_new_tokens=max_new_tokens,
-                             # repetition_penalty=1.0,
+                             repetition_penalty=1.0,
                              do_sample=False,
                              decoding_kwargs=decoding_kwargs
                              )
     output_ids = outputs
     input_length = input_ids.size(-1)
     output_ids = output_ids[:, input_length:].tolist()
-    output_text = tokenizer.batch_decode(output_ids)
+    response = tokenizer.batch_decode(output_ids)
     input_text = tokenizer.batch_decode(input_ids)
     te = time.time()
     token_count = sum([len([y for y in x if y!=tokenizer.eos_token_id]) for x in output_ids])
-    print(f'lookahead:{use_lookahead} time:{te - ts:.3f}s speed:{token_count/(te-ts):.1f}token/s response:{output_text}\n\n\n')
+    print(f'lookahead:{use_lookahead} time:{te - ts:.3f}s speed:{token_count/(te-ts):.1f}token/s response:{response}\n\n\n')
 

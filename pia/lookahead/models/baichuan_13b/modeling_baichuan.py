@@ -316,15 +316,13 @@ class BaichuanModel(BaichuanPreTrainedModel):
 
         alibi_mask = self.get_alibi_mask(inputs_embeds, seq_length_with_past)
 
-
         # Note: adapt for lookahead
         if attention_mask is not None and len(attention_mask.shape) == 4:
             # lookahead
             # attention_mask:  [bs, 1, src_len, tgt_len]
-            attention_mask = (1.0-attention_mask.to(inputs_embeds.dtype)) * torch.finfo(inputs_embeds.dtype).min + alibi_mask
+            attention_mask = (1.0-attention_mask.to(inputs_embeds.dtype)) * torch.finfo(inputs_embeds.dtype).min + alibi_mask[:,-seq_length:]
         else:
             # non-lookahead
-
             if attention_mask is not None:
                 if len(attention_mask.shape) == 2:
                     expanded_mask = attention_mask.to(alibi_mask.dtype)
