@@ -1114,16 +1114,16 @@ class QWenLMHeadModel(QWenPreTrainedModel):
 
         return stream_generator()
 
-    def _update_cache(self, past_key_values, kv_idx, prefix_and_next_count=None, max_match_count=None,
+    def _update_cache(self, past_key_values, kv_idx, context_length=None, max_match_count=None,
                       max_match_index=None):
         update_past_key_values = []
         for k, v in past_key_values:
             if max_match_index + 1 == max_match_count:
-                k = k[:, :prefix_and_next_count + max_match_count]
-                v = v[:, :prefix_and_next_count + max_match_count]
+                k = k[:, :context_length + max_match_count]
+                v = v[:, :context_length + max_match_count]
             else:
-                k = torch.concat([k[:, :prefix_and_next_count], k[:, kv_idx]], 1)
-                v = torch.concat([v[:, :prefix_and_next_count], v[:, kv_idx]], 1)
+                k = torch.concat([k[:, :context_length], k[:, kv_idx]], 1)
+                v = torch.concat([v[:, :context_length], v[:, kv_idx]], 1)
             update_past_key_values.append((k, v))
         return tuple(update_past_key_values)
 
