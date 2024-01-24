@@ -97,7 +97,7 @@ Note that our work is different from the other method named [lookahead decoding]
 </div> -->
 
 ![flow](./pia/lookahead/figures/flow.png)
-![dynamic](./pia/lookahead/figures/dynamic.png)
+![dynamic](https://github.com/alipay/PainlessInferenceAcceleration/blob/main/pia/lookahead/figures/dynamic.gif)
 
 
 
