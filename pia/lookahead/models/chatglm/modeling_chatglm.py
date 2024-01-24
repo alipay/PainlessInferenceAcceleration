@@ -983,7 +983,7 @@ class ChatGLMForConditionalGeneration(ChatGLMPreTrainedModel):
 
     def _update_cache(self, past_key_values, kv_idx, context_length=None, 
                       max_match_count=None, continuous=False):
-        return self._update_cache_with_axis_2(past_key_values, kv_idx, 
+        return self._update_cache_with_axis_0(past_key_values, kv_idx, 
                                               context_length=context_length, 
                                               max_match_count=max_match_count,
                                               continuous=continuous)
