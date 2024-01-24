@@ -64,6 +64,6 @@ for use_lookahead in [False,False,True,True]:
     output_text = tokenizer.batch_decode(output_ids)
     input_text = tokenizer.batch_decode(input_ids)
     te = time.time()
-    token_count = sum([len([y for y in x if y!=tokenizer.eos_token_id]]) for x in output_ids])
+    token_count = sum([len([y for y in x if y!=tokenizer.eos_token_id]) for x in output_ids])
     print(f'lookahead:{use_lookahead} time:{te - ts:.3f}s speed:{token_count/(te-ts):.1f}token/s response:{output_text}\n\n\n')
 

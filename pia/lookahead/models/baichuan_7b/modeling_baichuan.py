@@ -320,7 +320,7 @@ class DecoderLayer(nn.Module):
         return outputs
 
 
-class PreTrainedModel(PreTrainedModel):
+class PreTrainedModel(LookaheadPreTrainedModel):
     config_class = BaiChuanConfig
     base_model_prefix = "model"
     supports_gradient_checkpointing = True
@@ -430,6 +430,9 @@ class Model(PreTrainedModel):
         if past_key_values is not None:
             past_key_values_length = past_key_values[0][0].shape[2]
             seq_length_with_past = seq_length_with_past + past_key_values_length
+
+        if inputs_embeds is None:
+            inputs_embeds = self.embed_tokens(input_ids)
 
         # Note: adapt for lookahead
         if attention_mask is not None and len(attention_mask.shape) == 4:
