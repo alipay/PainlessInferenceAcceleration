@@ -53,25 +53,6 @@ ISSUE 4. Qwen model may generate different responses with lookahead when repetit
 
 TODO2: integrate our work [FastCoT](https://arxiv.org/pdf/2311.08263.pdf)
 
-## Models we support 
-
-- AntGLM
-- Baichuan & Baichuan 2 
-- BLOOM
-- ChatGLM
-- GPT-2
-- GPT-J
-- LLaMA & LLaMA-2
-- Mistral
-- Mixtral 
-- OPT
-- Qwen
-
-## Known issuss
-
-1. repetition_penalty is not fully supported, we will fix it in the future.
-2. lookahead may generate responses different from original ones due to low-precise data type (i.e., fp16 or bf16), the responses would be the same with fp32.
-
 ## Performance Comparison
 
 Performance is measured by token/s(tokens per second) of generation tokens.
@@ -97,9 +78,16 @@ We use the first 1000 samples for evaluation and the rest for trie-tree cache co
 We test 5 examples with Llama2-7b-chat and dolly dataset, inference time without lookahead (the left figure) is 15.7s (48.2token/s), while inference time with lookahead is 6.4s (112.9token/s), speedup is 2.34.
 
 [//]: # (![glm_without_lookahead]&#40;./pia/lookahead/figures/llama_la_off.gif&#41;![glm_with_lookahead]&#40;./pia/lookahead/figures/llama_la_on.gif&#41;)
+[//]: # (<div align=center>)
+
+[//]: # (<img src="./pia/lookahead/figures/llama_la_off.gif" width="50%"><img src="./pia/lookahead/figures/llama_la_on.gif" width="50%">)
+
+[//]: # (</div>)
 <div align=center>
-<img src="./pia/lookahead/figures/llama_la_off.gif" width="50%"><img src="./pia/lookahead/figures/llama_la_on.gif" width="50%">
+<img src="https://github.com/alipay/PainlessInferenceAcceleration/blob/main/pia/lookahead/figures/llama_la_off.gif" width="50%"><img src="https://github.com/alipay/PainlessInferenceAcceleration/blob/main/pia/lookahead/figures/llama_la_on.gif" width="50%">
 </div>
+
+
 
 ### Private datasets and models
 
@@ -118,8 +106,15 @@ AntGLM-10B is a LLM developed by Ant Group with [GLM](https://huggingface.co/THU
 [//]: # (![llama_without_lookahead]&#40;./pia/lookahead/figures/glm_la_off.gif&#41;![llama_with_lookahead]&#40;./pia/lookahead/figures/glm_la_on.gif&#41;)
 
 We test 5 examples with AntGLM-10B and AntRag dataset, inference time without lookahead (the left figure) is 16.9s (33.8token/s), while inference time with lookahead is 3.9s (147.6token/s), speedup is 4.37.
+
+[//]: # (<div align=center>)
+
+[//]: # (<img src="./pia/lookahead/figures/glm_la_off.gif" width="50%"><img src="./pia/lookahead/figures/glm_la_on.gif" width="50%">)
+
+[//]: # (</div>)
+
 <div align=center>
-<img src="./pia/lookahead/figures/glm_la_off.gif" width="50%"><img src="./pia/lookahead/figures/glm_la_on.gif" width="50%">
+<img src="https://github.com/alipay/PainlessInferenceAcceleration/blob/main/pia/lookahead/figures/glm_la_off.gif" width="50%"><img src="https://github.com/alipay/PainlessInferenceAcceleration/blob/main/pia/lookahead/figures/glm_la_on.gif" width="50%">
 </div>
 
 ## Introduction
@@ -138,7 +133,9 @@ Note that our work is different from the other method named [lookahead decoding]
 
 
 ![flow](./pia/lookahead/figures/flow.png)
-![dynamic](./pia/lookahead/figures/dynamic.png)
+
+[//]: # (![dynamic]&#40;./pia/lookahead/figures/dynamic.gif&#41;)
+![dynamic](https://github.com/alipay/PainlessInferenceAcceleration/blob/main/pia/lookahead/figures/dynamic.gif)
 
 
 
