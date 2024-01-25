@@ -49,9 +49,9 @@ for use_lookahead in [False, False, True, True, True, True]:
                        "tokenizer": tokenizer}
     model.generation_config.decoding_kwargs=decoding_kwargs
     model.generation_config.do_sample=False  # default is True for qwen, result in different responses in every generation
-    model.generation_config.repetition_penalty=1.1
     ts = time.time()
     response, history = model.chat(tokenizer, prompt, history=None, eos_token_id=151645)
     te = time.time()
     token_count = len(tokenizer.encode(response))
     print(f'lookahead:{use_lookahead} time:{te - ts:.3f}s speed:{token_count/(te-ts):.1f}token/s response:\n{response}\n')
+
