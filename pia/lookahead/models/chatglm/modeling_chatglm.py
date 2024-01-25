@@ -988,6 +988,7 @@ class ChatGLMForConditionalGeneration(ChatGLMPreTrainedModel):
                                               max_match_count=max_match_count,
                                               continuous=continuous)
 
+
     @staticmethod
     def _reorder_cache(
             past: Tuple[Tuple[torch.Tensor, torch.Tensor], ...], beam_idx: torch.LongTensor
