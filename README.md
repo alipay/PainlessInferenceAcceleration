@@ -53,6 +53,24 @@ ISSUE 4. Qwen model may generate different responses with lookahead when repetit
 
 TODO2: integrate our work [FastCoT](https://arxiv.org/pdf/2311.08263.pdf)
 
+## Models we support 
+
+- AntGLM
+- Baichuan & Baichuan 2 
+- BLOOM
+- ChatGLM
+- GPT-2
+- GPT-J
+- LLaMA & LLaMA-2
+- Mistral
+- Mixtral 
+- OPT
+- Qwen
+
+## Known issuss
+
+1. repetition_penalty is not fully supported, we will fix it in the future.
+2. lookahead may generate responses different from original ones due to low-precise data type (i.e., fp16 or bf16), the responses would be the same with fp32.
 
 ## Performance Comparison
 
@@ -119,9 +137,8 @@ Note that our work is different from the other method named [lookahead decoding]
 ### Hierarchical multi-branch draft
 
 
-
 ![flow](./pia/lookahead/figures/flow.png)
-![dynamic](./pia/lookahead/figures/dynamic.gif)
+![dynamic](./pia/lookahead/figures/dynamic.png)
 
 
 
