@@ -19,17 +19,16 @@ class LlameBenchmark(Benchmark):
         # from pia.lookahead.models.llama.modeling_llama import LlamaForCausalLM
         # fused op version for llama
         from pia.lookahead.models.llama.modeling_llama_batch import LlamaForCausalLM 
+        tokenizer = AutoTokenizer.from_pretrained(token_dir)
+        tokenizer.pad_token = tokenizer.eos_token
+        tokenizer.padding_side = 'left'
         model = LlamaForCausalLM.from_pretrained(model_dir
                                                  , cache_dir='../'
                                                  , torch_dtype=torch.float16
                                                  , low_cpu_mem_usage=True
                                                  , device_map='auto')
-        tokenizer = AutoTokenizer.from_pretrained(token_dir)
-        tokenizer.pad_token = tokenizer.eos_token
-        tokenizer.padding_side = 'left'
-        stop_ids = tokenizer.convert_tokens_to_ids(self.stop_words)
-        lookahead_cache = LookaheadCache(eos=tokenizer.eos_token_id, stop_words=stop_ids)
-        model.lookahead_cache = lookahead_cache
+        stop_words = tokenizer.convert_tokens_to_ids(self.stop_words)
+        model.lookahead_cache = LookaheadCache(stop_words=stop_words)
         self.model = model
         self.tokenizer = tokenizer
         self.eos = tokenizer.eos_token_id
@@ -37,6 +36,7 @@ class LlameBenchmark(Benchmark):
 
 
 model_dir = 'your/model/path'
+model_dir = '/mntnlp/common_base_model/llama2-7b-chat'
 """
 generate answers first if only prompts are available, answers in the warmup samples are used for constructing trie-tree cache
 prompt_dir = 'your/prompt/dir'
@@ -46,6 +46,7 @@ worker.save_answers(prompt_dir, dataset_dir, prompt_name='your/prompt/field/name
 
 # the dataset can be found in lookahead/datasets/dataset.py
 dataset_dir = 'dolly_15k_llama2_7b_chat.jsonl'
+dataset_dir = '/mntnlp/nanxiao/lookahead_benchmark/dolly_15k_llama2_7b_chat.jsonl'
 
 worker = LlameBenchmark(log_dir='llama_benchmark')
 worker.initialize(model_dir=model_dir, token_dir=model_dir)
