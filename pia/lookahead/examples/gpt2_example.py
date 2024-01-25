@@ -10,7 +10,6 @@ import time
 import torch
 from transformers import AutoTokenizer
 
-from pia.lookahead.common.pretrained_model import LookaheadCache
 from pia.lookahead.models.gpt2.modeling_gpt2 import GPT2LMHeadModel
 from pia.lookahead.examples import local_path_dict
 
@@ -61,13 +60,10 @@ for use_lookahead in [False, False, True, True]:
     output_ids = outputs
     input_length = input_ids.size(-1)
     output_ids = output_ids[0, input_length:].tolist()
-    output_text = tokenizer.decode(output_ids)
+    response = tokenizer.decode(output_ids)
     input_text = tokenizer.decode(input_ids[0])
     te = time.time()
-    if use_lookahead:
-        print(f'with lookahead:{te - ts:.3f}s')
-    else:
-        print(f'without lookahead:{te - ts:.3f}s')
-    print(f'prompt:{prompt}')
-    print(f'input text:{input_text}')
-    print(f'output text:{output_text}')
+    token_count = len(output_ids)
+    print(f'lookahead:{use_lookahead} time:{te - ts:.3f}s speed:{token_count/(te-ts):.1f}token/s response:\n{response}\n')
+
+

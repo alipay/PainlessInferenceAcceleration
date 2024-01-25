@@ -820,7 +820,6 @@ class QWenLMHeadModel(QWenPreTrainedModel):
         ), "Only one of \"bf16\", \"fp16\", \"fp32\" can be true"
 
         autoset_precision = config.bf16 + config.fp16 + config.fp32 == 0
-
         if autoset_precision:
             if SUPPORT_BF16:
                 logger.warn(
@@ -1114,18 +1113,12 @@ class QWenLMHeadModel(QWenPreTrainedModel):
 
         return stream_generator()
 
-    def _update_cache(self, past_key_values, kv_idx, prefix_and_next_count=None, max_match_count=None,
-                      max_match_index=None):
-        update_past_key_values = []
-        for k, v in past_key_values:
-            if max_match_index + 1 == max_match_count:
-                k = k[:, :prefix_and_next_count + max_match_count]
-                v = v[:, :prefix_and_next_count + max_match_count]
-            else:
-                k = torch.concat([k[:, :prefix_and_next_count], k[:, kv_idx]], 1)
-                v = torch.concat([v[:, :prefix_and_next_count], v[:, kv_idx]], 1)
-            update_past_key_values.append((k, v))
-        return tuple(update_past_key_values)
+    def _update_cache(self, past_key_values, kv_idx, context_length=None, 
+                      max_match_count=None, continuous=False):
+        return self._update_cache_with_axis_1(past_key_values, kv_idx, 
+                                              context_length=context_length, 
+                                              max_match_count=max_match_count,
+                                              continuous=continuous)
 
     # def generate(
     #     self,
