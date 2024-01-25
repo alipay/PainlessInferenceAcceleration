@@ -22,7 +22,7 @@ model_dir = local_path_dict.get('baichuan2_7b', 'your/model/path')
 tokenizer = BaichuanTokenizer.from_pretrained(model_dir)
 model = BaichuanForCausalLM.from_pretrained(model_dir
                                             , cache_dir='../'
-                                            , torch_dtype=torch.float32
+                                            , torch_dtype=torch.float16
                                             , low_cpu_mem_usage=True
                                             , device_map={"": "cuda:0"}
                                             )
