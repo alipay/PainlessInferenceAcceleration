@@ -32,11 +32,10 @@ tokenizer = QWenTokenizer.from_pretrained(model_dir)
 stop_words = [tokenizer.encode(x)[0] for x in [',', '.', ' ', '，','。']]
 
 
-# prompt = "杭州在哪里？"
-prompt = "编一个200字左右的儿童故事"
-# prompt = "编一个200字左右的关于小兔子的儿童故事"
+prompt = "杭州在哪里？"
+# prompt = "编一个200字左右的儿童故事"
 
-for use_lookahead in [False, False, True, True, True, True]:
+for use_lookahead in [False, False, True, True]:
     decoding_length = 64
     branch_length = 12
     debug_lookahead = False
