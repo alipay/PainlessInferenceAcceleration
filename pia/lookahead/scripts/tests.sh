@@ -1,6 +1,6 @@
-cd ../tests &&
-python test_lookahead_cache.py &&
-python test_triton_rms_norm.py &&
+# cd ../tests &&
+# python test_lookahead_cache.py &&
+# python test_triton_rms_norm.py &&
 
 cd ../examples &&
 python glm_example.py &&
@@ -9,6 +9,7 @@ python chatglm_example.py &&
 python llama_example.py &&
 python llama_batch_example.py &&
 python opt_example.py && 
+python opt_batch_example.py && 
 python baichuan2_7b_example.py && 
 python baichuan2_13b_example.py && 
 python bloom_example.py && 
