@@ -17,7 +17,7 @@
 
 - [2024/01] We fully support repetition_penalty parameter.
 
-- [2024/01] We support Mistral & Mixtral [example](https://github.com/alipay/PainlessInferenceAcceleration/blob/main/pia/lookahead/examples/mixtral_example.py).
+- [2024/01] We support Mistral & Mixtral. [example](https://github.com/alipay/PainlessInferenceAcceleration/blob/main/pia/lookahead/examples/mixtral_example.py)
 
 - [2023/12] We released our [Lookahead paper](https://arxiv.org/abs/2312.12728) on arXiv!
 
@@ -41,17 +41,20 @@
 
 ## Known issuss & TODO
 
-<del> ISSUE 1. repetition_penalty is not fully supported, we will fix it in the future.  </del>
+<del> ISSUE 1. Repetition_penalty is not fully supported, we will fix it in the future.  </del>
 
-ISSUE 2. lookahead may generate responses different from original ones due to low-precise data type (i.e., fp16 or bf16), the responses would be the same with fp32.
+ISSUE 2. Lookahead may generate responses different from original ones due to low-precise data type (i.e., fp16 or bf16), the responses would be the same with fp32.
 
-ISSUE 3. Baichuan tokenizer cannot be initialized with lastest transformers version (4.30.2 can work).
+ISSUE 3. Baichuan tokenizer cannot be initialized with the lastest version transformers (4.30.2 can work).
 
-ISSUE 4. Qwen model may generate different responses with lookahead when repetition_penalty is set.
+ISSUE 4. Qwen model may generate slightly different responses with lookahead when the repetition_penalty parameter is set.
 
-<del> TODO1: support the latest version  [🤗 transformers](https://github.com/huggingface/transformers) ]. Currently it's based on 4.30.2. </del>
+<del> TODO1: Support the latest version  [🤗 transformers](https://github.com/huggingface/transformers) ]. Currently it's based on 4.30.2. </del>
 
-TODO2: integrate our work [FastCoT](https://arxiv.org/pdf/2311.08263.pdf)
+TODO2: Integrate our work [FastCoT](https://arxiv.org/pdf/2311.08263.pdf)
+
+TODO3: Optimize batch inference implementation with flash-attention.
+
 
 ## Performance Comparison
 
@@ -270,7 +273,6 @@ class LlamaModel(LlamaPreTrainedModel):
                 attention_mask, (batch_size, seq_length), inputs_embeds, past_key_values_length
             )
 ```
-
 
 Note that the above adaption can not be used for batch inference, as generated token length of different samples may be varied. Adaption for batch 
 inference can be found in `models/modeling_glm_batch.py` or `models/modeling_llama_batch.py`. `Flash-attention` enhanced batch inference is on developing.
