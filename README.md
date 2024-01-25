@@ -15,7 +15,7 @@
 
 - [2024/01] We support all models of baichuan family (Baichuan-7b & 13b, Baichuan2-7b & 13b).
 
-- [2024/01] We fully support repetition_penalty.
+- [2024/01] We fully support repetition_penalty parameter.
 
 - [2024/01] We support Mistral & Mixtral [example](https://github.com/alipay/PainlessInferenceAcceleration/blob/main/pia/lookahead/examples/mixtral_example.py).
 
