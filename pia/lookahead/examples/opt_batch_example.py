@@ -30,13 +30,13 @@ tokenizer.padding_side = 'left'
 stop_words = set(tokenizer.convert_tokens_to_ids([',', '.', ' ']))
 
 prompt = ["Hello, I'm am conscious and", "tell me a joke"]
-inputs = tokenizer(prompt, return_tensors="pt")
+inputs = tokenizer(prompt, return_tensors="pt", padding=True)
 input_ids = inputs.input_ids.to(device)
 attention_mask = inputs.attention_mask.to(device)
 position_ids = None
 
 for use_lookahead in [False,False,True,True]:
-    debug_lookahead = True
+    debug_lookahead = False
     decoding_length = 64
     branch_length = 12
     ts = time.time()

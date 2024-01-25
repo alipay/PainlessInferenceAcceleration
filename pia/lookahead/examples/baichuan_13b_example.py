@@ -35,7 +35,7 @@ prompt = "Hello, I'm am conscious and"
 
 # first time without lookahead
 for use_lookahead in [False, False, True, True]:
-    debug_lookahead = True
+    debug_lookahead = False
     decoding_length = 64
     branch_length = 4
     max_new_tokens = 256
