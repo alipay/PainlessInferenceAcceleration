@@ -700,10 +700,9 @@ class LookaheadPreTrainedModel(PreTrainedModel):
                  })
 
             if position_ids is not None:
-                model_inputs["position_ids"] = self._get_position_ids(position_ids, encoding=True, length=length)
+                model_inputs["position_ids"] = self._get_position_ids(position_ids, prefill=True, length=length)
 
         else:
-
             cs = torch.tensor([[x - 1, x] for x in decoding_cursors], device=input_ids.device)
             qids = torch.gather(input_ids, 1, cs)
             decoding_qids = qids.tolist()
@@ -712,7 +711,7 @@ class LookaheadPreTrainedModel(PreTrainedModel):
                 decoding_mode = decoding_mode + '_mix'
             fmt, mode = decoding_mode.split('_')
             sub_decoding_length = max(decoding_length // len(decoding_qids), 1)
-            decoding_ids, decoding_masks, decoding_lengths = self.lookahead_cache.bat_get(decoding_qids,
+            decoding_ids, decoding_masks, hit_sizes = self.lookahead_cache.bat_get(decoding_qids,
                                                                                          decoding_length=sub_decoding_length,
                                                                                          branch_length=branch_length,
                                                                                          decoding_cursors=decoding_cursors,
@@ -721,7 +720,6 @@ class LookaheadPreTrainedModel(PreTrainedModel):
                                                                                          decoding_mode=fmt)
             sizes = list(set([len(x) for x in decoding_ids]))
             assert len(sizes) == 1
-            decodinged = True if sizes[0] > 1 else False
             input_id_slice = torch.tensor(decoding_ids, device=input_ids.device)
 
             min_cur = min(decoding_cursors)
@@ -733,8 +731,7 @@ class LookaheadPreTrainedModel(PreTrainedModel):
             decoding_kwargs.update({'decoding_qids': decoding_qids,
                                     'decoding_ids': decoding_ids,
                                     'decoding_masks': decoding_masks,
-                                    'decoding_lengths': decoding_lengths,
-                                    'decoding_qids': decoding_qids,
+                                    'hit_sizes': hit_sizes,
                                     'decoding_cursors': decoding_cursors,
                                     'decoding_cursors_tensor': torch.tensor(decoding_cursors, 
                                                                             dtype=torch.int32,
@@ -754,12 +751,12 @@ class LookaheadPreTrainedModel(PreTrainedModel):
             )
             if position_ids is not None:
                 indices = torch.sum(decoding_attention_mask, dim=3).squeeze(1)[0]
-                model_inputs["position_ids"] = self._get_position_ids(position_ids, indices=indices, encoding=False)
+                model_inputs["position_ids"] = self._get_position_ids(position_ids, indices=indices, prefill=False)
 
         return model_inputs
 
-    def _get_position_ids(self, full_position_ids, indices=None, length=None, encoding=True):
-        if encoding:
+    def _get_position_ids(self, full_position_ids, indices=None, length=None, prefill=True):
+        if prefill:
             return full_position_ids[..., :length]
         else:
             return full_position_ids[..., indices]
@@ -775,145 +772,162 @@ class LookaheadPreTrainedModel(PreTrainedModel):
     ) -> Dict[str, Any]:
         bs, input_length = input_ids.shape
         decoding_kwargs = model_kwargs['decoding_kwargs']
-        decoding_ids = decoding_kwargs.get('decoding_ids', [])
-        eos = decoding_kwargs.get('eos', 2)
+        pad = decoding_kwargs.get('pad', 2)
         max_length = decoding_kwargs.get('max_length', 1024)
         device = outputs.logits.device
-        dtype = outputs.logits.dtype
 
-        encoding = model_kwargs.get("past_key_values", None) is None
-        dls = []
-        edls = []
-        if encoding:
-            # encoding stage
+        prefill = model_kwargs.get("past_key_values", None) is None
+        if prefill:
+            # prefill stage
             past_key_values = outputs.past_key_values
             _, n_head, _, head_dim = past_key_values[0][0].size()
 
             _, nt, nv = outputs.logits.shape
-            next_tokens_scores = logits_processor(input_ids, outputs.logits[:, -1]).view(bs, 1, nv)
+            next_tokens_scores = logits_processor(input_ids, outputs.logits[:, -1])
 
             max_new_tokens = max_length - input_length
-            input_ids = torch.cat([input_ids, torch.ones((bs, max_new_tokens), dtype=torch.long, device=device) * eos],
+            input_ids = torch.cat([input_ids, torch.ones((bs, max_new_tokens), dtype=torch.long, device=device) * pad],
                                   dim=1)
             decoding_cursors = [input_length] * bs
 
             if decoding_kwargs.get('do_sample', False):
                 probs = nn.functional.softmax(next_tokens_scores, dim=-1)
-                bs, nt, nv = probs.shape
-                next_tokens = torch.multinomial(probs.view(bs * nt, nv), num_samples=1).view(bs, nt)
+                next_tokens = torch.multinomial(probs, num_samples=1)
             else:
-                next_tokens = torch.argmax(next_tokens_scores, dim=-1, keepdim=False).long()
+                next_tokens = torch.argmax(next_tokens_scores, dim=-1, keepdim=True).long()
 
             input_ids[:, input_length:input_length + 1] = next_tokens
 
             model_kwargs["past_key_values"] = past_key_values
-            model_kwargs['next_tokens'] = next_tokens
+            # model_kwargs['next_tokens'] = next_tokens
             model_kwargs['next_token_list'] = next_tokens.tolist()
             model_kwargs['next_tokens_scores'] = next_tokens_scores
-            dls.extend([1] * bs)
-            edls.extend([1] * bs)
+            decoding_kwargs['dls'].extend([1] * bs)
+            decoding_kwargs['edls'].extend([1] * bs)
 
         else:
             decoding_cursors = decoding_kwargs.get('decoding_cursors', None)
             min_cur = min(decoding_cursors)
-            max_cur = max(decoding_cursors)
-            decoding_masks = decoding_kwargs['decoding_masks']
-            decoding_lengths = decoding_kwargs['decoding_lengths']
+            model_kwargs['next_token_list'] = [[] for _ in range(len(decoding_cursors))]
+            for batch_index in range(bs):
+                cur = decoding_cursors[batch_index]
+                draft_ids = decoding_kwargs['decoding_ids'][batch_index][1:]
+                if len(draft_ids) == 0:
+                    next_token_logits = outputs.logits[batch_index:batch_index+1, 0]
+                    next_tokens_scores = logits_processor(input_ids[batch_index:batch_index+1, :cur+1], next_token_logits)
+                    if decoding_kwargs.get('do_sample', False):
+                        probs = nn.functional.softmax(next_tokens_scores, dim=-1)
+                        next_tokens = torch.multinomial(probs, num_samples=1)
+                    else:
+                        next_tokens = torch.argmax(next_tokens_scores, dim=-1, keepdim=True).long()
+                    next_token_id = next_tokens.tolist()[0][0]
+                    model_kwargs['next_token_list'][batch_index].append(next_token_id)
+                    decoding_cursors[batch_index] += 1
+                    input_ids[batch_index, cur + 1: cur + 2] = next_tokens
+                    decoding_kwargs['dls'].append(1)
+                    decoding_kwargs['edls'].append(1)
 
-            # TODO: accurate logit_processor
-            # next_tokens_scores = logits_processor(input_ids[:,:max_cur], outputs.logits)
-            bs, nt, nv = outputs.logits.shape
-            next_tokens_scores = logits_processor(input_ids[:, :max_cur].repeat(1, nt).view(bs * nt, -1),
-                                                  outputs.logits.view(bs * nt, -1)).view(bs, nt, -1)
+                    if decoding_kwargs.get('debug_lookahead', False):
+                        decoding_qids = decoding_kwargs['decoding_qids'][batch_index]
+                        tokenizer = decoding_kwargs.get('tokenizer', None)
+                        words = '' if tokenizer is None else tokenizer.decode([next_token_id])
+                        print(
+                            f'batch_index:{batch_index} decoding_length:{len(draft_ids)+1} accept_length:1 '
+                            f'query:{decoding_qids} accept_token:{next_token_id} accept_word:{words}')
+                else:
+                    draft_masks = decoding_kwargs['decoding_masks'][batch_index, 1:, cur-min_cur+1:]
+                    branch_lengths = np.sum(draft_masks, axis=1)
+                    max_branch_length = np.max(branch_lengths)
+                    leaf_indices = []
+                    for i, l in enumerate(branch_lengths):
+                        if i == 0 or l > branch_lengths[i-1]:
+                            continue
+                        leaf_indices.append(i-1)
+                    leaf_indices.append(-1)
+                    leaf_draft_masks = draft_masks[leaf_indices]
+                    leaf_branch_lengths = branch_lengths[leaf_indices]
+                    seg = [0] + np.cumsum(leaf_branch_lengths).tolist()
+                    nonzero_indices = np.nonzero(leaf_draft_masks)[1].tolist()
+                    mask_indices = [nonzero_indices[seg[i]:seg[i+1]] for i in range(len(seg)-1)]
+                    draft_branches = [[draft_ids[i] for i in indices] for indices in mask_indices]
+                    logits = outputs.logits[batch_index:batch_index+1]
 
-            if decoding_kwargs.get('do_sample', False):
-                probs = nn.functional.softmax(next_tokens_scores, dim=-1)
-                next_tokens = torch.multinomial(probs.view(bs * nt, nv), num_samples=1).view(bs, nt)
-            else:
-                next_tokens = torch.argmax(next_tokens_scores, dim=-1, keepdim=False).long()
+                    next_token_list = []
+                    next_token_tensors = []
+                    logit_indices = []
+                    branch = None
+                    for i in range(-1, min(max_branch_length, input_length-cur-2)):
+                        if i == -1:
+                            logit_index = 0
+                        else:
+                            logit_index = mask_indices[0][i]+1
 
-            next_token_list = next_tokens.tolist()
-            update_next_token_list = [[] for _ in range(len(next_token_list))]
-            for ib in range(bs):
-                max_match_index = -1
-                max_match_count = 0
-                max_decoding_ids_slice = None
-                max_next_token_slice = None
+                        next_token_logits = logits[:, logit_index]
+                        next_tokens_scores = logits_processor(input_ids[batch_index:batch_index+1, :cur+i+2],
+                                                              next_token_logits)
+                        if decoding_kwargs.get('do_sample', False):
+                            probs = nn.functional.softmax(next_tokens_scores, dim=-1)
+                            next_tokens = torch.multinomial(probs, num_samples=1)
+                        else:
+                            next_tokens = torch.argmax(next_tokens_scores, dim=-1, keepdim=True).long()
+                        input_ids[batch_index, cur+i+2:cur+i+3] = next_tokens
+                        next_token_id = next_tokens.tolist()[0][0]
+                        # next_token_tensors.append(next_tokens)
+                        next_token_list.append(next_token_id)
+                        logit_indices.append(logit_index)
 
-                decoding_ids_ = decoding_ids[ib][1:]
-                org_branch_length = len(decoding_ids_)
-
-                cur = decoding_cursors[ib]
-                for i in range(len(decoding_ids_)):
-
-                    mask_indices, = np.nonzero(decoding_masks[ib, i + 1, cur - min_cur + 1:])
-                    if mask_indices.size == 0:
-                        continue
-                    decoding_ids_slice = [decoding_ids_[j] for j in mask_indices]
-                    # next in logic rather than next in position
-                    next_token_slice = [next_token_list[ib][0]] + [next_token_list[ib][j + 1] for j in mask_indices]
-
-                    c = len(decoding_ids_slice)
-                    for j, p in enumerate(decoding_ids_slice):
-                        if next_token_slice[j] != p:
-                            c = j
+                        if i == max_branch_length-1:
                             break
 
-                    if c > max_match_count:
-                        max_match_count = c
-                        max_match_index = i
-                    if c >= max_match_count:
-                        max_decoding_ids_slice = decoding_ids_slice
-                        max_next_token_slice = next_token_slice
+                        update_mask_indices = []
+                        update_draft_branches = []
+                        for j, branch in enumerate(draft_branches):
+                            if len(branch) > i+1 and branch[i+1] == next_token_id:
+                                update_mask_indices.append(mask_indices[j])
+                                update_draft_branches.append(branch)
 
-                dls.append(org_branch_length + 1)
-                edls.append(max_match_count + 1)
-                prefix_length = cur + 1
-                if cur + max_match_count + 2 > input_length:
-                    max_match_count = max(input_length - cur - 2, 0)
-                if max_match_count > 0:
-                    match_idx = np.nonzero(decoding_masks[ib, max_match_index + 1, cur - min_cur + 1:])[0][
-                                : max_match_count]
+                        if len(update_mask_indices) == 0:
+                            break
+                        mask_indices = update_mask_indices
+                        draft_branches = update_draft_branches
 
-                    if len(decoding_ids_) != max_match_count and max_match_index + 1 != max_match_count:
-                        kv_idx = match_idx + prefix_length
-                        kv_idx_tensor = torch.from_numpy(kv_idx).to(device)
+                    max_match_count = len(next_token_list) - 1
+                    max_match_index = logit_indices[-1] - 1
+
+                    # next_tokens = torch.cat(next_token_tensors, 1).to(input_ids.device)
+                    # input_ids[batch_index, cur + 1: cur + max_match_count + 2] = next_tokens
+                    model_kwargs['next_token_list'][batch_index] = next_token_list
+                    decoding_kwargs['dls'].append(len(draft_ids)+1)
+                    decoding_kwargs['edls'].append(max_match_count + 1)
+                    decoding_cursors[batch_index] += max_match_count + 1
+
+                    if max_match_index+1 != max_match_count:
+                        past = model_kwargs["past_key_values"]
+                        device = past[0][0].device
+                        # ignore the first idx as it will be accepted all the time
+                        context_length = cur + 1
+                        kv_idx = torch.tensor(logit_indices[1:], dtype=torch.long, device=device)-1 + context_length
+                        continuous = max_match_index + 1 == max_match_count
                         self._update_cache(model_kwargs["past_key_values"],
-                                           ib,
+                                           batch_index,
                                            kv_idx,
-                                           prefix_and_next_count=prefix_length,
-                                           max_match_count=max_match_count,
-                                           max_match_index=max_match_index)
-                    next_token_list_ = next_token_list[ib][0: 1] + [next_token_list[ib][x + 1] for x in match_idx]
-                    update_next_token_list[ib] = next_token_list_ + (
-                            org_branch_length - len(next_token_list_) + 1) * [-1]
-                    next_tokens = torch.tensor(next_token_list_, device=device)
-                    input_ids[ib, cur + 1: cur + max_match_count + 2] = next_tokens
-                else:
-                    # max_match_count = 0
-                    next_token_list_ = next_token_list[ib][:1]
-                    update_next_token_list[ib] = next_token_list_ + org_branch_length * [-1]
-                    input_ids[ib, cur + 1] = next_token_list_[0]
+                                           context_length=context_length,
+                                           max_match_count=max_match_count)
 
-                decoding_cursors[ib] += max_match_count + 1
+                    if decoding_kwargs.get('debug_lookahead', False):
+                        ls = ','.join(leaf_branch_lengths.astype(np.str_))
+                        decoding_qids = decoding_kwargs['decoding_qids'][batch_index]
+                        size_str = ','.join([str(x) for x in decoding_kwargs['hit_sizes'][batch_index]])
+                        tokenizer = decoding_kwargs.get('tokenizer', None)
+                        words = '' if tokenizer is None else tokenizer.decode(next_token_list)
+                        print(
+                            f'batch_index:{batch_index} decoding_length:{len(draft_ids)+1} '
+                            f'accept_length:{max_match_count+1} '
+                            f'query:{decoding_qids} hits:{size_str} lengths:{ls} index:{max_match_index} '
+                            f'branch_token:{branch} accept_token:{next_token_list} accept_word:{words}')
 
-                if decoding_kwargs.get('debug_lookahead', False):
-                    lengths = np.sum(decoding_masks[ib, :, cur - min_cur:], axis=1) - 1
-                    larr = np.concatenate([lengths[:-1][(lengths[1:] - lengths[:-1]) <= 0], lengths[-1:]], axis=0)
-                    ls = ','.join(larr.astype(np.int32).astype(np.str_))
-                    decoding_qids = decoding_kwargs['decoding_qids'][ib]
-                    size_str = ','.join([str(x) for x in decoding_lengths[ib]])
-                    print(
-                        f'batch_index:{ib}/{bs} decoding_length:{len(decoding_ids_)} accept_length:{max_match_count} '
-                        f'query:{decoding_qids} source:{size_str} lengths:{ls} index:{max_match_index} '
-                        f'branch_token:{max_decoding_ids_slice} next_token:{max_next_token_slice}')
-            model_kwargs['next_tokens'] = torch.tensor(update_next_token_list, device=device)
-            model_kwargs['next_token_list'] = update_next_token_list
-            model_kwargs['next_tokens_scores'] = []
         model_kwargs['input_ids'] = input_ids
         decoding_kwargs['decoding_cursors'] = decoding_cursors
-        decoding_kwargs['dls'].extend(dls)
-        decoding_kwargs['edls'].extend(edls)
         model_kwargs['decoding_kwargs'] = decoding_kwargs
         return model_kwargs
 
@@ -923,54 +937,49 @@ class LookaheadPreTrainedModel(PreTrainedModel):
                     batch_indices,
                     model_kwargs):
 
-        decoding_kwargs = model_kwargs['decoding_kwargs']
         input_ids = model_kwargs['input_ids']
 
-        unfinished_sequence_list = unfinished_sequences.tolist()
-        unfinished_index_list = []
-        for i, (seq,) in enumerate(unfinished_sequence_list):
-            if seq == 0:
+        unfinished_indices = []
+        for i, flag in enumerate(unfinished_sequences):
+            if flag == 0:
                 idx = batch_indices[i]
                 output_ids[idx, :input_ids.size(-1)] = input_ids[i]
             else:
-                unfinished_index_list.append(i)
+                unfinished_indices.append(i)
 
-        output_batch_indices = [batch_indices[i] for i in unfinished_index_list]
+        unfinished_sequences = [unfinished_sequences[i] for i in unfinished_indices]
+        output_batch_indices = [batch_indices[i] for i in unfinished_indices]
 
         bs = input_ids.size(0)
-        finished_count = bs - len(unfinished_index_list)
-
+        finished_count = bs - len(unfinished_indices)
         if finished_count > 0 and bs > 1 and finished_count != bs:
-            unfinished_indices = torch.tensor(unfinished_index_list, device=unfinished_sequences.device)
-            unfinished_sequences = unfinished_sequences[unfinished_indices]
-
-            model_kwargs['input_ids'] = input_ids[unfinished_indices]
+            unfinished_indices_tensor = torch.tensor(unfinished_indices, device=input_ids.device)
+            model_kwargs['input_ids'] = input_ids[unfinished_indices_tensor]
+            attention_mask = model_kwargs.get('attention_mask', None)
+            model_kwargs['attention_mask'] = None if attention_mask is None else attention_mask[unfinished_indices_tensor]
             position_ids = model_kwargs.get('position_ids', None)
-            if position_ids is not None:
-                position_ids = position_ids[unfinished_indices]
-            model_kwargs['position_ids'] = position_ids
-            model_kwargs['attention_mask'] = model_kwargs['attention_mask'][unfinished_indices]
+            model_kwargs['position_ids'] = None if position_ids is None else position_ids[unfinished_indices_tensor]
+
             decoding_kwargs = model_kwargs['decoding_kwargs']
             decoding_cursors = decoding_kwargs['decoding_cursors']
-            decoding_kwargs['decoding_cursors'] = [decoding_cursors[i] for i in unfinished_index_list]
+            decoding_kwargs['decoding_cursors'] = [decoding_cursors[i] for i in unfinished_indices_tensor]
             batch_indices = decoding_kwargs['batch_indices']
-            decoding_kwargs['batch_indices'] = [batch_indices[i] for i in unfinished_index_list]
+            decoding_kwargs['batch_indices'] = [batch_indices[i] for i in unfinished_indices_tensor]
 
             past_key_values = []
             for kv in model_kwargs['past_key_values']:
                 k, v = kv
-                k = k[unfinished_indices]
-                v = v[unfinished_indices]
+                k = k[unfinished_indices_tensor]
+                v = v[unfinished_indices_tensor]
                 past_key_values.append((k, v))
             model_kwargs['past_key_values'] = tuple(past_key_values)
 
         return unfinished_sequences, output_ids, output_batch_indices, model_kwargs
 
-    def _update_cache(self, past_key_values, batch_idx, kv_idx, prefix_and_next_count=None, max_match_count=None,
-                      max_match_index=None):
+    def _update_cache(self, past_key_values, batch_idx, kv_idx, context_length=None, max_match_count=None):
         for k, v in past_key_values:
-            k[batch_idx, :, prefix_and_next_count:prefix_and_next_count + max_match_count] = k[batch_idx, :, kv_idx]
-            v[batch_idx, :, prefix_and_next_count:prefix_and_next_count + max_match_count] = v[batch_idx, :, kv_idx]
+            k[batch_idx, :, context_length:context_length + max_match_count] = k[batch_idx, :, kv_idx]
+            v[batch_idx, :, context_length:context_length + max_match_count] = v[batch_idx, :, kv_idx]
 
     def lookahead_generation(
             self,
@@ -987,7 +996,7 @@ class LookaheadPreTrainedModel(PreTrainedModel):
             synced_gpus: bool = False,
             streamer: Optional["BaseStreamer"] = None,
             **model_kwargs,
-    ) -> Union[GreedySearchOutput, torch.LongTensor]:
+    ) -> LookaheadDecoderOnlyOutput:
         r"""
         Generates sequences of token ids for models with a language modeling head using **greedy decoding** and can be
         used for text-decoder, text-to-text, speech-to-text, and vision-to-text models.
@@ -1095,7 +1104,6 @@ class LookaheadPreTrainedModel(PreTrainedModel):
         eos_token_id = eos_token_id if eos_token_id is not None else self.generation_config.eos_token_id
         if isinstance(eos_token_id, int):
             eos_token_id = [eos_token_id]
-        eos_token_id_tensor = torch.tensor(eos_token_id, device=input_ids.device) if eos_token_id is not None else None
         output_scores = output_scores if output_scores is not None else self.generation_config.output_scores
         output_attentions = (
             output_attentions if output_attentions is not None else self.generation_config.output_attentions
@@ -1130,7 +1138,7 @@ class LookaheadPreTrainedModel(PreTrainedModel):
 
         decoding_kwargs = model_kwargs['decoding_kwargs']
         decoding_kwargs.update({
-            'eos': eos_token_id[0] if eos_token_id is not None else 2,
+            'pad': pad_token_id if pad_token_id is not None else 2,
             'edls': [],
             'dls': [],
             'fts': []
@@ -1172,45 +1180,25 @@ class LookaheadPreTrainedModel(PreTrainedModel):
         decoding_kwargs['max_length'] = stop_max_length
         decoding_kwargs['decoding_max_length'] = decoding_max_length
 
-        # keep track of which sequences are already finished
-        unfinished_sequences = input_ids.new_ones((input_ids.shape[0], 1))  # ones([bs, 1])
-
-        # import time
-        # pts = time.time()
         branch_length = decoding_kwargs.get('branch_length', 8)
-        decoding_mode = decoding_kwargs.get('decoding_mode', 'hier')
 
         input_id_list = input_ids.tolist()
         for i, ids in enumerate(input_id_list):
             ids = ids[1:-1]
             self.lookahead_cache.put(ids, branch_length=branch_length + 1, mode='input', idx=i)
-        # pitv = time.time()-pts
-        # print(f'decoding_1:{round(pitv*1000,3)}ms')
 
         input_bs, input_length = input_ids.shape
-        eos = decoding_kwargs.get('eos', 2)
         output_ids = torch.cat(
             [input_ids,
-             eos * torch.ones((input_bs, stop_max_length - input_length), dtype=torch.long, device=input_ids.device)],
+             pad_token_id * torch.ones((input_bs, stop_max_length - input_length), dtype=torch.long, device=input_ids.device)],
             dim=1)
         batch_indices = [i for i in range(input_bs)]
         decoding_kwargs['batch_indices'] = batch_indices
         model_kwargs['input_ids'] = input_ids
         model_kwargs['decoding_kwargs'] = decoding_kwargs
         ts = time.time()
-
-        # if use early stop func when batch size > 1
-        # if use decoding, use_early_stop must be true, or it will exceed max length and cause error
+        unfinished_sequences = [1]*input_bs
         while True:
-            if synced_gpus:
-                # Under synced_gpus the `forward` call must continue until all gpus complete their sequence.
-                # The following logic allows an early break if all peers finished generating their sequence
-                this_peer_finished_flag = torch.tensor(0.0 if this_peer_finished else 1.0, device=input_ids.device)
-                # send 0.0 if we finished, 1.0 otherwise
-                dist.all_reduce(this_peer_finished_flag, op=dist.ReduceOp.SUM)
-                # did all peers finish? the reduced sum will be 0.0 then
-                if this_peer_finished_flag.item() == 0.0:
-                    break
 
             # prepare model inputs
             input_ids = model_kwargs.pop('input_ids', None)
@@ -1226,9 +1214,6 @@ class LookaheadPreTrainedModel(PreTrainedModel):
                 decoding_kwargs=decoding_kwargs
             )
 
-            if synced_gpus and this_peer_finished:
-                continue  # don't waste resources running the code we don't need
-
             model_kwargs['decoding_kwargs'] = decoding_kwargs
 
             model_kwargs = self._lookahead_update_model_kwargs_for_generation(
@@ -1239,27 +1224,15 @@ class LookaheadPreTrainedModel(PreTrainedModel):
                 logits_processor=logits_processor
             )
 
-            next_tokens = model_kwargs['next_tokens']
             next_tokens_scores = model_kwargs['next_tokens_scores']
             next_token_list = model_kwargs['next_token_list']
-
-            # finished sentences should have their next token be a padding token
-            if eos_token_id is not None:
-                if pad_token_id is None:
-                    raise ValueError("If `eos_token_id` is defined, make sure that `pad_token_id` is defined.")
-                next_tokens = next_tokens * unfinished_sequences + pad_token_id * (1 - unfinished_sequences)
-
-            # update generated ids, model inputs, and length for next step
-            # input_ids = torch.cat([input_ids, next_tokens], dim=-1)
-            if streamer is not None:
-                streamer.put(next_tokens.cpu())
 
             batch_indices = model_kwargs['decoding_kwargs']['batch_indices']
             for k, tids in enumerate(next_token_list):
                 tids = [x for x in tids if x != -1]
                 batch_index = batch_indices[k]
                 self.lookahead_cache.stream_put(tids, branch_length=branch_length + 1, final=False, mode='output',
-                                                   idx=batch_index)
+                                                idx=batch_index)
 
             # Store scores, attentions and hidden_states when required
             if return_dict_in_generate:
@@ -1279,35 +1252,25 @@ class LookaheadPreTrainedModel(PreTrainedModel):
                         else (outputs.hidden_states,)
                     )
 
-            # if eos_token was found in one sentence, set sentence to finished
-            if eos_token_id_tensor is not None:
-                # unfinished_sequences = unfinished_sequences.mul(
-                #     next_tokens.tile(eos_token_id_tensor.shape[0], 1).ne(eos_token_id_tensor.unsqueeze(1)).prod(dim=0)
-                # )
-                unfinished_sequences = unfinished_sequences.mul(
-                    next_tokens[:, :, None].ne(eos_token_id_tensor).prod(dim=2).prod(dim=1, keepdim=True))
-
-                # stop when each sentence is finished
-                if unfinished_sequences.max() == 0:
-                    this_peer_finished = True
-
             # stop if we exceed the maximum length
             decoding_cursors = decoding_kwargs['decoding_cursors']
-            for i in range(input_ids.size(0)):
-                cur = decoding_cursors[i]
+
+            for i, cur in enumerate(decoding_cursors):
                 if stopping_criteria(input_ids[i:i + 1, :cur + 1], None):
                     unfinished_sequences[i] = 0
-
+                next_token_ids = next_token_list[i]
+                for eos in eos_token_id:
+                    if eos in next_token_ids:
+                        unfinished_sequences[i] = 0
             unfinished_sequences, output_ids, batch_indices, model_kwargs = self._early_stop(
-                unfinished_sequences, output_ids, batch_indices, model_kwargs
-            )
+                unfinished_sequences, output_ids, batch_indices, model_kwargs)
             te = time.time()
             decoding_kwargs['fts'].append(te - ts)
             ts = te
             if len(batch_indices) == 0:
                 for i in range(input_bs):
-                    self.lookahead_cache.stream_put([], branch_length=branch_length + 1, final=True, mode='output',
-                                                       idx=i)
+                    self.lookahead_cache.stream_put([], branch_length=branch_length + 1,
+                                                    final=True, mode='output', idx=i)
                 max_cur = max(decoding_cursors)
                 input_ids = output_ids[:, :max_cur + 1]
                 break
