@@ -15,16 +15,18 @@ from transformers.generation.utils import GenerationConfig
 # assert transformers.__version__ >= '4.36.0'
 from pia.lookahead.models.baichuan2_13b.modeling_baichuan import BaichuanForCausalLM
 from pia.lookahead.models.baichuan2_13b.tokenization_baichuan import BaichuanTokenizer
+
 from pia.lookahead.examples import local_path_dict
 
 model_dir = local_path_dict.get('baichuan2_13b', 'your/model/path')
 
 tokenizer = BaichuanTokenizer.from_pretrained(model_dir)
+
 model = BaichuanForCausalLM.from_pretrained(model_dir
                                             , cache_dir='../'
                                             , torch_dtype=torch.float16
                                             , low_cpu_mem_usage=True
-                                            , device_map={"": "cuda:0"}
+                                            , device_map={"":"cuda:0"}
                                             )
 tokenizer.pad_token = tokenizer.eos_token
 # tokenizer.padding_side = 'left'
@@ -50,7 +52,6 @@ for use_lookahead in [False, False, True, True]:
     model.generation_config.decoding_kwargs = decoding_kwargs
     model.generation_config.max_new_tokens = max_new_tokens
     model.generation_config.do_sample = False
-    # model.generation_config.repetition_penalty = None
 
     messages = []
     messages.append({"role": "user", "content": prompt})
