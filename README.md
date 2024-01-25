@@ -14,15 +14,19 @@
 ## *News or Update* 🔥
 - [2024/01] We support Mistral & Mixtral [example](https://github.com/alipay/PainlessInferenceAcceleration/blob/main/pia/lookahead/examples/mixtral_example.py)
 
+<<<<<<< HEAD
 - [2023/12] We released our [Lookahead paper](https://arxiv.org/abs/2312.12728) on arXiv!
 
 - [2023/12] PIA released 💪 !!! Fast, Faster, Fastest 🐆 !!!
 
 
+=======
+>>>>>>> b56178a8557e280d758c7a2c6b205ca076d8b17e
 <del> TODO1: support the latest version  [🤗 transformers](https://github.com/huggingface/transformers) ]. Currently it's based on 4.30.2. </del>
 
 TODO2: integrate our work [FastCoT](https://arxiv.org/pdf/2311.08263.pdf)
 
+<<<<<<< HEAD
 ## Models we support 
 
 - GLM
@@ -39,6 +43,10 @@ TODO2: integrate our work [FastCoT](https://arxiv.org/pdf/2311.08263.pdf)
 
 ## Known issuss
 
+=======
+## Known issuss
+
+>>>>>>> b56178a8557e280d758c7a2c6b205ca076d8b17e
 1. repetition_penalty is not fully supported, we will fix it in the future.
 2. lookahead may generate responses different from original ones due to low-precise data type (i.e., fp16 or bf16), the responses would be the same with fp32.
 

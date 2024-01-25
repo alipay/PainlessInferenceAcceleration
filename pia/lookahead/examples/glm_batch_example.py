@@ -10,7 +10,6 @@ import time
 import torch
 
 
-from pia.lookahead.common.lookahead_cache import LookaheadCache
 from pia.lookahead.models.glm.tokenization_glm import GLMChineseTokenizer
 from pia.lookahead.models.glm.modeling_glm_batch import GLMForConditionalGeneration
 from pia.lookahead.examples import local_path_dict
@@ -28,11 +27,11 @@ tokenizer.pad_token = tokenizer.eos_token
 stop_words = set(tokenizer.convert_tokens_to_ids([',', '.', ' ', '，','。','的','是']))
 
 # prompt = "Hello, I'm am conscious and"
-prompt = ["杭州在哪里？[gMASK]", "西湖在哪个省？[gMASK]"]
-inputs = tokenizer(prompt, return_tensors="pt", padding=True, truncation=False, )
+prompt = ["杭州在哪里？[gMASK]", "西湖在哪个省？[gMASK]", "编一个200字左右的儿童故事[gMASK]"]
+inputs = tokenizer(prompt, return_tensors="pt", padding=True, truncation=False)
 
 device = model.device
-debug_lookahead = False
+debug_lookahead = True
 decoding_length = 64
 branch_length = 12
 max_new_tokens = 128
@@ -47,10 +46,10 @@ for use_lookahead in [False, False, True, True]:
     ts = time.time()
     decoding_kwargs = {"use_lookahead": use_lookahead,
                        "debug_lookahead": debug_lookahead,
-                       "decoding_mode": 'hier',
                        "decoding_length": decoding_length,
                        "branch_length": branch_length,
-                       "stop_words": stop_words}
+                       "stop_words": stop_words,
+                       "tokenizer": tokenizer}
     outputs = model.generate(input_ids=input_ids,
                              attention_mask=attention_mask,
                              position_ids=position_ids,
@@ -65,7 +64,6 @@ for use_lookahead in [False, False, True, True]:
     output_ids = outputs
     input_length = input_ids.size(-1)
     output_ids = output_ids[:, input_length:].tolist()
-    # output_ids = output_ids.tolist()
     output_texts = []
     output_id_list = []
     for token_ids in output_ids:
@@ -75,10 +73,6 @@ for use_lookahead in [False, False, True, True]:
     input_id_list = input_ids.tolist()
     input_texts = tokenizer.batch_decode(input_ids)
     te = time.time()
-    if use_lookahead:
-        print(f'with lookahead:{te - ts:.3f}s')
-    else:
-        print(f'without lookahead:{te - ts:.3f}s')
-    print(f'prompt:{prompt}')
-    print(f'input text:{input_texts}')
-    print(f'output text:{output_texts}')
+    # print(f'prompt:{prompt}')
+    # print(f'input text:{input_texts}')
+    print(f'lookahead:{use_lookahead} time:{te-ts:3f}s response:\n{output_texts}\n')

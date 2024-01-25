@@ -8,7 +8,6 @@ import sys
 import time
 import torch
 
-from pia.lookahead.common.pretrained_model import LookaheadCache
 from pia.lookahead.models.glm.modeling_glm import GLMForConditionalGeneration
 from pia.lookahead.models.glm.tokenization_glm import GLMChineseTokenizer
 from pia.lookahead.examples import local_path_dict
@@ -18,7 +17,7 @@ model_dir = local_path_dict.get('glm', 'your/model/path')
 model = GLMForConditionalGeneration.from_pretrained(model_dir
                                                     , cache_dir='../'
                                                     , offload_folder='./'
-                                                    , torch_dtype=torch.float16
+                                                    , torch_dtype=torch.float32
                                                     , low_cpu_mem_usage=True
                                                     , device_map={"":"cuda:0"})
 tokenizer = GLMChineseTokenizer.from_pretrained(model_dir)
@@ -31,8 +30,9 @@ for block in model.glm.transformer.layers:
     block.attention._norm()
 
 # prompt = "Hello, I'm am conscious and"
-prompt = "杭州在哪里？[gMASK]"
-inputs = tokenizer(prompt, return_tensors="pt", padding=True, truncation=False, )
+# prompt = "杭州在哪里？[gMASK]"
+prompt = "编一个200字左右的儿童故事[gMASK]"
+inputs = tokenizer(prompt, return_tensors="pt", padding=True, truncation=False)
 
 device = model.device
 debug_lookahead = False
@@ -48,7 +48,6 @@ for use_lookahead in [False,False,True,True]:
     ts = time.time()
     decoding_kwargs = {"use_lookahead": use_lookahead,
                        "debug_lookahead": debug_lookahead,
-                       "decoding_mode": 'hier',
                        "decoding_length": decoding_length,
                        "branch_length": branch_length,
                        "stop_words": stop_words}
@@ -59,20 +58,14 @@ for use_lookahead in [False,False,True,True]:
                              eos_token_id=tokenizer.eop_token_id,
                              use_cache=True,
                              max_new_tokens=max_new_tokens,
-                             repetition_penalty=1.0,
+                             repetition_penalty=1.2,
                              do_sample=False,
                              decoding_kwargs=decoding_kwargs
                              )
     output_ids = outputs
     input_length = input_ids.size(-1)
-    output_ids = output_ids[:, input_length:].tolist()
-    # output_ids = output_ids.tolist()
-    output_texts = []
-    output_id_list = []
-    for token_ids in output_ids:
-        output_id_list.append(token_ids)
-        text = tokenizer.decode(token_ids)
-        output_texts.append(text)
-    input_id_list = input_ids.tolist()
+    output_ids = output_ids[0, input_length:].tolist()
+    response = tokenizer.decode(output_ids)
     te = time.time()
-    print(f'use_lookahead:{use_lookahead} time:{te - ts:.3f} output:{output_texts}')
+    token_count = len(output_ids)
+    print(f'lookahead:{use_lookahead} time:{te - ts:.3f}s speed:{token_count/(te-ts):.1f}token/s response:\n{response}\n')
