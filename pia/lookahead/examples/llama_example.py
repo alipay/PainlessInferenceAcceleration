@@ -65,5 +65,5 @@ for use_lookahead in [False, False, True, True]:
     input_text = tokenizer.decode(input_ids[0])
     te = time.time()
     token_count = len(output_ids)
-    print(f'lookahead:{use_lookahead} time:{te - ts:.3f}s speed:{token_count/(te-ts):.1f}token/s response:{output_text}\n\n\n')
+    print(f'lookahead:{use_lookahead} time:{te - ts:.3f}s speed:{token_count/(te-ts):.1f}token/s response:{response}\n\n\n')
 
