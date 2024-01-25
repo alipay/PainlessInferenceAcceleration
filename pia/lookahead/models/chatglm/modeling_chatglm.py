@@ -981,18 +981,13 @@ class ChatGLMForConditionalGeneration(ChatGLMPreTrainedModel):
             attentions=transformer_outputs.attentions,
         )
 
-    def _update_cache(self, past_key_values, kv_idx, prefix_and_next_count=None, max_match_count=None,
-                      max_match_index=None):
-        output_past_key_values = []
-        for k, v in past_key_values:
-            if max_match_index + 1 == max_match_count:
-                k = k[:prefix_and_next_count + max_match_count]
-                v = v[:prefix_and_next_count + max_match_count]
-            else:
-                k = torch.concat([k[:prefix_and_next_count], k[kv_idx]], 0)
-                v = torch.concat([v[:prefix_and_next_count], v[kv_idx]], 0)
-            output_past_key_values.append((k, v))
-        return tuple(output_past_key_values)
+    def _update_cache(self, past_key_values, kv_idx, context_length=None, 
+                      max_match_count=None, continuous=False):
+        return self._update_cache_with_axis_0(past_key_values, kv_idx, 
+                                              context_length=context_length, 
+                                              max_match_count=max_match_count,
+                                              continuous=continuous)
+
 
     @staticmethod
     def _reorder_cache(
