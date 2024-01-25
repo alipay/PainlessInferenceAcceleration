@@ -9,37 +9,35 @@ import time
 
 import torch
 from transformers import AutoTokenizer
+from transformers import AutoModelForCausalLM
 from transformers.generation.utils import GenerationConfig
 
-
-from pia.lookahead.common.lookahead_cache import LookaheadCache
 from pia.lookahead.models.baichuan.modeling_baichuan import BaichuanForCausalLM
 from pia.lookahead.models.baichuan.tokenization_baichuan import BaichuanTokenizer
 from pia.lookahead.examples import local_path_dict
 
 model_dir = local_path_dict.get('baichuan', 'your/model/path') 
 
-dtype = torch.float16 if torch.cuda.is_available() else torch.float32
+tokenizer = BaichuanTokenizer.from_pretrained(model_dir, trust_remote_code=True)
 model = BaichuanForCausalLM.from_pretrained(model_dir
                                             , cache_dir='../'
                                             , torch_dtype=torch.float16
                                             , low_cpu_mem_usage=True
                                             , device_map={"":"cuda:0"}
+                                            , trust_remote_code=True
                                             )
-tokenizer = BaichuanTokenizer.from_pretrained(model_dir)
 tokenizer.pad_token = tokenizer.eos_token
-tokenizer.padding_side = 'left'
+# tokenizer.padding_side = 'left'
 stop_words = set(tokenizer.convert_tokens_to_ids([',', '.', ' ']))
 
-
-prompt = "Hello, I'm am conscious and"
+# prompt = "Hello, I'm am conscious and"
+prompt = "解释一下“温故而知新”"
 
 # first time without lookahead
 for use_lookahead in [False, False, True, True]:
     debug_lookahead = False
     decoding_length = 64
     branch_length = 12
-    ts = time.time()
     max_new_tokens = 256
     decoding_kwargs = {"use_lookahead": use_lookahead,
                        "debug_lookahead": debug_lookahead,
@@ -52,16 +50,15 @@ for use_lookahead in [False, False, True, True]:
     model.generation_config.decoding_kwargs = decoding_kwargs
     model.generation_config.max_new_tokens = max_new_tokens
     model.generation_config.do_sample = False
+    model.generation_config.repetition_penalty = None
 
     messages = []
     messages.append({"role": "user", "content": prompt})
 
+    ts = time.time()
     response = model.chat(tokenizer, messages)
     te = time.time()
-    if use_lookahead:
-        print(f'with lookahead:{te - ts:.3f}s')
-    else:
-        print(f'without lookahead:{te - ts:.3f}s')
-    print(f'prompt:{prompt}')
-    print(f'input text:{prompt}')
-    print(f'output text:{response}')
+    # print(f'prompt:{prompt}')
+    # print(f'input text:{prompt}')
+    token_count = len(tokenizer.encode(response))
+    print(f'lookahead:{use_lookahead} time:{te - ts:.3f}s speed:{token_count/(te-ts):.1f}token/s response:{response}\n\n\n')

@@ -8,16 +8,39 @@
    A toolkit for LLM inference without 😭 . Currently it contains our work LOOKAHEAD, a framework which accelerates LLM inference without loss of accuracy, other works will release soon.
 </p>
 
-[[Paper](https://arxiv.org/abs/2312.12728)]
+<!-- [[Paper](https://arxiv.org/abs/2312.12728)] -->
 
 
-## News or Update
+## *News or Update* 🔥
+- [2024/01] We support Mistral & Mixtral [example](https://github.com/alipay/PainlessInferenceAcceleration/blob/main/pia/lookahead/examples/mixtral_example.py)
 
-TODO1: support the latest version  [🤗 transformers](https://github.com/huggingface/transformers) ]. Currently it's based on 4.30.2.
+- [2023/12] We released our [Lookahead paper](https://arxiv.org/abs/2312.12728) on arXiv!
+
+- [2023/12] PIA released 💪 !!! Fast, Faster, Fastest 🐆 !!!
+
+
+<del> TODO1: support the latest version  [🤗 transformers](https://github.com/huggingface/transformers) ]. Currently it's based on 4.30.2. </del>
 
 TODO2: integrate our work [FastCoT](https://arxiv.org/pdf/2311.08263.pdf)
 
+## Models we support 
 
+- GLM
+- Baichuan & Baichuan 2 
+- BLOOM
+- ChatGLM
+- GPT-2
+- GPT-J
+- LLaMA & LLaMA-2
+- Mistral
+- Mixtral 
+- OPT
+- Qwen
+
+## Known issuss
+
+1. repetition_penalty is not fully supported, we will fix it in the future.
+2. lookahead may generate responses different from original ones due to low-precise data type (i.e., fp16 or bf16), the responses would be the same with fp32.
 
 ## Performance Comparison
 
@@ -59,8 +82,10 @@ AntGLM-10B is a LLM developed by Ant Group with [GLM](https://huggingface.co/THU
 
 Our repo PIA (short for Painless Inference Acceleration) is used for LLM inference, it is based on [🤗 transformers](https://github.com/huggingface/transformers)  library.
 
-It uses an on-the-fly trie-tree cache to prepare hierarchical multi-branch drafts, without the demand for assist models (e.g., speculative decoding) or additional head training (e.g., block decoding). 
+- It uses an on-the-fly trie-tree cache to prepare hierarchical multi-branch drafts, without the demand for assist models (e.g., speculative decoding) or additional head training (e.g., block decoding). 
 With the efficient hierarchical structure, we can lookahead tens fo branches, therefore significantly improve generated tokens in a forward pass.
+
+- You can also benefit from our optimized fuesed operation kernels.
 
 Note that our work is different from the other method named [lookahead decoding](https://github.com/hao-ai-lab/LookaheadDecoding). 
 
@@ -71,8 +96,8 @@ Note that our work is different from the other method named [lookahead decoding]
 <img src="./pia/lookahead/figures/draft.png" width="100%">
 </div> -->
 
-![draft](./pia/lookahead/figures/draft.png)
-
+![flow](./pia/lookahead/figures/flow.png)
+![dynamic](https://github.com/alipay/PainlessInferenceAcceleration/blob/main/pia/lookahead/figures/dynamic.gif)
 
 
 
