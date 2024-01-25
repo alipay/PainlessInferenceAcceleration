@@ -27,8 +27,7 @@ class GlmBenchmark(Benchmark):
         tokenizer.pad_token = tokenizer.eos_token
 
         stop_ids = tokenizer.convert_tokens_to_ids(self.stop_words+['的','是'])
-        lookahead_cache = LookaheadCache(eos=tokenizer.eop_token_id, stop_words=stop_ids)
-        model.lookahead_cache = lookahead_cache
+        model.lookahead_cache = LookaheadCache(stop_words=stop_ids)
         self.model = model
         self.tokenizer = tokenizer
         self.eos = tokenizer.eop_token_id

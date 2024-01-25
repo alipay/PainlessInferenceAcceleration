@@ -31,7 +31,7 @@ prompt = ["杭州在哪里？[gMASK]", "西湖在哪个省？[gMASK]", "编一�
 inputs = tokenizer(prompt, return_tensors="pt", padding=True, truncation=False)
 
 device = model.device
-debug_lookahead = True
+debug_lookahead = False
 decoding_length = 64
 branch_length = 12
 max_new_tokens = 128

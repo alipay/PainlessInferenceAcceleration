@@ -24,8 +24,7 @@ class ChatglmBenchmark(Benchmark):
                                                  , device_map='auto')
         tokenizer = ChatGLMTokenizer.from_pretrained(token_dir)
         stop_ids = tokenizer.convert_tokens_to_ids(self.stop_words)
-        lookahead_cache = LookaheadCache(eos=tokenizer.eos_token_id, stop_words=stop_ids)
-        model.lookahead_cache = lookahead_cache
+        model.lookahead_cache = LookaheadCache(stop_words=stop_ids)
         self.model = model
         self.tokenizer = tokenizer
         self.eos = tokenizer.eos_token_id
