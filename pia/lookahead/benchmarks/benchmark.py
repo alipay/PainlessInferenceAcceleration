@@ -125,7 +125,7 @@ class Benchmark():
                                  eos_token_id=self.eos,
                                  use_cache=True,
                                  max_new_tokens=max_length,
-                                 repetition_penalty=1.0,
+                                 repetition_penalty=1.1,
                                  do_sample=False,
                                  decoding_kwargs=decoding_kwargs,
                                  return_dict_in_generate=True

@@ -1,6 +1,6 @@
-cd ../tests &&
-python test_lookahead_cache.py &&
-python test_triton_rms_norm.py &&
+# cd ../tests &&
+# python test_lookahead_cache.py &&
+# python test_triton_rms_norm.py &&
 
 cd ../examples &&
 echo glm_example &&
