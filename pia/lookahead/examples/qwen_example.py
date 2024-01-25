@@ -15,7 +15,7 @@ from pia.lookahead.models.qwen.modeling_qwen import QWenLMHeadModel
 from pia.lookahead.models.qwen.tokenization_qwen import QWenTokenizer
 from pia.lookahead.examples import local_path_dict
 
-model_dir = local_path_dict.get('qwen', 'your/model/path') 
+model_dir = local_path_dict.get('qwen', 'your/model/path')
 
 dtype = torch.float16 if torch.cuda.is_available() else torch.float32
 device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
@@ -49,7 +49,6 @@ for use_lookahead in [False, False, True, True, True, True]:
                        "tokenizer": tokenizer}
     model.generation_config.decoding_kwargs=decoding_kwargs
     model.generation_config.do_sample=False  # default is True for qwen, result in different responses in every generation
-    model.generation_config.repetition_penalty=1.1
     ts = time.time()
     response, history = model.chat(tokenizer, prompt, history=None, eos_token_id=151645)
     te = time.time()
