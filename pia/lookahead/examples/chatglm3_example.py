@@ -7,8 +7,8 @@ import sys
 import time
 import torch
 
-from pia.lookahead.models.chatglm.tokenization_chatglm_3 import ChatGLMTokenizer
-from pia.lookahead.models.chatglm.modeling_chatglm import ChatGLMForConditionalGeneration
+from pia.lookahead.models.chatglm3.tokenization_chatglm import ChatGLMTokenizer
+from pia.lookahead.models.chatglm3.modeling_chatglm import ChatGLMForConditionalGeneration
 from pia.lookahead.examples import local_path_dict
 
 model_dir = local_path_dict.get('chatglm3', 'your/model/path') 
@@ -40,7 +40,7 @@ branch_length = 12
 max_new_tokens = 128
 
 
-for use_lookahead in [False,False,True,True]:
+for use_lookahead in [False, False, True,True]:
     ts = time.time()
     decoding_kwargs = {"use_lookahead": use_lookahead,
                        "debug_lookahead": debug_lookahead,
@@ -58,7 +58,7 @@ for use_lookahead in [False,False,True,True]:
                              max_new_tokens=max_new_tokens,
                              repetition_penalty=1.0,
                              do_sample=False,
-                             decoding_kwargs=decoding_kwargs
+                             **kwargs,
                              )
     output_ids = outputs
     input_length = input_ids.size(-1)

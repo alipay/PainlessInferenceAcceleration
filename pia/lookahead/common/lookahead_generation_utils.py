@@ -4,13 +4,16 @@ Copyright (c) Ant Financial Service Group and its affiliates.
 """
 
 from typing import Optional, Tuple, Dict
-from dataclasses import dataclass
+import queue
+import threading
 
+from dataclasses import dataclass
 import torch
 
 from transformers.utils import ExplicitEnum
 from transformers.generation.utils import ModelOutput
 from transformers.generation.configuration_utils import GenerationConfig
+from transformers.generation.streamers import BaseStreamer
 
 
 class LookaheadGenerationConfig(GenerationConfig):
@@ -71,3 +74,4 @@ class LookaheadDecoderOnlyOutput(ModelOutput):
     attentions: Optional[Tuple[Tuple[torch.FloatTensor]]] = None
     hidden_states: Optional[Tuple[Tuple[torch.FloatTensor]]] = None
     kwargs: Optional[Dict] = None
+
