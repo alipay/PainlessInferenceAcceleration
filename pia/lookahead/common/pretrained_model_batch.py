@@ -977,9 +977,24 @@ class LookaheadPreTrainedModel(PreTrainedModel):
         return unfinished_sequences, output_ids, output_batch_indices, model_kwargs
 
     def _update_cache(self, past_key_values, batch_idx, kv_idx, context_length=None, max_match_count=None):
+        self._update_cache_with_axis_2(past_key_values, batch_idx, kv_idx, 
+                                       context_length=context_length, max_match_count=max_match_count)
+
+    def _update_cache_with_axis_2(self, past_key_values, batch_idx, kv_idx, context_length=None, max_match_count=None):
         for k, v in past_key_values:
             k[batch_idx, :, context_length:context_length + max_match_count] = k[batch_idx, :, kv_idx]
             v[batch_idx, :, context_length:context_length + max_match_count] = v[batch_idx, :, kv_idx]
+
+    def _update_cache_with_axis_1(self, past_key_values, batch_idx, kv_idx, context_length=None, max_match_count=None):
+        for k, v in past_key_values:
+            k[batch_idx, context_length:context_length + max_match_count] = k[batch_idx, kv_idx]
+            v[batch_idx, context_length:context_length + max_match_count] = v[batch_idx, kv_idx]
+
+    def _update_cache_with_axis_0(self, past_key_values, batch_idx, kv_idx, context_length=None, max_match_count=None):
+        for k, v in past_key_values:
+            k[context_length:context_length + max_match_count, batch_idx] = k[kv_idx, batch_idx]
+            v[context_length:context_length + max_match_count, batch_idx] = v[kv_idx, batch_idx]
+
 
     def lookahead_generation(
             self,
@@ -1226,6 +1241,10 @@ class LookaheadPreTrainedModel(PreTrainedModel):
 
             next_tokens_scores = model_kwargs['next_tokens_scores']
             next_token_list = model_kwargs['next_token_list']
+
+            if streamer is not None:
+                # TODO: output batch tokens, should override TextIterStreamer 
+                streamer.put(np.array(next_token_list[0]))
 
             batch_indices = model_kwargs['decoding_kwargs']['batch_indices']
             for k, tids in enumerate(next_token_list):
