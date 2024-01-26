@@ -7,34 +7,35 @@ Copyright (c) Ant Financial Service Group and its affiliates.
 import os
 import sys
 import time
+
 import torch
 from transformers import AutoTokenizer
+from transformers import TextIteratorStreamer
 
-from pia.lookahead.models.gptj.modeling_gptj import GPTJForCausalLM
+from pia.lookahead.models.llama.modeling_llama import LlamaForCausalLM
 from pia.lookahead.examples import local_path_dict
 
-model_dir = local_path_dict.get('gptj', 'your/model/path') 
+model_dir = local_path_dict.get('llama', 'your/model/path') 
 
 dtype = torch.float16 if torch.cuda.is_available() else torch.float32
-model = GPTJForCausalLM.from_pretrained(model_dir
-                                       , cache_dir='../'
-                                       , torch_dtype=dtype
-                                       , low_cpu_mem_usage=True
-                                       , device_map={"":"cuda:0"}
-                                       )
+model = LlamaForCausalLM.from_pretrained(model_dir
+                                         , cache_dir='../'
+                                         , torch_dtype=dtype
+                                         , low_cpu_mem_usage=True
+                                         , device_map={"":"cuda:0"}
+                                         )
 tokenizer = AutoTokenizer.from_pretrained(model_dir)
 tokenizer.pad_token = tokenizer.eos_token
 tokenizer.padding_side = 'left'
 stop_words = set(tokenizer.convert_tokens_to_ids([',', '.', ' ']))
 
-
 prompt = "Hello, I'm am conscious and"
 inputs = tokenizer(prompt, return_tensors="pt")
-device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
-input_ids = inputs.input_ids.to(device)
-attention_mask = inputs.attention_mask.to(device)
+input_ids = inputs.input_ids.cuda()
+attention_mask = inputs.attention_mask.cuda()
 position_ids = None
 
+# first time without lookahead
 for use_lookahead in [False, False, True, True]:
     debug_lookahead = False
     decoding_length = 64
@@ -46,8 +47,8 @@ for use_lookahead in [False, False, True, True]:
                        "decoding_length": decoding_length,
                        "branch_length": branch_length,
                        "stop_words": stop_words}
-                       
-    outputs = model.generate(input_ids=input_ids,
+    streamer = TextIteratorStreamer(tokenizer)
+    generator = model.stream_generate(input_ids=input_ids,
                              attention_mask=attention_mask,
                              position_ids=position_ids,
                              pad_token_id=tokenizer.eos_token_id,
@@ -56,15 +57,15 @@ for use_lookahead in [False, False, True, True]:
                              max_new_tokens=max_new_tokens,
                              repetition_penalty=1.0,
                              do_sample=False,
-                             decoding_kwargs=decoding_kwargs,
+                             streamer=streamer,
+                             decoding_kwargs=decoding_kwargs
                              )
-    output_ids = outputs
-    input_length = input_ids.size(-1)
-    output_ids = output_ids[0, input_length:].tolist()
-    response = tokenizer.decode(output_ids)
-    input_text = tokenizer.decode(input_ids[0])
-    te = time.time()
-    token_count = len(output_ids)
-    print(f'lookahead:{use_lookahead} time:{te - ts:.3f}s speed:{token_count/(te-ts):.1f}token/s response:\n{response}\n')
 
+    response = ''
+    for word in generator:
+        response = response + word
+        print(word, end='',flush=True)
+    te = time.time()
+    token_count = len(tokenizer.encode(response))-input_ids.size(1)
+    print(f'lookahead:{use_lookahead} time:{te - ts:.3f}s speed:{token_count/(te-ts):.1f}token/s\n')
 
