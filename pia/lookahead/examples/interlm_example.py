@@ -14,7 +14,6 @@ from pia.lookahead.models.internlm.tokenization_internlm import InternLMTokenize
 from pia.lookahead.examples import local_path_dict
 
 model_dir = local_path_dict.get('internlm', 'your/model/path') 
-# model_dir = '/mntnlp/liangchen/internlm2-chat-7b'
 
 tokenizer = InternLMTokenizer.from_pretrained(model_dir)
 model = InternLM2ForCausalLM.from_pretrained(model_dir
@@ -30,7 +29,7 @@ stop_words = set(tokenizer.convert_tokens_to_ids([',', '.', ' ']))
 prompt = "做一个自我介绍"
 
 # first time without lookahead
-for use_lookahead in [True, True]:
+for use_lookahead in [False, False, True, True]:
     debug_lookahead = True
     decoding_length = 64
     branch_length = 12

@@ -1213,6 +1213,7 @@ class LookaheadPreTrainedModel(PreTrainedModel):
         model_kwargs['decoding_kwargs'] = decoding_kwargs
         ts = time.time()
         unfinished_sequences = [1]*input_bs
+        max_cur = 0
         while True:
 
             # prepare model inputs
@@ -1273,6 +1274,7 @@ class LookaheadPreTrainedModel(PreTrainedModel):
 
             # stop if we exceed the maximum length
             decoding_cursors = decoding_kwargs['decoding_cursors']
+            max_cur = max(max_cur, max(decoding_cursors))
 
             for i, cur in enumerate(decoding_cursors):
                 if stopping_criteria(input_ids[i:i + 1, :cur + 1], None):
@@ -1290,7 +1292,6 @@ class LookaheadPreTrainedModel(PreTrainedModel):
                 for i in range(input_bs):
                     self.lookahead_cache.stream_put([], branch_length=branch_length + 1,
                                                     final=True, mode='output', idx=i)
-                max_cur = max(decoding_cursors)
                 input_ids = output_ids[:, :max_cur + 1]
                 break
 
