@@ -14,7 +14,6 @@ from pia.lookahead.models.internlm.tokenization_internlm import InternLMTokenize
 from pia.lookahead.examples import local_path_dict
 
 model_dir = local_path_dict.get('internlm', 'your/model/path') 
-# model_dir = '/mntnlp/liangchen/internlm2-chat-7b'
 
 tokenizer = InternLMTokenizer.from_pretrained(model_dir)
 model = InternLM2ForCausalLM.from_pretrained(model_dir
@@ -30,8 +29,8 @@ stop_words = set(tokenizer.convert_tokens_to_ids([',', '.', ' ']))
 prompt = "做一个自我介绍"
 
 # first time without lookahead
-for use_lookahead in [True, True]:
-    debug_lookahead = True
+for use_lookahead in [False, False. True, True]:
+    debug_lookahead = False
     decoding_length = 64
     branch_length = 12
     ts = time.time()
@@ -42,18 +41,11 @@ for use_lookahead in [True, True]:
                        "branch_length": branch_length,
                        "stop_words": stop_words,
                        "tokenizer": tokenizer}
-    # model.generation_config.decoding_kwargs=decoding_kwargs
+
     ts = time.time()
     response, history = model.chat(tokenizer, prompt, history=[], decoding_kwargs=decoding_kwargs)
     te = time.time()
     token_count = len(tokenizer.encode(response))
     print(f'lookahead:{use_lookahead} time:{te - ts:.3f}s speed:{token_count/(te-ts):.1f}token/s response:\n{response}\n')
-    # output_ids = outputs
-    # input_length = input_ids.size(-1)
-    # output_ids = output_ids[0, input_length:].tolist()
-    # response = tokenizer.decode(output_ids)
-    # input_text = tokenizer.decode(input_ids[0])
-    # te = time.time()
-    # token_count = len(output_ids)
-    # print(f'lookahead:{use_lookahead} time:{te - ts:.3f}s speed:{token_count/(te-ts):.1f}token/s response:{response}\n\n\n')
+
 
