@@ -35,8 +35,10 @@ from transformers.utils import add_start_docstrings, add_start_docstrings_to_mod
     replace_return_docstrings
 
 # from transformers.modeling_utils import PreTrainedModel
-from pia.lookahead.common.pretrained_model_batch import LookaheadPreTrainedModel
-# from pia.lookahead.csrc.triton.rms_norm import rmsnorm_wrapper
+from lookahead.common.pretrained_model_batch import LookaheadPreTrainedModel
+from flash_attn import flash_attn_qkvpacked_func, flash_attn_func, flash_attn_with_kvcache
+from lookahead.csrc.triton.rms_norm import rmsnorm_wrapper
+
 
 logger = logging.get_logger(__name__)
 
@@ -86,23 +88,7 @@ class LlamaRMSNorm(nn.Module):
         self.variance_epsilon = eps
 
     def forward(self, hidden_states):
-        input_dtype = hidden_states.dtype
-        variance = hidden_states.to(torch.float32).pow(2).mean(-1, keepdim=True)
-        hidden_states = hidden_states * torch.rsqrt(variance + self.variance_epsilon)
-
-        return (self.weight * hidden_states).to(input_dtype)
-
-# class LlamaRMSNorm(nn.Module):
-#     def __init__(self, hidden_size, eps=1e-6):
-#         """
-#         LlamaRMSNorm is equivalent to T5LayerNorm
-#         """
-#         super().__init__()
-#         self.weight = nn.Parameter(torch.ones(hidden_size))
-#         self.variance_epsilon = eps
-#
-#     def forward(self, hidden_states):
-#         return rmsnorm_wrapper(hidden_states, self.weight, eps=self.variance_epsilon)
+        return rmsnorm_wrapper(hidden_states, self.weight, eps=self.variance_epsilon)
 
 
 class LlamaRotaryEmbedding(torch.nn.Module):
@@ -126,18 +112,19 @@ class LlamaRotaryEmbedding(torch.nn.Module):
 
         freqs = torch.einsum("i,j->ij", t, self.inv_freq)
         # Different from paper, but it uses a different permutation in order to obtain the same calculation
-        # emb = torch.cat((freqs, freqs), dim=-1)
-        cos = freqs.cos()
-        sin = freqs.sin()
-        cached = torch.stack([torch.stack([cos, -sin], dim=1), torch.stack([sin, cos], dim=1)], dim=1)
-        self.register_buffer("cached", cached.to(dtype), persistent=False)
+        emb = freqs
+        self.register_buffer("cos_cached", emb.cos().to(dtype), persistent=False)
+        self.register_buffer("sin_cached", emb.sin().to(dtype), persistent=False)
 
     def forward(self, x, seq_len=None):
         # x: [bs, num_attention_heads, seq_len, head_size]
         if seq_len > self.max_seq_len_cached:
             self._set_cos_sin_cache(seq_len=seq_len, device=x.device, dtype=x.dtype)
 
-        return self.cached[:seq_len, ...]
+        return (
+            self.cos_cached,
+            self.sin_cached,
+        )
 
 
 class LlamaLinearScalingRotaryEmbedding(LlamaRotaryEmbedding):
@@ -154,10 +141,9 @@ class LlamaLinearScalingRotaryEmbedding(LlamaRotaryEmbedding):
 
         freqs = torch.einsum("i,j->ij", t, self.inv_freq)
         # Different from paper, but it uses a different permutation in order to obtain the same calculation
-        cos = freqs.cos()
-        sin = freqs.sin()
-        cached = torch.stack([torch.stack([cos, -sin], dim=1), torch.stack([sin, cos], dim=1)], dim=1)
-        self.register_buffer("cached", cached.to(dtype), persistent=False)
+        emb = freqs
+        self.register_buffer("cos_cached", emb.cos().to(dtype), persistent=False)
+        self.register_buffer("sin_cached", emb.sin().to(dtype), persistent=False)
 
 
 class LlamaDynamicNTKScalingRotaryEmbedding(LlamaRotaryEmbedding):
@@ -181,27 +167,9 @@ class LlamaDynamicNTKScalingRotaryEmbedding(LlamaRotaryEmbedding):
 
         freqs = torch.einsum("i,j->ij", t, self.inv_freq)
         # Different from paper, but it uses a different permutation in order to obtain the same calculation
-        cos = freqs.cos()
-        sin = freqs.sin()
-        cached = torch.stack([torch.stack([cos, -sin], dim=1), torch.stack([sin, cos], dim=1)], dim=1)
-        self.register_buffer("cached", cached.to(dtype), persistent=False)
-
-
-# llama7b:  41.6token/s -> 52.0token/s, +25%
-# llama13b: 32.3token/s -> 40.2token/s, +24%
-def apply_rotary_pos_emb(q, k, cached, position_ids):
-    # cached: [seq_len, 2, 2, dim]
-    # The first two dimensions of cos and sin are always 1, so we can `squeeze` them.
-    position_ids = position_ids.unsqueeze(1)  # [bs, 1, seq_len]
-    c = cached[position_ids]  # [bs, 1, seq_len, 2, 2, dim//2]
-    shape = q.shape
-    update_shape = shape[:-1] + (1, 2, shape[-1] // 2)
-    q = q.view(*update_shape)  # [bs,head_num,seq_len,1, 2,dim//2]
-    q_embed = (c * q).sum(-2).view(shape)
-    k = k.view(*update_shape)  # [bs,head_num,seq_len,1, 2,dim//2]
-    k_embed = (c * k).sum(-2).view(shape)
-    return q_embed, k_embed
-
+        emb = freqs
+        self.register_buffer("cos_cached", emb.cos().to(dtype), persistent=False)
+        self.register_buffer("sin_cached", emb.sin().to(dtype), persistent=False)
 
 class LlamaMLP(nn.Module):
     def __init__(self, config):
@@ -264,8 +232,6 @@ class LlamaAttention(nn.Module):
         self.o_proj = nn.Linear(self.num_heads * self.head_dim, self.hidden_size, bias=False)
         self._init_rope()
 
-        self.norming = True
-        self.normed = False
         self.query_key_value = None
         self.cache_seqlens = None
 
@@ -296,38 +262,6 @@ class LlamaAttention(nn.Module):
             else:
                 raise ValueError(f"Unknown RoPE scaling type {scaling_type}")
 
-    def _attn(self, query, key, value, attention_mask=None, head_mask=None):
-
-        # attns = {}
-        # attn_weights = torch.matmul(self.norm_coef*query, key.transpose(-1, -2))
-        # attn_weights = attn_weights.masked_fill_(attention_mask==0.0, -65504.0)
-
-        # print(attention_mask.shape, query.shape, key.shape)
-        # coef is divide by weight and bias after loading
-        if query.size(0) == 1:
-            if self.normed:
-                attn_weights = torch.baddbmm(attention_mask.squeeze(0), query.squeeze(0),
-                                             key.squeeze(0).transpose(-1, -2))
-            else:
-                attn_weights = torch.baddbmm(attention_mask.squeeze(0), self.norm_coef * query.squeeze(0),
-                                             key.squeeze(0).transpose(-1, -2))
-        else:
-            if self.normed:
-                attn_weights = torch.matmul(key, query.transpose(-1, -2)).transpose(-1, -2)
-            else:
-                attn_weights = torch.matmul(key, self.norm_coef * query.transpose(-1, -2)).transpose(-1, -2)
-            attn_weights = attn_weights.add_(attention_mask)
-
-        attn_weights = nn.functional.softmax(attn_weights, dim=-1)
-
-        attn_output = torch.matmul(attn_weights, value)
-
-        return attn_output, attn_weights
-
-    def _sdp_attn(self, query, key, value, attention_mask=None, head_mask=None):
-        with torch.backends.cuda.sdp_kernel(enable_math=False):
-            return F.scaled_dot_product_attention(query, key, value, attn_mask=attention_mask), None
-
     def forward(
             self,
             hidden_states: torch.Tensor,
@@ -340,11 +274,12 @@ class LlamaAttention(nn.Module):
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[Tuple[torch.Tensor]]]:
 
         if self.query_key_value is None:
-            coef = math.sqrt(self.head_dim) if self.norming else 1.0
+            # coef = math.sqrt(self.head_dim)
+            coef = 1.0
             self.query_key_value = nn.Linear(self.hidden_size, 3 * self.num_heads * self.head_dim, bias=False,
                                              device=self.q_proj.weight.device, dtype=self.q_proj.weight.dtype)
             self.query_key_value.weight = nn.Parameter(
-                torch.cat([self.q_proj.weight.data / coef, self.k_proj.weight.data, self.v_proj.weight.data], dim=0),
+                torch.cat([self.q_proj.weight.data / coef, self.k_proj.weight.data, self.v_proj.weight.data], axis=0),
                 requires_grad=False)
             self.q_proj = self.q_proj.cpu()
             self.q_proj = None
@@ -352,69 +287,41 @@ class LlamaAttention(nn.Module):
             self.k_proj = None
             self.v_proj = self.v_proj.cpu()
             self.v_proj = None
-            self.normed = True
 
-        bs, l = hidden_states.shape[:2]
+        bs, kv_seq_len = hidden_states.shape[:2]
         if past_key_value is not None:
-            kv_seq_len = past_key_value[0].shape[2]
-        else:
-            kv_seq_len = l
+            kv_seq_len += past_key_value[0].shape[1]
 
         mat = self.query_key_value(hidden_states)
         shape = mat.size()[:-1] + (3, self.num_heads, self.head_dim)
-        query_states, key_states, value_states = mat.view(shape).permute(0, 3, 2, 1, 4).unbind(2)
+        query_states, key_states, value_states = mat.view(shape).unbind(2)
 
-        cached = self.rotary_emb(value_states, seq_len=kv_seq_len)
-        query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cached, position_ids)
+        cos, sin = self.rotary_emb(value_states, seq_len=kv_seq_len)
 
         if past_key_value is None:
-
-            attn_output, attn_weights = self._attn(query_states,
-                                                          key_states,
-                                                          value_states,
-                                                          attention_mask=attention_mask)
-
             decoding_max_length = decoding_kwargs.get('decoding_max_length', None)
-            zeros = torch.zeros([bs, self.num_heads, decoding_max_length - l, self.head_dim],
-                                dtype=hidden_states.dtype, 
-                                device=hidden_states.device)
-            past_key = torch.cat([key_states, zeros], 2)
-            past_value = torch.cat([value_states, zeros], 2)
+            past_kv = torch.zeros([2, bs, decoding_max_length, self.num_heads, self.head_dim],
+                                  dtype=hidden_states.dtype, device=hidden_states.device)
+            past_key, past_value = past_kv.unbind(0)
             past_key_value = [past_key, past_value]
-            self.cache_seqlens = l
+            attn_output = flash_attn_with_kvcache(query_states, past_key, past_value, k=key_states, v=value_states,
+                                                  rotary_cos=cos, rotary_sin=sin, cache_seqlens=0, softmax_scale=None,
+                                                  causal=True, rotary_interleaved=False)
+            self.cache_seqlens = kv_seq_len
         else:
             past_key, past_value = past_key_value
-            decoding_cursors = decoding_kwargs.get('decoding_cursors', None)
-            if decoding_cursors is None:
-                max_len = self.cache_seqlens + l
-                past_key[:, :,  self.cache_seqlens: max_len] = key_states
-                past_value[:, :, self.cache_seqlens: max_len] = value_states
+            decoding_cursors_tensor = decoding_kwargs.get('decoding_cursors_tensor', None)
+            if decoding_cursors_tensor is None:
+                cache_seqlens = self.cache_seqlens
             else:
-                max_len = max(decoding_cursors) + l
-                cs = list(set(decoding_cursors))
-                if len(cs) == 1:
-                    c = cs[0]
-                    past_key[:, :, c: c + l] = key_states
-                    past_value[:, :, c: c + l] = value_states
-                else:
-                    for i, cursor in enumerate(decoding_cursors):
-                        past_key[i, :,  cursor: cursor + l] = key_states[i]
-                        past_value[i,  :, cursor: cursor + l] = value_states[i]
-
-            attn_output, attn_weights = self._attn(query_states,
-                                                          past_key[:, :, :max_len],
-                                                          past_value[:, :, :max_len],
-                                                          attention_mask=attention_mask)
-            if decoding_cursors is None:
+                cache_seqlens = decoding_cursors_tensor
+            attn_output = flash_attn_with_kvcache(query_states, past_key, past_value, k=key_states, v=value_states,
+                                                  rotary_cos=cos, rotary_sin=sin, cache_seqlens=cache_seqlens,
+                                                  softmax_scale=None, causal=True, rotary_interleaved=False)
+            if decoding_cursors_tensor is None:
                 self.cache_seqlens += 1
-
-        if not use_cache:
-            past_key_value = None
-
         if not output_attentions:
             attn_weights = None
-
-        attn_output = attn_output.permute(0, 2, 1, 3).contiguous()
         attn_shape = attn_output.size()[:-2] + (self.num_heads * self.head_dim,)
         attn_output = attn_output.view(attn_shape)
         attn_output = self.o_proj(attn_output)
@@ -991,6 +898,11 @@ class LlamaForCausalLM(LlamaPreTrainedModel):
                 tuple(past_state.index_select(0, beam_idx.to(past_state.device)) for past_state in layer_past),
             )
         return reordered_past
+
+    def _update_cache(self, past_key_values, batch_idx, kv_idx, context_length=None, max_match_count=None):
+        self._update_cache_with_axis_1(past_key_values, batch_idx, kv_idx, 
+                                       context_length=context_length, max_match_count=max_match_count)
+
 
 @add_start_docstrings(
     """
