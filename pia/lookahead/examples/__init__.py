@@ -14,6 +14,7 @@ local_path_dict = {
     'glm': '/mntnlp/nanxiao/lookahead_benchmark/antrag' ,
     'gpt2': '/mntnlp/common_base_model/gpt2',
     'gptj': '/mntnlp/common_base_model/gpt-j-6b',
+    'internlm': '/mntnlp/liangchen/internlm2-chat-7b',
     'llama':  '/mntnlp/common_base_model/llama2-7b-chat',
     'opt':  '/mntnlp/common_base_model/opt_6b7',
     # 'opt': '/Users/yaozhao/dataset/models/opt-125m',
