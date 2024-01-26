@@ -30,9 +30,10 @@
 - GLM
 - Baichuan & Baichuan 2 
 - BLOOM
-- ChatGLM
+- ChatGLM 2 & 3 
 - GPT-2
 - GPT-J
+- InterLM
 - LLaMA & LLaMA-2
 - Mistral
 - Mixtral 
@@ -280,9 +281,9 @@ inference can be found in `models/modeling_glm_batch.py` or `models/modeling_lla
 </details>
 
 
-## Supported Models
+<!-- ## Supported Models
 
-We currently support a range of models, including Llama, OPT, Bloom, GPTJ, GPT2, Baichuan, ChatGLM, GLM, and Qwen. We welcome contributions to extend support to additional models. 
+We currently support a range of models, including Llama, OPT, Bloom, GPTJ, GPT2, Baichuan, ChatGLM, GLM, and Qwen. We welcome contributions to extend support to additional models.  -->
 
 ## Tests
 
