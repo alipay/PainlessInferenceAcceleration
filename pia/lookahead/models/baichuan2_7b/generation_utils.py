@@ -49,6 +49,14 @@ def build_chat_input(model, tokenizer, messages: List[dict], max_new_tokens: int
     return torch.LongTensor([input_tokens]).to(model.device)
 
 
+
+def build_batch_chat_input(model, tokenizer, messages: List[dict], max_new_tokens: int=0):
+
+    prompts = [x['content']+'<reserved_106>' for x in messages]
+    inputs = tokenizer(prompts, return_tensors="pt", padding=True, truncation=False)
+    return inputs
+
+
 class TextIterStreamer:
     def __init__(self, tokenizer, skip_prompt=False, skip_special_tokens=False):
         self.tokenizer = tokenizer
