@@ -58,6 +58,9 @@ python baichuan2_7b_example.py &&
 echo baichuan2_13b_example && 
 python baichuan2_13b_example.py &&
 
+echo internlm_example &&
+python internlm_example.py &&
+
 echo mistral_example &&
 python mistral_example.py &&
 
