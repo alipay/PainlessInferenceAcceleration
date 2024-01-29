@@ -29,7 +29,7 @@ stop_words = set(tokenizer.convert_tokens_to_ids([',', '.', ' ']))
 prompt = "做一个自我介绍"
 
 # first time without lookahead
-for use_lookahead in [False, False. True, True]:
+for use_lookahead in [False, False, True, True]:
     debug_lookahead = False
     decoding_length = 64
     branch_length = 12
