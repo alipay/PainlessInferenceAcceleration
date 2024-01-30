@@ -14,8 +14,7 @@ from pia.lookahead.models.llama.modeling_llama import LlamaForCausalLM
 from pia.lookahead.examples import local_path_dict
 from transformers import CodeLlamaTokenizer
 
-model_dir = "/mntnlp/common_base_model/CodeLlama-7b-Instruct-hf"
-# model_dir = local_path_dict.get('llama', 'your/model/path') 
+model_dir = local_path_dict.get('codellama', 'your/model/path') 
 
 dtype = torch.float16 if torch.cuda.is_available() else torch.float32
 # dtype = torch.float32
