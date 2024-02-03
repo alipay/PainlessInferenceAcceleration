@@ -676,6 +676,7 @@ class LookaheadPreTrainedModel(PreTrainedModel):
         branch_length = decoding_kwargs.get('branch_length', 12)
         decoding_mode = decoding_kwargs.get('decoding_mode', 'hier')
         max_length = decoding_kwargs.get('max_length', 2048)
+        max_query_length = decoding_kwargs.get('max_query_length', 2)
         update_branch_length = min(branch_length, max_length - input_ids.size(-1) - 1)
         assert update_branch_length >= 0, f'{branch_length=} {max_length=} {input_ids.size(-1)=} {update_branch_length=}'
 
@@ -704,8 +705,7 @@ class LookaheadPreTrainedModel(PreTrainedModel):
                 model_inputs["position_ids"] = self._get_position_ids(position_ids, prefill=True, length=length)
 
         else:
-            decoding_qids = input_ids[0, -2:].tolist()
-            # decoding_qids = decoding_kwargs['input_id_list'][0][-2:]
+            decoding_qids = input_ids[0, -max_query_length:].tolist()
             min_input_size = 0
             min_output_size = max(decoding_length // 2, 1)
 

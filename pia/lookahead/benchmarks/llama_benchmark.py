@@ -15,9 +15,9 @@ from benchmark import Benchmark
 class LlameBenchmark(Benchmark):
 
     def initialize(self, model_dir=None, token_dir=None, **kwargs):
-        # org version for llama
+        # org version llama
         # from pia.lookahead.models.llama.modeling_llama import LlamaForCausalLM
-        # fused op version for llama
+        # fused op version llama
         from pia.lookahead.models.llama.modeling_llama_batch import LlamaForCausalLM 
         tokenizer = AutoTokenizer.from_pretrained(token_dir)
         tokenizer.pad_token = tokenizer.eos_token
@@ -27,46 +27,43 @@ class LlameBenchmark(Benchmark):
                                                  , torch_dtype=torch.float16
                                                  , low_cpu_mem_usage=True
                                                  , device_map='auto')
-        stop_words = tokenizer.convert_tokens_to_ids(self.stop_words)
-        model.lookahead_cache = LookaheadCache(stop_words=stop_words)
+        model.lookahead_cache = LookaheadCache()
+        self.stop_ids = tokenizer.convert_tokens_to_ids(self.stop_words)
         self.model = model
         self.tokenizer = tokenizer
         self.eos = tokenizer.eos_token_id
         self.eop = None
 
-
-model_dir = 'your/model/path'
 model_dir = '/mntnlp/common_base_model/llama2-7b-chat'
-"""
-generate answers first if only prompts are available, answers in the warmup samples are used for constructing trie-tree cache
-prompt_dir = 'your/prompt/dir'
-dataset_dir = 'your/answer/dir'
-worker.save_answers(prompt_dir, dataset_dir, prompt_name='your/prompt/field/name', batch_size=1, max_count=None)
-"""
-
-# the dataset can be found in lookahead/datasets/dataset.py
-dataset_dir = 'dolly_15k_llama2_7b_chat.jsonl'
-dataset_dir = '/mntnlp/nanxiao/lookahead_benchmark/dolly_15k_llama2_7b_chat.jsonl'
-
 worker = LlameBenchmark(log_dir='llama_benchmark')
 worker.initialize(model_dir=model_dir, token_dir=model_dir)
-worker.load_prompts(prompt_dir=dataset_dir)
 
-max_length = 256
-chat_count = 1000
-warmup_count = 10000
+"""
+answers in the warmup samples are used for constructing trie-tree cache
+"""
+# warmup_prompt_dir = '/mntnlp/nanxiao/dataset/dolly_15k/train.jsonl'
+# warmup_dataset_dir = '/mntnlp/nanxiao/dataset/lookahead/dolly_15k_llama2_7b_chat/train.jsonl'
+# worker.save_answers(warmup_prompt_dir, warmup_dataset_dir, batch_size=1, max_count=None, use_lookahead=True)
+
+# the dataset can be found in lookahead/datasets/dataset.py
+dataset_dir = '/mntnlp/nanxiao/dataset/lookahead/dolly_15k_llama2_7b_chat/test.jsonl'
+warmup_dataset_dir = '/mntnlp/nanxiao/dataset/lookahead/dolly_15k_llama2_7b_chat/train.jsonl'
+worker.load_prompts(prompt_dir=dataset_dir, warmup_prompt_dir=warmup_dataset_dir)
+
 
 # test correctness with lookahead decoding
 worker.batch_chat(worker.prompts[:10],
-                  max_length=max_length,
+                  max_new_tokens=256,
                   decoding_length=16,
                   branch_length=4,
                   debug_lookahead=False,
                   erase=True,
                   batch_size=1)
 
-
-worker.perf_check(worker.prompts[:chat_count], warmup_ids=worker.ids[chat_count:chat_count + warmup_count],
-                  sizes=[64], lens=[0], max_length=max_length)
-worker.perf_check(worker.prompts[:chat_count], warmup_ids=worker.ids[chat_count:chat_count + warmup_count],
-                  sizes=[64], lens=[12], max_length=max_length)
+max_new_tokens = 256
+chat_count = 1000
+warmup_count = 10000
+worker.perf_check(worker.prompts[:chat_count], warmup_ids=worker.warmup_ids[:warmup_count],
+                  sizes=[64], lens=[0], max_new_tokens=max_new_tokens)
+worker.perf_check(worker.prompts[:chat_count], warmup_ids=worker.warmup_ids[:warmup_count],
+                  sizes=[64], lens=[12], max_new_tokens=max_new_tokens)
