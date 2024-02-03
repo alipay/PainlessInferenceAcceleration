@@ -504,7 +504,6 @@ class LookaheadCache():
                 # token count is enough, not need retrieve again
                 if s >= branch_length // 2:
                     break
-        print(f'{decoding_ids=}')
         if decoding_ids is None:
             decoding_ids = token_ids[-1:]
 

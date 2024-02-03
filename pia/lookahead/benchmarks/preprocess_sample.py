@@ -6,72 +6,30 @@ Copyright (c) Ant Financial Service Group and its affiliates.
 import json
 
 
-def preprocess_txt(src_dir, dst_dir, ds='search'):
+def preprocess_antrag(src_dir, dst_dir):
     lines = open(src_dir).readlines()
-    prompts = [x.strip().split('[gMASK]')[0] for x in lines]
     jsons = []
-    for p in prompts:
-        jsons.append(json.dumps({'prompt': p}))
-    with open(dst_dir, 'w') as f:
-        f.write('\n'.join(jsons))
+    for x in lines:
+        p, r = x.strip().split('[gMASK]')
+        jsons.append(json.dumps({'prompt': p, 'answer': r}, ensure_ascii=False ))
+    test_jsons = jsons[:1000]
+    train_jsons = jsons[1000:]
+
+    with open(dst_dir+'test.jsonl', 'w') as f:
+        f.write('\n'.join(test_jsons))
+
+    with open(dst_dir+'train.jsonl', 'w') as f:
+        f.write('\n'.join(train_jsons))
 
 
-def preprocess_json(src_dir, dst_dir, max_count=None):
-    lines = open(src_dir).readlines()
-    prompts = []
-    for d in json.loads('\n'.join(lines)):
-        prompts.append(d['instruction'] + ' ' + d['input'])
-        if max_count is not None and len(prompts) >= max_count:
-            break
-    jsons = []
-    for p in prompts:
-        jsons.append(json.dumps({'prompt': q}))
-    with open(dst_dir, 'w') as f:
-        f.write('\n'.join(jsons))
-
-
-def preprocess_jsonl(src_dir, dst_dir, ds='coig', max_count=None):
-    lines = open(src_dir).readlines()
-    prompts = []
-    for d in lines:
-        d = json.loads(d)
-        prompts.append(d['prompt'])
-        if max_count is not None and len(prompts) >= max_count:
-            break
-
-    jsons = []
-    for p in prompts:
-        jsons.append(json.dumps({'prompt': p}))
-    with open(dst_dir, 'w') as f:
-        f.write('\n'.join(jsons))
-
-
-def preprocess_csv(src_dir, dst_dir, ds=None, max_count=None):
-    import csv
-    lines = csv.reader(open(src_dir))
-
-    jsons = []
-    for i, line in enumerate(lines):
-        if i == 0:
-            continue
-        p = line[2]
-        jsons.append(json.dumps({'prompt': p}))
-    with open(dst_dir, 'w') as f:
-        f.write('\n'.join(jsons))
-
-
-def preprocess_dolly(src_dir, dst_dir, ds='dolly', max_count=None):
+def preprocess_dolly(src_dir, dst_dir, max_count=None):
     lines = open(src_dir).readlines()
     outputs = []
-    if ds == 'alpaca':
-        jsons = json.loads('\n'.join(lines))
-    else:
-        jsons = [json.loads(x) for x in lines]
+    jsons = [json.loads(x) for x in lines]
     for line in jsons:
         ins = line["instruction"]
-        inputs = line['context'] if ds == 'dolly' else line['input']
-        answer = line['response'] if ds == 'dolly' else line['output']
-        cat = line['category'] if ds == 'dolly' else 'default'
+        inputs = line['context']
+        answer = line['response']
 
         if len(inputs) == 0:
             template = (
@@ -90,13 +48,126 @@ def preprocess_dolly(src_dir, dst_dir, ds='dolly', max_count=None):
 
         prompt = prompt.replace('\n', '')
 
-        outputs.append(json.dumps({'prompt': prompt, 'response': answer ,'cat': cat }))
+        outputs.append(json.dumps({'prompt': prompt, 'answer': answer}))
 
         if max_count is not None and len(outputs) >= max_count:
             break
 
-    with open(dst_dir, 'w') as f:
-        f.write('\n'.join(outputs))
+    test_jsons = outputs[:1000]
+    train_jsons = outputs[1000:]
 
+    with open(dst_dir+'test.jsonl', 'w') as f:
+        f.write('\n'.join(test_jsons))
+
+    with open(dst_dir+'train.jsonl', 'w') as f:
+        f.write('\n'.join(train_jsons))
+
+
+
+def preprocess_gsm(src_dir, dst_dir, max_count=None):
+    lines = open(src_dir).readlines()
+    outputs = []
+    jsons = [json.loads(x) for x in lines]
+    for line in jsons:
+        prompt = line["question"]
+        answer = line['answer']
+
+        outputs.append(json.dumps({'prompt': prompt, 'answer': answer}))
+
+        if max_count is not None and len(outputs) >= max_count:
+            break
+
+    test_jsons = outputs[:1000]
+    train_jsons = outputs[1000:]
+
+    with open(dst_dir+'test.jsonl', 'w') as f:
+        f.write('\n'.join(test_jsons))
+
+    with open(dst_dir+'train.jsonl', 'w') as f:
+        f.write('\n'.join(train_jsons))
+
+def preprocess_humaneval(src_dir,dst_dir):
+    train_lines = []
+    test_lines = []
+    for name in ['cpp','go','java','js','python']:
+        filename = f'{src_dir}data_{name}_data_humaneval.jsonl'
+        ls = []
+        for line in open(filename):
+            line = json.loads(line)
+            prompt = line['prompt']
+            answer = line['canonical_solution']
+            ls.append(json.dumps({"prompt": prompt, "answer": answer }, ensure_ascii=False))
+        length = len(ls)
+        test_lines.extend(ls[:length//2])
+        train_lines.extend(ls[length//2:])
+
+    with open(f'{dst_dir}train.jsonl','w') as f:
+        f.write('\n'.join(train_lines))
+
+    with open(f'{dst_dir}test.jsonl','w') as f:
+        f.write('\n'.join(test_lines))
+
+
+def complete(ds='dolly_15k',model_name='llama2_7b_chat', set_name='test'):
+    org_dir = f'/mntnlp/nanxiao/dataset/{ds}/{set_name}.jsonl'
+    pred_dir = f'/mntnlp/nanxiao/dataset/lookahead/{ds}_{model_name}/{ds}_{model_name}.jsonl'
+    kvs = {}
+    for line in open(pred_dir):
+        line = json.loads(line)
+        kvs[line['prompt']] = (line['response'], line['ids'])
+    lines = []
+    hits = []
+    for line in open(org_dir):
+        line = json.loads(line)
+        prompt = line['prompt']
+        answer = line['answer']
+        tup = kvs.get(prompt, None)
+        if tup is None:
+            hits.append(0)
+            continue
+        pred, ids = tup
+        hits.append(1)
+        d = {"prompt": prompt, "answer": answer, "pred": pred, "ids":ids}
+        lines.append(json.dumps(d, ensure_ascii=False))
+    print(lines[0])
+    print(len(hits),sum(hits))
+    with open(f'/mntnlp/nanxiao/dataset/lookahead/{ds}_{model_name}/{set_name}.jsonl','w') as f:
+        f.write('\n'.join(lines))
+
+def rename(src_dir, dst_dir, names=None):
+    jsons = []
+    for line in open(src_dir):
+        line = json.loads(line)
+        d = {}
+        for k,v in names.items():
+            d[v] = line[k]
+        jsons.append(json.dumps(d, ensure_ascii=False))
+    with open(dst_dir,'w') as f:
+        f.write('\n'.join(jsons))
+
+
+# src_dir = '/mntnlp/nanxiao/dataset/antrag_8k/antrag.txt'
+# dst_dir = '/mntnlp/nanxiao/dataset/antrag_8k/'
+# preprocess_antrag(src_dir, dst_dir)
+                
+# src_dir = '/mntnlp/nanxiao/dataset/dolly_15k/databricks-dolly-15k.jsonl'
+# dst_dir = '/mntnlp/nanxiao/dataset/dolly_15k/'
+# preprocess_dolly(src_dir, dst_dir)
+
+# src_dir = '/mntnlp/nanxiao/dataset/gsm_8k/gsm_8k.jsonl'
+# dst_dir = '/mntnlp/nanxiao/dataset/gsm_8k/'
+# preprocess_gsm(src_dir, dst_dir)
+
+# src_dir = '/mntnlp/nanxiao/dataset/humaneval-x/'
+# dst_dir = '/mntnlp/nanxiao/dataset/humaneval-x/'
+# split_humaneval(src_dir, dst_dir)
+
+# src_dir = '/mntnlp/nanxiao/dataset/lookahead/antrag_8k_antglm_10b/train.jsonl'
+# dst_dir = '/mntnlp/nanxiao/dataset/lookahead/antrag_8k_antglm_10b/train.jsonl'
+# names = {'prompt': 'prompt', 'response': 'answer', 'pred': 'pred', 'ids': 'ids'}
+# rename(src_dir, dst_dir, names=names)
+
+
+complete(ds='dolly_15k', model_name='chatglm2', set_name='train')
 
 

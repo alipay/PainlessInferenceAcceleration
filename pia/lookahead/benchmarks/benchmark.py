@@ -25,8 +25,7 @@ class Benchmark():
                  log_dir=None,
                  eos=None,
                  eop=None,
-                 device='cuda:0'
-                 ):
+                 device='cuda:0'):
         self.log_dir = log_dir
         self.eos = eos
         self.eop = eop  # end token id of prompt, ignore if end token id of prompt is not a fixed id
@@ -34,11 +33,17 @@ class Benchmark():
 
         self.model = None
         self.tokenizer = None
+
         self.prompts = []
         self.answers = []
         self.ids = []
 
+        self.warmup_prompts = []
+        self.warmup_answers = []
+        self.warmup_ids = []
+
         self.stop_words = [',', '.', ' ', '\n', '，', ',']
+        self.stop_ids = None
 
         self.logger = None
         if self.log_dir is not None:
@@ -48,46 +53,50 @@ class Benchmark():
     def initialize(self, model_dir=None, token_dir=None, **kwargs):
         raise NotImplementedError()
 
-    def save_answers(self, src_dir, dst_dir, max_length=256, batch_size=1, max_count=None, use_predict=False):
+    def save_answers(self, src_dir, dst_dir, max_new_tokens=256, batch_size=1, prompt_name='prompt', response_name='response', max_count=None, use_lookahead=False):
         lines = open(src_dir).readlines()
 
         prompts = []
+        responses = []
         for d in lines:
             d = json.loads(d)
-            prompts.append(d['prompt'])
+            prompts.append(d[prompt_name])
+            responses.append(d[response_name])
             if max_count is not None and len(prompts) >= max_count:
                 break
 
         jsons = []
-        qaids = self.generate(prompts, max_length=max_length, use_lookahead=use_predict,
+        qaids = self.generate(prompts, max_new_tokens=max_new_tokens, use_lookahead=use_lookahead,
                               decoding_length=64, branch_length=12,
                               batch_size=batch_size)
-        for p, a, ids in qaids:
-            jsons.append(json.dumps({'prompt': p, 'answer': a, 'ids': ids}))
+        for i, (p, a, ids) in enumerate(qaids):
+            r = responses[i]
+            jsons.append(json.dumps({'prompt': p, 'response': r, 'pred': a, 'ids': ids}))
         with open(dst_dir, 'w') as f:
             f.write('\n'.join(jsons))
 
-    def load_prompts(self, prompt_dir=None):
+    def load_prompts(self, prompt_dir=None, warmup_prompt_dir=None):
         prompts = []
         answers = []
-        ids = []
         for line in open(prompt_dir, 'r'):
             line = json.loads(line)
             prompts.append(line['prompt'])
             answers.append(line.get('answer', None))
-            ids.append(line.get('ids', None))
         self.prompts = prompts
         self.answers = answers
-        self.ids = ids
 
-    def shuffle_prompts(self, ps, ans, ids, min_length=20):
-        indices = list(range(len(ps)))
-        random.Random(4).shuffle(indices)
-        indices = [i for i, x in enumerate(ids) if len(x) >= min_length]
-        ps = [ps[i] for i in indices]
-        ans = [ans[i] for i in indices]
-        ids = [ids[i] for i in indices]
-        return ps, ans, ids
+        if warmup_prompt_dir is not None:
+            prompts = []
+            answers = []
+            ids = []
+            for line in open(warmup_prompt_dir, 'r'):
+                line = json.loads(line)
+                prompts.append(line['prompt'])
+                answers.append(line.get('answer', None))
+                ids.append(line.get('ids', None))
+            self.warmup_prompts = prompts
+            self.warmup_answers = answers
+            self.warmup_ids = ids
 
     def tokenize(self, prompt, max_length=256):
         if isinstance(prompt, list):
@@ -102,13 +111,13 @@ class Benchmark():
         position_ids = None
         return input_ids, position_ids, attention_mask
 
-    def chat(self, prompt, max_length=256, use_lookahead=False, decoding_length=64, branch_length=8,
+    def chat(self, prompt, max_new_tokens=256, use_lookahead=False, decoding_length=64, branch_length=8,
              decoding_mode='hier', debug_lookahead=False):
         if use_lookahead and decoding_length > 1 and branch_length > 0:
-            token_max_length = max_length + decoding_length + 1
+            max_gen_length = max_new_tokens + decoding_length + 1
         else:
-            token_max_length = max_length
-        input_ids, position_ids, attention_mask = self.tokenize(prompt, max_length=token_max_length)
+            max_gen_length = max_new_tokens
+        input_ids, position_ids, attention_mask = self.tokenize(prompt, max_length=max_gen_length)
         tokenizer = self.tokenizer
         model = self.model
 
@@ -116,15 +125,16 @@ class Benchmark():
                         "debug_lookahead": debug_lookahead,
                         "decoding_mode": decoding_mode,
                         "decoding_length": decoding_length,
-                        "branch_length": branch_length}
-
+                        "branch_length": branch_length,
+                        "max_query_length": 2,
+                        "stop_words": self.stop_ids}
         outputs = model.generate(input_ids=input_ids,
                                  attention_mask=attention_mask,
                                  position_ids=position_ids,
                                  pad_token_id=self.eos,
                                  eos_token_id=self.eos,
                                  use_cache=True,
-                                 max_new_tokens=max_length,
+                                 max_new_tokens=max_new_tokens,
                                  repetition_penalty=1.1,
                                  do_sample=False,
                                  decoding_kwargs=decoding_kwargs,
@@ -157,14 +167,14 @@ class Benchmark():
             if (i + 1) % 1000 == 0:
                 print(f'warmup:{i + 1}, elapse:{round(time.time() - ts, 1)}s')
 
-    def generate(self, qs, use_lookahead=True, max_length=256, decoding_length=64, branch_length=8, batch_size=16):
+    def generate(self, qs, use_lookahead=True, max_new_tokens=256, decoding_length=64, branch_length=8, batch_size=16):
         chat_count = len(qs)
         qas = []
         ts = time.time()
         for i in range((chat_count - 1) // batch_size + 1):
             queries = qs[i * batch_size:(i + 1) * batch_size]
             input_texts, input_id_list, output_id_list, output_texts, kwargs = self.chat(queries,
-                                                                                         max_length=max_length,
+                                                                                         max_new_tokens=max_new_tokens,
                                                                                          use_lookahead=use_lookahead,
                                                                                          decoding_length=decoding_length,
                                                                                          branch_length=branch_length)
@@ -174,7 +184,7 @@ class Benchmark():
                 print(f'generate:{i + 1}, elapse:{round(time.time() - ts, 1)}s')
         return qas
 
-    def batch_chat(self, qs, max_length=256, decoding_length=64, branch_length=8, decoding_mode='hier',
+    def batch_chat(self, qs, max_new_tokens=256, decoding_length=64, branch_length=8, decoding_mode='hier',
                    debug_lookahead=False, erase=True, batch_size=1):
         total_out_tokens = [0, 0]
         total_times = [0, 0]
@@ -192,7 +202,7 @@ class Benchmark():
                 out_token = 0
                 ts = time.time()
                 input_texts, input_id_list, output_id_list, output_texts, kwargs = self.chat(query,
-                                                                                             max_length=max_length,
+                                                                                             max_new_tokens=max_new_tokens,
                                                                                              use_lookahead=use_lookahead,
                                                                                              decoding_length=decoding_length,
                                                                                              branch_length=branch_length,
@@ -227,7 +237,7 @@ class Benchmark():
         speedup = opt_speed / org_speed
         print(f'speed:{org_speed:.2f}->{opt_speed:.2f} speedup:{speedup:.3f}')
 
-    def perf_check(self, queries, warmup_ids=None, max_length=256, sizes=(31, 64),
+    def perf_check(self, queries, warmup_ids=None, max_new_tokens=256, sizes=(31, 64),
                    lens=(4, 8, 12), decoding_mode='hier',
                    batch_size=1, max_node_rate=32):
         wc = len(warmup_ids) if warmup_ids is not None else 0
@@ -265,7 +275,7 @@ class Benchmark():
                     qs_ = queries[k * batch_size:(k + 1) * batch_size]
                     ts_ = time.time()
                     input_texts, input_id_list, output_id_list, output_texts, kwargs = self.chat(qs_,
-                                                                                                 max_length=max_length,
+                                                                                                 max_new_tokens=max_new_tokens,
                                                                                                  use_lookahead=use_lookahead,
                                                                                                  decoding_length=decoding_length,
                                                                                                  branch_length=branch_length,
@@ -398,32 +408,32 @@ class Benchmark():
 
     def grid_search(self, chat_count=100, warmup_count=10000):
 
-        ids = self.ids
         ps = self.prompts
+        warmup_ids = self.warmup_ids
         outputs = self.perf_check(ps[:chat_count],
-                                  warmup_ids=ids[chat_count:chat_count + warmup_count],
+                                  warmup_ids=warmup_ids[:warmup_count],
                                   sizes=[16 * x - 1 for x in [1, 2, 4, 8, 16]],
                                   lens=[4 * x for x in range(1, 11)],
                                   batch_size=1)
 
         opt_size, opt_len = sorted(outputs.items(), key=lambda x: x[1], reverse=True)[0][0]
         for rate in [1, 2, 4, 8, 16, 32, 64, 128, 256]:
-            self.perf_check(ps[:chat_count], warmup_ids=ids[chat_count:chat_count + warmup_count], sizes=[opt_size],
+            self.perf_check(ps[:chat_count], warmup_ids=ids[:warmup_count], sizes=[opt_size],
                             lens=[opt_len], max_node_rate=rate)
 
     def batch_grid_search(self, chat_count=100, warmup_count=10000):
 
-        ids = self.ids
         ps = self.prompts
+        warmup_ids = self.warmup_ids
         decoding_mode = 'hier'
         for bs in [2, 4, 6, 8]:
             outputs = self.perf_check(ps[:chat_count],
-                                      warmup_ids=ids[chat_count:chat_count + warmup_count],
+                                      warmup_ids=warmup_ids[:warmup_count],
                                       sizes=[16 * x - bs for x in [8, 16]],
                                       lens=[4, 8, 12, 16],
                                       batch_size=bs,
                                       decoding_mode=decoding_mode)
 
             opt_size, opt_len = sorted(outputs.items(), key=lambda x: x[1], reverse=True)[0][0]
-            self.perf_check(ps[:chat_count], warmup_ids=ids[chat_count:chat_count + warmup_count], sizes=[opt_size],
+            self.perf_check(ps[:chat_count], warmup_ids=warmup_ids[:warmup_count], sizes=[opt_size],
                             lens=[opt_len], batch_size=bs)
