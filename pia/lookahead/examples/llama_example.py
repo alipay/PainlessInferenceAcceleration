@@ -29,6 +29,7 @@ tokenizer.padding_side = 'left'
 stop_words = set(tokenizer.convert_tokens_to_ids([',', '.', ' ']))
 
 prompt = "Hello, I'm am conscious and"
+
 inputs = tokenizer(prompt, return_tensors="pt")
 input_ids = inputs.input_ids.cuda()
 attention_mask = inputs.attention_mask.cuda()
