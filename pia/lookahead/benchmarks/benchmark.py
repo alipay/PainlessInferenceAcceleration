@@ -339,8 +339,7 @@ class Benchmark():
 
         return outputs
 
-    def perf_check_trie(self, warmup_ids, max_node_rate=32, decoding_length=64, branch_length=24, edl=8, put_count=10000, get_count=100):
-        lookahead_cache = self.model.lookahead_cache
+    def perf_check_trie(self, lookahead_cache, warmup_ids, max_node_rate=32, decoding_length=64, branch_length=24, edl=8, put_count=10000, get_count=100):
         lookahead_cache.max_node=decoding_length*max_node_rate
         lookahead_cache.max_output_node=decoding_length*max_node_rate
         lookahead_cache.fresh()
