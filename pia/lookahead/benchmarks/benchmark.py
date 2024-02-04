@@ -53,15 +53,15 @@ class Benchmark():
     def initialize(self, model_dir=None, token_dir=None, **kwargs):
         raise NotImplementedError()
 
-    def save_answers(self, src_dir, dst_dir, max_new_tokens=256, batch_size=1, prompt_name='prompt', response_name='response', max_count=None, use_lookahead=False):
+    def save_answers(self, src_dir, dst_dir, max_new_tokens=256, batch_size=1, prompt_name='prompt', answer_name='answer', max_count=None, use_lookahead=False):
         lines = open(src_dir).readlines()
 
         prompts = []
-        responses = []
+        answers = []
         for d in lines:
             d = json.loads(d)
             prompts.append(d[prompt_name])
-            responses.append(d[response_name])
+            answers.append(d[answer_name])
             if max_count is not None and len(prompts) >= max_count:
                 break
 
@@ -70,8 +70,8 @@ class Benchmark():
                               decoding_length=64, branch_length=12,
                               batch_size=batch_size)
         for i, (p, a, ids) in enumerate(qaids):
-            r = responses[i]
-            jsons.append(json.dumps({'prompt': p, 'response': r, 'pred': a, 'ids': ids}))
+            r = answers[i]
+            jsons.append(json.dumps({'prompt': p, 'answer': r, 'pred': a, 'ids': ids}))
         with open(dst_dir, 'w') as f:
             f.write('\n'.join(jsons))
 
@@ -225,14 +225,15 @@ class Benchmark():
                 edls = kwargs.get('edls', [])
                 edl = sum(edls[bs:]) / len(edls[bs:]) if len(edls) > bs else 0.0
                 et = kwargs.get('fts', [0])[0]
-                # print(f"Human:{query[:80]}...")
+                fts = kwargs.get('fts', [0])[1:]
+                ft = sum(fts)/max(len(fts),1)
                 print(f"1/{bs} Robot:{output_texts[0]}")
                 prefix = 'lookahead:' + ('On ' if use_lookahead else 'Off')
                 speedup = speeds[-1] / speeds[0] if use_lookahead else 0.0
                 print(
                     f"{prefix} mode:{decoding_mode} idx:{i} "
                     f"input:{in_char:.1f}/{in_token:.1f} output:{out_char:.1f}/{out_token:.1f} "
-                    f"edl:{edl:.3f}/{dl:.3f}/{et:.3f} time:{t:.3f} speed:{speed_token:.1f} speedup:{speedup:.3f}\n")
+                    f"edl:{edl:.3f}/{dl:.3f}/{et:.3f}/{ft:.3f} time:{t:.3f} speed:{speed_token:.1f} speedup:{speedup:.3f}\n")
         org_speed = total_out_tokens[0] / total_times[0]
         opt_speed = total_out_tokens[1] / total_times[1]
         speedup = opt_speed / org_speed
@@ -338,6 +339,36 @@ class Benchmark():
 
         return outputs
 
+    def perf_check_trie(self, warmup_ids, max_node_rate=32, decoding_length=64, branch_length=24, edl=8, put_count=10000, get_count=100):
+        lookahead_cache = self.model.lookahead_cache
+        lookahead_cache.max_node=decoding_length*max_node_rate
+        lookahead_cache.max_output_node=decoding_length*max_node_rate
+        lookahead_cache.fresh()
+        ts = time.time()
+        counts = 0
+        for i, ids_ in enumerate(warmup_ids[:put_count]):
+            length = len(ids_)
+            counts += length
+            for j, t in enumerate(ids_):
+                final = j == length-1
+                lookahead_cache.stream_put([t], branch_length=branch_length + 1, mode='output', idx=-1, final=final)
+            if (i + 1) % 1000 == 0:
+                print(f'prof put:{i + 1}, elapse:{round(time.time() - ts, 1)}s')
+        times = time.time() - ts
+        print(f'stream_put:{counts} time:{times:.3f} mean:{times/counts*1e6:.2f}us')
+        ts = time.time()
+        counts = 0
+        for i, ids_ in enumerate(warmup_ids[:get_count]):
+            for j in range(0, len(ids_) - 1, edl):
+                counts += 1
+                lookahead_cache.bat_get([ids_[j:j + 2]], decoding_length=decoding_length,
+                                        branch_length=branch_length, decoding_cursors=[j], mode='mix',
+                                        indices=[0], decoding_mode='hier')
+            if (i + 1) % 1000 == 0:
+                print(f'prof get:{i + 1}, elapse:{round(time.time() - ts, 1)}s')
+        times = time.time() - ts
+        print(f'stream_put:{counts} time:{times:.3f} mean:{times/counts*1e6:.2f}us')
+
     def naive_profile(self, qs, use_lookahead=False, count=64, sortby=0):
         pr = cProfile.Profile()
         pr.enable()
@@ -352,30 +383,18 @@ class Benchmark():
         ps = pstats.Stats(pr, stream=s).sort_stats(sortby).print_stats(count)
         print(s.getvalue())
 
-    def naive_prof_trie(self, warmup_ids, decoding_length=64, branch_length=24, edl=8, put_count=10000, get_count=100,
-                        count=64, sortby=SortKey.TIME, put=True, get=True):
+    def naive_prof_trie(self, warmup_ids, max_node_rate=32, decoding_length=64, branch_length=24, edl=8, put_count=10000, get_count=100,
+                        count=64, sortby=0):
         pr = cProfile.Profile()
         pr.enable()
-        lookahead_cache = self.model.lookahead_cache
-        if put:
-            lookahead_cache.fresh()
-            ts = time.time()
-            for i, ids_ in enumerate(warmup_ids[:put_count]):
-                lookahead_cache.put(ids_, branch_length=branch_length + 1, mode='output', idx=-1, final=True)
-                if (i + 1) % 1000 == 0:
-                    print(f'prof put:{i + 1}, elapse:{round(time.time() - ts, 1)}s')
-        if get:
-            ts = time.time()
-            for i, ids_ in enumerate(warmup_ids[:get_count]):
-                for j in range(0, len(ids_) - 1, edl):
-                    lookahead_cache.bat_get([ids_[j:j + 2]], decoding_length=decoding_length,
-                                            branch_length=branch_length, decoding_cursors=[j], mode='mix',
-                                            indices=[0], decoding_mode='hier')
-                if (i + 1) % 1000 == 0:
-                    print(f'prof get:{i + 1}, elapse:{round(time.time() - ts, 1)}s')
+        self.perf_check_trie(warmup_ids, max_node_rate=max_node_rate,decoding_length=decoding_length,branch_length=branch_length,
+                             edl=edl,put_count=put_count,get_count=get_count)
         pr.disable()
         s = io.StringIO()
-        # sortby = SortKey.CUMULATIVE SortKey.TIME
+        if sortby == 0:
+            sortby = SortKey.TIME
+        else:
+            sortby = SortKey.CUMULATIVE
         ps = pstats.Stats(pr, stream=s).sort_stats(sortby).print_stats(count)
         print(s.getvalue())
 

@@ -145,6 +145,19 @@ def rename(src_dir, dst_dir, names=None):
     with open(dst_dir,'w') as f:
         f.write('\n'.join(jsons))
 
+def count_tokens(dataset_dir, model_dir):
+    from transformers import AutoTokenizer
+    tokenizer = AutoTokenizer.from_pretrained(model_dir)
+    prompt_tokens = []
+    answer_tokens = []
+    for line in open(dataset_dir):
+        line = json.loads(line)
+        pt = len(tokenizer(line['prompt']).input_ids)
+        at = len(tokenizer(line['answer']).input_ids)
+        prompt_tokens.append(pt)
+        answer_tokens.append(at)
+    print(f'size:{len(prompt_tokens)} prompt:{sum(prompt_tokens)/len(prompt_tokens)} answer:{sum(answer_tokens)/len(answer_tokens)}')
+
 
 # src_dir = '/mntnlp/nanxiao/dataset/antrag_8k/antrag.txt'
 # dst_dir = '/mntnlp/nanxiao/dataset/antrag_8k/'
@@ -168,6 +181,8 @@ def rename(src_dir, dst_dir, names=None):
 # rename(src_dir, dst_dir, names=names)
 
 
-complete(ds='dolly_15k', model_name='chatglm2', set_name='train')
+# complete(ds='dolly_15k', model_name='chatglm2', set_name='train')
 
-
+# dataset_dir = '/mntnlp/nanxiao/dataset/gsm_8k/train.jsonl'
+# model_dir = '/mntnlp/common_base_model/llama2-7b-chat'
+# count_tokens(dataset_dir,model_dir)
