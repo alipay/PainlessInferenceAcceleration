@@ -112,7 +112,7 @@ class Benchmark():
         return input_ids, position_ids, attention_mask
 
     def chat(self, prompt, max_new_tokens=256, use_lookahead=False, decoding_length=64, branch_length=8,
-             decoding_mode='hier', debug_lookahead=False):
+             decoding_mode='hier', debug_lookahead=False, max_query_length=2):
         if use_lookahead and decoding_length > 1 and branch_length > 0:
             max_gen_length = max_new_tokens + decoding_length + 1
         else:
@@ -126,7 +126,7 @@ class Benchmark():
                         "decoding_mode": decoding_mode,
                         "decoding_length": decoding_length,
                         "branch_length": branch_length,
-                        "max_query_length": 2,
+                        "max_query_length": max_query_length,
                         "stop_words": self.stop_ids}
         outputs = model.generate(input_ids=input_ids,
                                  attention_mask=attention_mask,
@@ -185,7 +185,7 @@ class Benchmark():
         return qas
 
     def batch_chat(self, qs, max_new_tokens=256, decoding_length=64, branch_length=8, decoding_mode='hier',
-                   debug_lookahead=False, erase=True, batch_size=1):
+                   debug_lookahead=False, erase=True, batch_size=1, max_query_length=2):
         total_out_tokens = [0, 0]
         total_times = [0, 0]
         lookahead_cache = self.model.lookahead_cache
@@ -207,7 +207,8 @@ class Benchmark():
                                                                                              decoding_length=decoding_length,
                                                                                              branch_length=branch_length,
                                                                                              decoding_mode=decoding_mode,
-                                                                                             debug_lookahead=debug_lookahead)
+                                                                                             debug_lookahead=debug_lookahead,
+                                                                                             max_query_length=max_query_length)
                 in_char += sum([len(x) for x in input_texts])
                 in_token += sum([len(x) for x in input_id_list])
                 out_char += sum([len(x) for x in output_texts])
@@ -229,7 +230,7 @@ class Benchmark():
                 prefix = 'lookahead:' + ('On ' if use_lookahead else 'Off')
                 speedup = speeds[-1] / speeds[0] if use_lookahead else 0.0
                 print(
-                    f"{prefix} mode:{decoding_mode} idx:{i}/{chat_count} "
+                    f"{prefix} mode:{decoding_mode} idx:{i} "
                     f"input:{in_char:.1f}/{in_token:.1f} output:{out_char:.1f}/{out_token:.1f} "
                     f"edl:{edl:.3f}/{dl:.3f}/{et:.3f} time:{t:.3f} speed:{speed_token:.1f} speedup:{speedup:.3f}\n")
         org_speed = total_out_tokens[0] / total_times[0]
@@ -239,7 +240,7 @@ class Benchmark():
 
     def perf_check(self, queries, warmup_ids=None, max_new_tokens=256, sizes=(31, 64),
                    lens=(4, 8, 12), decoding_mode='hier',
-                   batch_size=1, max_node_rate=32):
+                   batch_size=1, max_node_rate=32,max_query_length=2):
         wc = len(warmup_ids) if warmup_ids is not None else 0
         log_str = f'\nmode:{decoding_mode} bs:{batch_size} queries:{len(queries)} warmup:{wc} sizes:{sizes} lens:{lens}'
         print(log_str)
@@ -279,7 +280,8 @@ class Benchmark():
                                                                                                  use_lookahead=use_lookahead,
                                                                                                  decoding_length=decoding_length,
                                                                                                  branch_length=branch_length,
-                                                                                                 decoding_mode=decoding_mode)
+                                                                                                 decoding_mode=decoding_mode,
+                                                                                                 max_query_length=max_query_length)
                     te_ = time.time()
                     times.append(te_ - ts_)
                     in_char += sum([len(x) for x in qs_])
