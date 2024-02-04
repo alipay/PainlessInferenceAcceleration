@@ -36,7 +36,7 @@ from transformers.utils import add_start_docstrings, add_start_docstrings_to_mod
 
 # from transformers.modeling_utils import PreTrainedModel
 from pia.lookahead.common.pretrained_model_batch import LookaheadPreTrainedModel
-# from pia.lookahead.csrc.triton.rms_norm import rmsnorm_wrapper
+from pia.lookahead.csrc.triton.rms_norm import rmsnorm_wrapper
 
 logger = logging.get_logger(__name__)
 
@@ -76,6 +76,22 @@ def _expand_mask(mask: torch.Tensor, dtype: torch.dtype, tgt_len: Optional[int] 
     return inverted_mask.masked_fill(inverted_mask.to(torch.bool), torch.finfo(dtype).min)
 
 
+# class LlamaRMSNorm(nn.Module):
+#     def __init__(self, hidden_size, eps=1e-6):
+#         """
+#         LlamaRMSNorm is equivalent to T5LayerNorm
+#         """
+#         super().__init__()
+#         self.weight = nn.Parameter(torch.ones(hidden_size))
+#         self.variance_epsilon = eps
+
+#     def forward(self, hidden_states):
+#         input_dtype = hidden_states.dtype
+#         variance = hidden_states.to(torch.float32).pow(2).mean(-1, keepdim=True)
+#         hidden_states = hidden_states * torch.rsqrt(variance + self.variance_epsilon)
+
+#         return (self.weight * hidden_states).to(input_dtype)
+
 class LlamaRMSNorm(nn.Module):
     def __init__(self, hidden_size, eps=1e-6):
         """
@@ -86,23 +102,7 @@ class LlamaRMSNorm(nn.Module):
         self.variance_epsilon = eps
 
     def forward(self, hidden_states):
-        input_dtype = hidden_states.dtype
-        variance = hidden_states.to(torch.float32).pow(2).mean(-1, keepdim=True)
-        hidden_states = hidden_states * torch.rsqrt(variance + self.variance_epsilon)
-
-        return (self.weight * hidden_states).to(input_dtype)
-
-# class LlamaRMSNorm(nn.Module):
-#     def __init__(self, hidden_size, eps=1e-6):
-#         """
-#         LlamaRMSNorm is equivalent to T5LayerNorm
-#         """
-#         super().__init__()
-#         self.weight = nn.Parameter(torch.ones(hidden_size))
-#         self.variance_epsilon = eps
-#
-#     def forward(self, hidden_states):
-#         return rmsnorm_wrapper(hidden_states, self.weight, eps=self.variance_epsilon)
+        return rmsnorm_wrapper(hidden_states, self.weight, eps=self.variance_epsilon)
 
 
 class LlamaRotaryEmbedding(torch.nn.Module):
