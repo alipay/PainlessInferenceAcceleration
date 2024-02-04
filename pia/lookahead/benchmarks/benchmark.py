@@ -224,16 +224,16 @@ class Benchmark():
                 dl = sum(dls[bs:]) / len(dls[bs:]) if len(dls) > bs else 0.0
                 edls = kwargs.get('edls', [])
                 edl = sum(edls[bs:]) / len(edls[bs:]) if len(edls) > bs else 0.0
-                et = kwargs.get('fts', [0])[0]
-                fts = kwargs.get('fts', [0])[1:]
-                ft = sum(fts)/max(len(fts),1)
+                pt = kwargs.get('fts', [0])[0]
+                gts = kwargs.get('fts', [0])[1:]
+                gt = sum(gts)/max(len(gts),1)
                 print(f"1/{bs} Robot:{output_texts[0]}")
                 prefix = 'lookahead:' + ('On ' if use_lookahead else 'Off')
                 speedup = speeds[-1] / speeds[0] if use_lookahead else 0.0
                 print(
                     f"{prefix} mode:{decoding_mode} idx:{i} "
                     f"input:{in_char:.1f}/{in_token:.1f} output:{out_char:.1f}/{out_token:.1f} "
-                    f"edl:{edl:.3f}/{dl:.3f}/{et:.3f}/{ft:.3f} time:{t:.3f} speed:{speed_token:.1f} speedup:{speedup:.3f}\n")
+                    f"edl:{edl:.3f}/{dl:.3f}/{pt:.3f}/{gt:.3f} time:{t:.3f} speed:{speed_token:.1f} speedup:{speedup:.3f}\n")
         org_speed = total_out_tokens[0] / total_times[0]
         opt_speed = total_out_tokens[1] / total_times[1]
         speedup = opt_speed / org_speed
@@ -261,7 +261,8 @@ class Benchmark():
                 out_token = 0
                 dls = []
                 edls = []
-                fts = []
+                pts = []
+                gts = []
                 if use_lookahead:
                     lookahead_cache.fresh()
                     lookahead_cache.max_node = max_node_rate * decoding_length
@@ -294,7 +295,8 @@ class Benchmark():
                     dls.extend(dls_[bs:] if len(dls_) > bs else [])
                     edls_ = kwargs.get('edls', [])
                     edls.extend(edls_[bs:] if len(edls_) > bs else [])
-                    fts.append(kwargs.get('fts', [0])[0])
+                    pts.append(kwargs.get('fts', [0])[0])
+                    gts.extend(kwargs.get('fts', [0])[1:])
                     if (k + 1) % (100 // batch_size) == 0:
                         elapse = time.time() - ts
                         speed = out_token / elapse
@@ -302,11 +304,12 @@ class Benchmark():
                         avg_out_token = float(out_token) / (k + 1) / batch_size
                         dl = sum(dls) / max(len(dls), 1)
                         edl = sum(edls) / max(len(edls), 1)
-                        ft = sum(fts) / max(len(fts), 1)
+                        pt = sum(pts) / max(len(pts), 1)
+                        gt = sum(gts) / max(len(gts), 1)
                         log_str = f'mode:{decoding_mode} step:{k + 1} ' \
                                   f'decoding:{decoding_length}/{branch_length} bs:{batch_size} ' \
                                   f'elapse:{elapse:.1f}s in:{avg_in_token:.1f} out:{avg_out_token:.1f} ' \
-                                  f'edl:{edl:.3f}/{dl:.3f}/{ft:.3f} speed:{speed:.1f}token/s'
+                                  f'edl:{edl:.3f}/{dl:.3f}/{pt:.3f}/{gt:.3f} speed:{speed:.1f}token/s'
                         print(log_str)
                 n_repeat = len(queries)
                 in_char /= n_repeat
@@ -317,11 +320,10 @@ class Benchmark():
                 speed = out_token / t
                 speeds.append(speed)
                 outputs[(decoding_length, branch_length)] = speed
-                # print(f"Human:{query}")
-                # print(f"Robot:{results[0]}")
                 dl = sum(dls) / max(len(dls), 1)
                 edl = sum(edls) / max(len(edls), 1)
-                ft = sum(fts) / max(len(fts), 1)
+                pt = sum(pts) / max(len(pts), 1)
+                gt = sum(gts) / max(len(gts), 1)
                 ms = torch.cuda.memory_stats()
                 mem = ms['reserved_bytes.large_pool.peak'] / 1024 ** 3
                 speedup = speeds[-1] / speeds[0]
@@ -330,7 +332,7 @@ class Benchmark():
                           f"decoding_length:{decoding_length} branch_length:{branch_length} " \
                           f"query:{len(queries)} warmup:{wc} " \
                           f"input:{in_token:.1f} output:{out_token:.1f} " \
-                          f"edl:{edl:.3f}/{dl:.3f}/{ft:.3f} time:{t:.3f} " \
+                          f"edl:{edl:.3f}/{dl:.3f}/{pt:.3f}/{gt:.3f} time:{t:.3f} " \
                           f"speed:{speed:.1f} mem:{mem:.3f} "
                 print(log_str)
                 if self.logger is not None:
