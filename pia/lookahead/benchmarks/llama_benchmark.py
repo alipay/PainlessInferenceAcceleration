@@ -35,7 +35,7 @@ class LlameBenchmark(Benchmark):
         self.eop = None
 
 
-model_dir = '/mntnlp/common_base_model/llama2-7b-chat'
+model_dir = '/mntnlp/common_base_model/llama2-13b-chat'
 worker = LlameBenchmark(log_dir='llama_benchmark')
 worker.initialize(model_dir=model_dir, token_dir=model_dir)
 
@@ -45,13 +45,12 @@ worker.initialize(model_dir=model_dir, token_dir=model_dir)
 # worker.save_answers(warmup_prompt_dir, warmup_dataset_dir, batch_size=1, max_count=None, use_lookahead=True)
 
 # the dataset can be found in lookahead/datasets/dataset.py
-dataset_dir = '/mntnlp/nanxiao/dataset/lookahead/gsm_8k_llama2_7b_chat/test.jsonl'
-warmup_dataset_dir = '/mntnlp/nanxiao/dataset/lookahead/gsm_8k_llama2_7b_chat/train.jsonl'
+dataset_dir = '/mntnlp/nanxiao/dataset/lookahead/dolly_15k_llama2_13b_chat/test.jsonl'
+warmup_dataset_dir = '/mntnlp/nanxiao/dataset/lookahead/dolly_15k_llama2_13b_chat/train.jsonl'
 worker.load_prompts(prompt_dir=dataset_dir, warmup_prompt_dir=warmup_dataset_dir)
 
-
 # test correctness with lookahead decoding
-worker.batch_chat(worker.prompts[:10],
+worker.batch_chat(worker.prompts[:3],
                   max_new_tokens=256,
                   decoding_length=16,
                   branch_length=4,
@@ -60,10 +59,10 @@ worker.batch_chat(worker.prompts[:10],
                   batch_size=1)
 
 max_new_tokens = 256
-chat_count = 100
+chat_count = 1000
 warmup_count = 10000
-worker.perf_check(worker.prompts[:chat_count], warmup_ids=worker.warmup_ids[:warmup_count],
-                  sizes=[64], lens=[0], max_new_tokens=max_new_tokens)
+# worker.perf_check(worker.prompts[:chat_count], warmup_ids=worker.warmup_ids[:warmup_count],
+#                   sizes=[64], lens=[0], max_new_tokens=max_new_tokens)
 
 worker.perf_check(worker.prompts[:chat_count], warmup_ids=worker.warmup_ids[:warmup_count],
-                  sizes=[32], lens=[8], max_new_tokens=max_new_tokens, decoding_mode='hier',max_query_length=2)
+                  sizes=[16,24,32], lens=[6,8], max_new_tokens=max_new_tokens, decoding_mode='hier',max_query_length=2)
