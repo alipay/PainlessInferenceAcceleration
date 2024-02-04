@@ -59,10 +59,10 @@ worker.batch_chat(worker.prompts[:3],
                   batch_size=1)
 
 max_new_tokens = 256
-chat_count = 1000
+chat_count = 100
 warmup_count = 10000
 # worker.perf_check(worker.prompts[:chat_count], warmup_ids=worker.warmup_ids[:warmup_count],
 #                   sizes=[64], lens=[0], max_new_tokens=max_new_tokens)
 
 worker.perf_check(worker.prompts[:chat_count], warmup_ids=worker.warmup_ids[:warmup_count],
-                  sizes=[16,24,32], lens=[6,8], max_new_tokens=max_new_tokens, decoding_mode='hier',max_query_length=2)
+                  sizes=[16,24,32], lens=[6,8], max_new_tokens=max_new_tokens, decoding_mode='hier',max_query_length=3)
