@@ -15,7 +15,7 @@ from benchmark import Benchmark
 class GlmBenchmark(Benchmark):
 
     def initialize(self, model_dir=None, token_dir=None, **kwargs):
-        from pia.lookahead.models.glm.modeling_glm import GLMForConditionalGeneration
+        from pia.lookahead.models.glm.modeling_glm_batch import GLMForConditionalGeneration
         from pia.lookahead.models.glm.tokenization_glm import GLMChineseTokenizer
         model = GLMForConditionalGeneration.from_pretrained(model_dir
                                                             , torch_dtype=torch.float16
@@ -86,4 +86,4 @@ warmup_count = 10000
 worker.perf_check(worker.prompts[:chat_count], warmup_ids=worker.warmup_ids[:warmup_count],
                   sizes=[0], lens=[0], max_new_tokens=max_new_tokens)
 worker.perf_check(worker.prompts[:chat_count], warmup_ids=worker.warmup_ids[:warmup_count],
-                  sizes=[64,128], lens=[24,32], max_new_tokens=max_new_tokens,decoding_mode='one_input')
+                  sizes=[64,128], lens=[24,32], max_new_tokens=max_new_tokens,decoding_mode='hier',max_query_length=3)
