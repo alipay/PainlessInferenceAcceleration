@@ -239,9 +239,9 @@ class Benchmark():
         speedup = opt_speed / org_speed
         print(f'speed:{org_speed:.2f}->{opt_speed:.2f} speedup:{speedup:.3f}')
 
-    def perf_check(self, queries, warmup_ids=None, max_new_tokens=256, sizes=(31, 64),
+    def perf_check(self, queries, warmup_ids=None, max_new_tokens=256, sizes=(32, 64),
                    lens=(4, 8, 12), decoding_mode='hier',
-                   batch_size=1, max_node_rate=32,max_query_length=2):
+                   batch_size=1, max_node_rate=16, max_query_length=2):
         wc = len(warmup_ids) if warmup_ids is not None else 0
         log_str = f'\nmode:{decoding_mode} bs:{batch_size} queries:{len(queries)} warmup:{wc} sizes:{sizes} lens:{lens}'
         print(log_str)
@@ -265,8 +265,7 @@ class Benchmark():
                 gts = []
                 if use_lookahead:
                     lookahead_cache.fresh()
-                    lookahead_cache.max_node = max_node_rate * decoding_length
-                    lookahead_cache.max_output_node = max_node_rate * decoding_length // 2
+                    lookahead_cache.max_output_node = max_node_rate * decoding_length
                     if warmup_ids is not None:
                         self.warm_up(warmup_ids, branch_length=branch_length, eop=self.eop)
                 torch.cuda.empty_cache()
@@ -399,12 +398,12 @@ class Benchmark():
         ps = pstats.Stats(pr, stream=s).sort_stats(sortby).print_stats(count)
         print(s.getvalue())
 
-    def naive_profile_trie(self, lookahead_cache, warmup_ids, max_node_rate=32, decoding_length=64, branch_length=24, edl=8, put_count=10000, get_count=100,
+    def naive_profile_trie(self, lookahead_cache, warmup_ids, max_node_rate=16, decoding_length=64, branch_length=24, edl=8, put_count=10000, get_count=100,
                         count=64, sortby=0):
         pr = cProfile.Profile()
         pr.enable()
-        self.perf_check_trie(lookahead_cache, warmup_ids, max_node=max_node_rate,decoding_length=decoding_length,branch_length=branch_length,
-                             edl=edl,put_count=put_count,get_count=get_count)
+        self.perf_check_trie(lookahead_cache, warmup_ids, max_node_rate=max_node_rate, decoding_length=decoding_length, branch_length=branch_length,
+                             edl=edl, put_count=put_count, get_count=get_count)
         pr.disable()
         s = io.StringIO()
         if sortby == 0:
@@ -449,7 +448,7 @@ class Benchmark():
         warmup_ids = self.warmup_ids
         outputs = self.perf_check(ps[:chat_count],
                                   warmup_ids=warmup_ids[:warmup_count],
-                                  sizes=[16 * x - 1 for x in [1, 2, 4, 8, 16]],
+                                  sizes=[16 * x for x in [1, 2, 4, 8, 16]],
                                   lens=[4 * x for x in range(1, 11)],
                                   batch_size=1)
 

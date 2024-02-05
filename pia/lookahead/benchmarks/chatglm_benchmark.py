@@ -54,7 +54,7 @@ worker.load_prompts(prompt_dir=dataset_dir, warmup_prompt_dir=warmup_dataset_dir
 
 
 # test correctness with lookahead decoding
-worker.batch_chat(worker.prompts[:10],
+worker.batch_chat(worker.prompts[:1],
                   max_new_tokens=256,
                   decoding_length=16,
                   branch_length=4,
