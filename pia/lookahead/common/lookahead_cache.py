@@ -73,7 +73,7 @@ class Tree():
 
         freqs = []
         self._dfs_get_freqs(nodes, freqs, idx, output_weight)
-        # self._bfs_get_freqs(nodes, freqs, idx, output_weight, max_size=max_size, max_length=max_length)
+        # self._bfs_get_freqs(nodes, freqs, idx, output_weight)
 
         min_mix_freq = 1e9
         min_input_freq = 1e9
@@ -144,20 +144,18 @@ class Tree():
         return ids, mask, sizes
 
     def _dfs_get_freqs(self, nodes, freqs, idx, output_weight):
-        for tid, node in nodes.items():
+        for node in nodes.value():
             fo = node.freqs.get(-1, 0.0)
             fi = node.freqs.get(idx, 0.0)
             if fo > 0 or fi > 0:
                 fm = (1.0 - output_weight) * fi + output_weight * fo
-                freqs.append([len(freqs), fi, fo, fm])
+                freqs.append([None, fi, fo, fm])
                 if len(node.children) > 0:
                     self._dfs_get_freqs(node.children, freqs, idx, output_weight)
 
-    def _bfs_get_freqs(self, nodes, freqs, idx, output_weight, max_size=64, max_length=8):
-        if max_length <= 0:
-            return
+    def _bfs_get_freqs(self, nodes, freqs, idx, output_weight):
         node_list = [nodes]
-        while len(node_list) > 0 and len(freqs) <= 2*max_size:
+        while len(node_list) > 0:
             update_node_list = []
             for nodes in node_list:
                 for node in nodes.values():
@@ -165,11 +163,10 @@ class Tree():
                     fi = node.freqs.get(idx, 0.0)
                     if fo > 0 or fi > 0:
                         fm = (1.0 - output_weight) * fi + output_weight * fo
-                        freqs.append([max_length, fi, fo, fm])
+                        freqs.append([None, fi, fo, fm])
                         if len(node.children) > 0:
                             update_node_list.append(node.children)
             node_list = update_node_list
-            max_length -= 1
 
     def get_one_branch(self, token_ids, max_length=8, mode='mix', idx=0):
         assert mode in ('input', 'output', 'mix')
