@@ -40,13 +40,13 @@ worker = LlameBenchmark(log_dir='llama_benchmark')
 worker.initialize(model_dir=model_dir, token_dir=model_dir)
 
 # answers in the warmup samples are used for constructing trie-tree cache
-warmup_prompt_dir = '/mntnlp/nanxiao/dataset/dolly_15k/train.jsonl'
-warmup_dataset_dir = '/mntnlp/nanxiao/dataset/lookahead/dolly_15k_llama2_7b_chat/train_v100.jsonl'
-worker.save_answers(warmup_prompt_dir, warmup_dataset_dir, batch_size=1, max_count=1000, use_lookahead=False)
+# warmup_prompt_dir = '/mntnlp/nanxiao/dataset/dolly_15k/train.jsonl'
+# warmup_dataset_dir = '/mntnlp/nanxiao/dataset/lookahead/dolly_15k_llama2_7b_chat/train_v100.jsonl'
+# worker.save_answers(warmup_prompt_dir, warmup_dataset_dir, batch_size=1, max_count=1000, use_lookahead=False)
 
 # the dataset can be found in lookahead/datasets/dataset.py
 dataset_dir = '/mntnlp/nanxiao/dataset/lookahead/dolly_15k_llama2_13b_chat/test.jsonl'
-warmup_dataset_dir = '/mntnlp/nanxiao/dataset/lookahead/dolly_15k_llama2_13b_chat/train_v100.jsonl'
+warmup_dataset_dir = '/mntnlp/nanxiao/dataset/lookahead/dolly_15k_llama2_13b_chat/train.jsonl'
 worker.load_prompts(prompt_dir=dataset_dir, warmup_prompt_dir=warmup_dataset_dir)
 
 # test correctness with lookahead decoding
