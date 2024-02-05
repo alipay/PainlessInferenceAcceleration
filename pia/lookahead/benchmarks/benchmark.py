@@ -75,14 +75,14 @@ class Benchmark():
         with open(dst_dir, 'w') as f:
             f.write('\n'.join(jsons))
 
-    def load_prompts(self, prompt_dir=None, warmup_prompt_dir=None):
+    def load_prompts(self, prompt_dir=None, warmup_prompt_dir=None, max_length=4096):
         prompts = []
         answers = []
         for line in open(prompt_dir, 'r'):
             line = json.loads(line)
             prompts.append(line['prompt'])
             answers.append(line.get('answer', None))
-        self.prompts = prompts
+        self.prompts = [x for x in prompts if len(x)<=max_length]
         self.answers = answers
 
         if warmup_prompt_dir is not None:
@@ -94,7 +94,7 @@ class Benchmark():
                 prompts.append(line['prompt'])
                 answers.append(line.get('answer', None))
                 ids.append(line.get('ids', None))
-            self.warmup_prompts = prompts
+            self.warmup_prompts = [x for x in prompts if len(x)<max_length]
             self.warmup_answers = answers
             self.warmup_ids = ids
 
@@ -111,7 +111,7 @@ class Benchmark():
         position_ids = None
         return input_ids, position_ids, attention_mask
 
-    def chat(self, prompt, max_new_tokens=256, use_lookahead=False, decoding_length=64, branch_length=8,
+    def chat(self, prompt, max_length=2048, max_new_tokens=256, use_lookahead=False, decoding_length=64, branch_length=8,
              decoding_mode='hier', debug_lookahead=False, max_query_length=2):
         if use_lookahead and decoding_length > 1 and branch_length > 0:
             max_gen_length = max_new_tokens + decoding_length + 1
@@ -128,6 +128,7 @@ class Benchmark():
                         "branch_length": branch_length,
                         "max_query_length": max_query_length,
                         "stop_words": self.stop_ids}
+        assert self.eos is not None
         outputs = model.generate(input_ids=input_ids,
                                  attention_mask=attention_mask,
                                  position_ids=position_ids,
@@ -135,7 +136,6 @@ class Benchmark():
                                  eos_token_id=self.eos,
                                  use_cache=True,
                                  max_new_tokens=max_new_tokens,
-                                 repetition_penalty=1.1,
                                  do_sample=False,
                                  decoding_kwargs=decoding_kwargs,
                                  return_dict_in_generate=True
