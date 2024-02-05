@@ -339,33 +339,49 @@ class Benchmark():
 
         return outputs
 
-    def perf_check_trie(self, lookahead_cache, put_ids, get_ids, max_node_rate=32, decoding_length=64, branch_length=24, edl=8):
-        lookahead_cache.max_node=decoding_length*max_node_rate
+    def perf_check_trie(self, lookahead_cache, warmup_ids, input_ids, output_ids, max_node_rate=16, decoding_length=64, branch_length=24, edl=8):
         lookahead_cache.max_output_node=decoding_length*max_node_rate
         lookahead_cache.fresh()
-        ts = time.time()
-        put_counts = 0
-        for i, ids_ in enumerate(put_ids):
-            length = len(ids_)
-            put_counts += length
-            for j, t in enumerate(ids_):
-                final = j == length-1
-                lookahead_cache.stream_put([t], branch_length=branch_length + 1, mode='output', idx=0, final=final)
-            # if (i + 1) % 1000 == 0:
-            #     print(f'prof put:{i + 1}, elapse:{round(time.time() - ts, 1)}s')
-        put_times = time.time() - ts
-        ts = time.time()
-        get_counts = 0
-        for i, ids_ in enumerate(get_ids):
-            for j in range(0, len(ids_) - 1, edl):
-                get_counts += 1
-                lookahead_cache.bat_get([ids_[j:j + 2]], decoding_length=decoding_length,
+
+        for i, ids_ in enumerate(warmup_ids):
+            lookahead_cache.put(ids_, branch_length=branch_length + 1, mode='output', idx=0, final=False)
+
+        count = len(input_ids)
+        put_count = 0
+        put_time = 0.0
+        get_count = 0
+        get_time = 0.0
+        for i in range(count):
+            in_ids = input_ids[i]
+            out_ids = output_ids[i]
+
+            put_count += len(in_ids)
+            ts = time.time()
+            lookahead_cache.put(in_ids, branch_length=branch_length + 1, mode='input', idx=0, final=False)
+            put_time += time.time()-ts
+
+            ts = time.time()
+            for j in range(0, len(out_ids) - 1, edl):
+                get_count += 1
+                lookahead_cache.bat_get([out_ids[j:j + 2]], decoding_length=decoding_length,
                                         branch_length=branch_length, decoding_cursors=[j], mode='mix',
                                         indices=[0], decoding_mode='hier')
-            # if (i + 1) % 1000 == 0:
-            #     print(f'prof get:{i + 1}, elapse:{round(time.time() - ts, 1)}s')
-        get_times = time.time() - ts
-        print(f'\nparam:{max_node_rate}/{decoding_length}/{branch_length} put:{put_counts}/{put_times:.3f}/{put_times/put_counts*1e3:.2f} get:{get_counts}/{get_times:.3f}/{get_times/get_counts*1e3:.2f}\n')
+            get_time += time.time()-ts
+
+            put_count += len(out_ids)
+            ts = time.time()
+            for j in range(0, len(ids_) - 1, edl):
+                lookahead_cache.stream_put(out_ids[j:j+edl], branch_length=branch_length + 1, mode='output', idx=0, final=False)
+            lookahead_cache.stream_put([], branch_length=branch_length + 1, mode='output', idx=0, final=True)
+            put_time += time.time()-ts
+
+        single_put_time = put_time/max(put_count,1)
+        sample_put_time = put_time/max(count,1)
+
+        single_get_time = get_time/max(get_count,1)
+        sample_get_time = get_time/max(count,1)
+
+        print(f'\nparam:{max_node_rate}/{decoding_length}/{branch_length} sample:{count} put:{put_count}/{put_time:.2f}/{single_put_time*1e3:.2f}/{sample_put_time*1e3:.2f} get:{get_count}/{get_time:.2f}/{single_get_time*1e3:.2f}/{sample_get_time*1e3:.2f}\n')
 
     def naive_profile(self, qs, use_lookahead=False, count=64, sortby=0):
         pr = cProfile.Profile()
@@ -385,7 +401,7 @@ class Benchmark():
                         count=64, sortby=0):
         pr = cProfile.Profile()
         pr.enable()
-        self.perf_check_trie(lookahead_cache, warmup_ids, max_node_rate=max_node_rate,decoding_length=decoding_length,branch_length=branch_length,
+        self.perf_check_trie(lookahead_cache, warmup_ids, max_node=max_node_rate,decoding_length=decoding_length,branch_length=branch_length,
                              edl=edl,put_count=put_count,get_count=get_count)
         pr.disable()
         s = io.StringIO()
