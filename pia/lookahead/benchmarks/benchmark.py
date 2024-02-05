@@ -75,14 +75,14 @@ class Benchmark():
         with open(dst_dir, 'w') as f:
             f.write('\n'.join(jsons))
 
-    def load_prompts(self, prompt_dir=None, warmup_prompt_dir=None, max_length=4096):
+    def load_prompts(self, prompt_dir=None, warmup_prompt_dir=None, max_length=1024):
         prompts = []
         answers = []
         for line in open(prompt_dir, 'r'):
             line = json.loads(line)
             prompts.append(line['prompt'])
             answers.append(line.get('answer', None))
-        self.prompts = [x for x in prompts if len(x)<=max_length]
+        self.prompts = [x for x in prompts if len(x)<=max_length or len(self.tokenizer(x).input_ids)<=max_length]
         self.answers = answers
 
         if warmup_prompt_dir is not None:
@@ -94,7 +94,7 @@ class Benchmark():
                 prompts.append(line['prompt'])
                 answers.append(line.get('answer', None))
                 ids.append(line.get('ids', None))
-            self.warmup_prompts = [x for x in prompts if len(x)<max_length]
+            self.warmup_prompts = [x for x in prompts if len(x)<=max_length or len(self.tokenizer(x).input_ids)<=max_length]
             self.warmup_answers = answers
             self.warmup_ids = ids
 
