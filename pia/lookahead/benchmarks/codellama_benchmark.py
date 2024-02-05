@@ -38,19 +38,18 @@ model_dir = '/mntnlp/common_base_model/codellama-13b-instruct-hf'
 worker = LlameBenchmark(log_dir='codellama_benchmark')
 worker.initialize(model_dir=model_dir, token_dir=model_dir)
 
-# answers in the warmup samples are used for constructing trie-tree cache
+# # answers in the warmup samples are used for constructing trie-tree cache
 # warmup_prompt_dir = '/mntnlp/nanxiao/dataset/humaneval-x/train.jsonl'
-# warmup_dataset_dir = '/mntnlp/nanxiao/dataset/lookahead/humaneval_x_codellama_7b/train.jsonl'
-# worker.save_answers(warmup_prompt_dir, warmup_dataset_dir, batch_size=1, max_count=None, use_lookahead=True)
+# warmup_dataset_dir = '/mntnlp/nanxiao/dataset/lookahead/humaneval_x_codellama_13b/train.jsonl'
+# worker.save_answers(warmup_prompt_dir, warmup_dataset_dir, answer_name='response', batch_size=1, max_count=None, use_lookahead=True)
 
 # the dataset can be found in lookahead/datasets/dataset.py
 dataset_dir = '/mntnlp/nanxiao/dataset/humaneval-x/test.jsonl'
 warmup_dataset_dir = '/mntnlp/nanxiao/dataset/lookahead/humaneval_x_codellama_13b/train.jsonl'
 worker.load_prompts(prompt_dir=dataset_dir, warmup_prompt_dir=warmup_dataset_dir)
 
-
 # test correctness with lookahead decoding
-worker.batch_chat(worker.prompts[:10],
+worker.batch_chat(worker.prompts[:1],
                   max_new_tokens=256,
                   decoding_length=16,
                   branch_length=4,
@@ -67,5 +66,5 @@ warmup_count = 10000
 #                   sizes=[32], lens=[16], max_new_tokens=max_new_tokens,max_query_length=3,
 #                   decoding_mode='one_input')
 worker.perf_check(worker.prompts[:chat_count], warmup_ids=worker.warmup_ids[:warmup_count],
-                  sizes=[16,24,32], lens=[4,6,8], max_new_tokens=max_new_tokens,max_query_length=3,
+                  sizes=[64,128], lens=[8,12,16], max_new_tokens=max_new_tokens,max_query_length=3,
                   decoding_mode='hier')
