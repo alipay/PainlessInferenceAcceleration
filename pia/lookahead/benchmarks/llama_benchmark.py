@@ -41,8 +41,8 @@ worker.initialize(model_dir=model_dir, token_dir=model_dir)
 
 # answers in the warmup samples are used for constructing trie-tree cache
 # warmup_prompt_dir = '/mntnlp/nanxiao/dataset/dolly_15k/train.jsonl'
-# warmup_dataset_dir = '/mntnlp/nanxiao/dataset/lookahead/dolly_15k_llama2_7b_chat/train.jsonl'
-# worker.save_answers(warmup_prompt_dir, warmup_dataset_dir, batch_size=1, max_count=None, use_lookahead=True)
+# warmup_dataset_dir = '/mntnlp/nanxiao/dataset/lookahead/dolly_15k_llama2_7b_chat/train_v100.jsonl'
+# worker.save_answers(warmup_prompt_dir, warmup_dataset_dir, batch_size=1, max_count=1000, use_lookahead=False)
 
 # the dataset can be found in lookahead/datasets/dataset.py
 dataset_dir = '/mntnlp/nanxiao/dataset/lookahead/dolly_15k_llama2_13b_chat/test.jsonl'
@@ -59,10 +59,10 @@ worker.batch_chat(worker.prompts[:3],
                   batch_size=1)
 
 max_new_tokens = 256
-chat_count = 1000
+chat_count = 100
 warmup_count = 10000
 # worker.perf_check(worker.prompts[:chat_count], warmup_ids=worker.warmup_ids[:warmup_count],
 #                   sizes=[64], lens=[0], max_new_tokens=max_new_tokens)
 
 worker.perf_check(worker.prompts[:chat_count], warmup_ids=worker.warmup_ids[:warmup_count],
-                  sizes=[16,24,32], lens=[6,8], max_new_tokens=max_new_tokens, decoding_mode='hier',max_query_length=2)
+                  sizes=[16,24,32], lens=[6,8], max_new_tokens=max_new_tokens, decoding_mode='hier',max_query_length=3)
