@@ -58,7 +58,7 @@ for use_lookahead in [False, False, True,True]:
                              max_new_tokens=max_new_tokens,
                              repetition_penalty=1.0,
                              do_sample=False,
-                             **kwargs,
+                             decoding_kwargs=decoding_kwargs,
                              )
     output_ids = outputs
     input_length = input_ids.size(-1)
