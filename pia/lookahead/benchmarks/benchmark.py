@@ -266,6 +266,7 @@ class Benchmark():
                 if use_lookahead:
                     lookahead_cache.fresh()
                     lookahead_cache.max_output_node = max_node_rate * decoding_length
+                    lookahead_cache.max_node = 2*max_node_rate * decoding_length
                     if warmup_ids is not None:
                         self.warm_up(warmup_ids, branch_length=branch_length, eop=self.eop)
                 torch.cuda.empty_cache()
@@ -324,7 +325,7 @@ class Benchmark():
                 pt = sum(pts) / max(len(pts), 1)
                 gt = sum(gts) / max(len(gts), 1)
                 ms = torch.cuda.memory_stats()
-                mem = ms['reserved_bytes.large_pool.peak'] / 1024 ** 3
+                mem = ms['reserved_bytes.large_pool.peak'] / 1e9
                 speedup = speeds[-1] / speeds[0]
                 times = [round(x, 3) for x in times]
                 log_str = f"mode:{decoding_mode} bs:{batch_size} " \
