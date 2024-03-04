@@ -1,8 +1,11 @@
-# cd ../tests &&
-# python test_lookahead_cache.py &&
-# python test_triton_rms_norm.py &&
+cd ../tests &&
+python test_lookahead_cache.py &&
+python test_triton_rms_norm.py &&
 
 cd ../examples &&
+
+pip install transformers==4.36.0 &&
+
 echo glm_example &&
 python glm_example.py &&
 
@@ -36,21 +39,6 @@ python gptj_example.py &&
 echo gpt2_example && 
 python gpt2_example.py &&
 
-echo qwen_example && 
-python qwen_example.py &&
-
-
-# 4.30.2
-pip install transformers==4.30.2 &&
-
-echo baichuan_7b_example && 
-python baichuan_7b_example.py &&
-
-echo baichuan_13b_example && 
-python baichuan_13b_example.py &&
-
-# 4.36.0
-pip install transformers==4.36.0 &&
 
 echo baichuan2_7b_example && 
 python baichuan2_7b_example.py &&
@@ -66,6 +54,18 @@ python mistral_example.py &&
 
 echo mixtral_quant_example &&
 python mixtral_quant_example.py &&
+
+# 4.30.2
+pip install transformers==4.30.2 &&
+
+echo baichuan_7b_example && 
+python baichuan_7b_example.py &&
+
+echo baichuan_13b_example && 
+python baichuan_13b_example.py &&
+
+echo qwen_example && 
+python qwen_example.py &&
 
 
 echo finished!
