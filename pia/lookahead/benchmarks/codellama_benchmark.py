@@ -49,7 +49,7 @@ warmup_dataset_dir = '/mntnlp/nanxiao/dataset/lookahead/humaneval_x_codellama_13
 worker.load_prompts(prompt_dir=dataset_dir, warmup_prompt_dir=warmup_dataset_dir)
 
 # test correctness with lookahead decoding
-worker.batch_chat(worker.prompts[:1],
+worker.batch_chat(worker.prompts[:5],
                   max_new_tokens=256,
                   decoding_length=16,
                   branch_length=4,
@@ -60,11 +60,5 @@ worker.batch_chat(worker.prompts[:1],
 max_new_tokens = 256
 chat_count = 1000
 warmup_count = 10000
-# worker.perf_check(worker.prompts[:chat_count], warmup_ids=worker.warmup_ids[:warmup_count],
-#                   sizes=[64], lens=[0], max_new_tokens=max_new_tokens)
-# worker.perf_check(worker.prompts[:chat_count], warmup_ids=worker.warmup_ids[:warmup_count],
-#                   sizes=[32], lens=[16], max_new_tokens=max_new_tokens,max_query_length=3,
-#                   decoding_mode='one_input')
 worker.perf_check(worker.prompts[:chat_count], warmup_ids=worker.warmup_ids[:warmup_count],
-                  sizes=[64,128], lens=[8,12,16], max_new_tokens=max_new_tokens,max_query_length=3,
-                  decoding_mode='hier')
+                  sizes=[128], lens=[12], max_new_tokens=max_new_tokens)

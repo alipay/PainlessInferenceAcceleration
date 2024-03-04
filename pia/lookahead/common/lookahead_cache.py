@@ -144,7 +144,7 @@ class Tree():
         return ids, mask, sizes
 
     def _dfs_get_freqs(self, nodes, freqs, idx, output_weight):
-        for node in nodes.value():
+        for node in nodes.values():
             fo = node.freqs.get(-1, 0.0)
             fi = node.freqs.get(idx, 0.0)
             if fo > 0 or fi > 0:
