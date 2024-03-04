@@ -175,14 +175,6 @@ def count_tokens(dataset_dir, model_dir):
 # dst_dir = '/mntnlp/nanxiao/dataset/humaneval-x/'
 # split_humaneval(src_dir, dst_dir)
 
-# src_dir = '/mntnlp/nanxiao/dataset/lookahead/antrag_8k_antglm_10b/train.jsonl'
-# dst_dir = '/mntnlp/nanxiao/dataset/lookahead/antrag_8k_antglm_10b/train.jsonl'
-# names = {'prompt': 'prompt', 'response': 'answer', 'pred': 'pred', 'ids': 'ids'}
-# rename(src_dir, dst_dir, names=names)
-
-
-# complete(ds='dolly_15k', model_name='chatglm2', set_name='train')
-
 # dataset_dir = '/mntnlp/nanxiao/dataset/gsm_8k/train.jsonl'
 # model_dir = '/mntnlp/common_base_model/llama2-7b-chat'
 # count_tokens(dataset_dir,model_dir)
