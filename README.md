@@ -63,20 +63,28 @@ Performance is measured by token/s(tokens per second) of generation tokens.
 
 ### Public datasets and models
 
-We use the first 1000 samples for evaluation and the rest for trie-tree cache construction. The hyper-parameters are `decoding_length=64` and `branch_lenght=8`. The tag `fused` indicates operators are fused with triton, the implementation can be found in `modeling_llama_batch.py`.
+We use the test set for evaluation and the train set for trie-tree cache construction. The hyper-parameters are tuned by grid searching. The tag `fused` indicates operators are fused with triton, the implementation can be found in `modeling_llama_batch.py`.
 
-| model                  | dataset       | GPU           | 🤗 transformers | lookahead    |
-|------------------------|---------------|---------------|-----------------|--------------|
-| Llama2-7b-chat         | Dolly-15k     | A100-80G      | 40.6            | 83.7 (x2.06)  |
-| Llama2-7b-chat(fused)  | Dolly-15k     | A100-80G      | 50.4            | 106.8 (x2.12) |
-| Llama2-13b-chat        | Dolly-15k     | A100-80G      | 34.0            | 71.7 (x2.11)  |
-| Llama2-13b-chat(fused) | Dolly-15k     | A100-80G      | 39.9            | 84.6 (x2.12)  |
-| ChatGLM2-6b            | Dolly-15k     | A100-80G      | 45.6            | 108.4 (x2.38) |
-| Llama2-7b-chat         | GSM-8k        | A100-80G      | 41.4            | 111.3 (x2.69) |
-| Llama2-7b-chat(fused)  | GSM-8k        | A100-80G      | 53.7            | 149.6 (x2.79) |
-| Llama2-13b-chat        | GSM-8k        | A100-80G      | 31.2            | 71.1 (x2.28)  |
-| Llama2-13b-chat(fused) | GSM-8k        | A100-80G      | 42.9            | 103.4 (x2.41) |
-| ChatGLM2-6b            | GSM-8k        | A100-80G      | 43.3            | 94.0 (x2.17)  |
+| model                  | dataset     | GPU      | 🤗 transformers | lookahead    |
+|------------------------|-------------|----------|-----------------|--------------|
+| Llama2-7b-chat         | Dolly-15k   | A100-80G | 40.6            | 83.7 (x2.06)  |
+| Llama2-7b-chat         | GSM-8k      | A100-80G | 41.4            | 111.3 (x2.69) |
+| Llama2-7b-chat(fused)  | Dolly-15k   | A100-80G | 50.4            | 106.8 (x2.12) |
+| Llama2-7b-chat(fused)  | Dolly-15k   | A10      | 31.4            | 55.7(x1.77) |
+| Llama2-7b-chat(fused)  | GSM-8k      | A100-80G | 53.7            | 149.6 (x2.79) |
+| Llama2-7b-chat(fused)  | GSM-8k      | A10      | 31.4            | 68.1(x2.17) |
+| Llama2-7b-chat(fused)  | Humaneval-x | A100-80G | 51.1             | 161.5(x3.16) |
+| Llama2-7b-chat(fused)  | Humaneval-x      | A10      | 30.9            | 89.6(x2.90) |
+| Llama2-13b-chat        | Dolly-15k   | A100-80G | 34.0            | 71.7 (x2.11)  |
+| Llama2-13b-chat        | GSM-8k      | A100-80G | 31.2            | 71.1 (x2.28)  |
+| Llama2-13b-chat(fused) | Dolly-15k   | A100-80G | 39.9            | 84.6 (x2.12)  |
+| Llama2-13b-chat(fused) | Dolly-15k   | V100-32G | 20.5            | 35.2(x1.72)  |
+| Llama2-13b-chat(fused) | GSM-8k      | A100-80G | 42.9            | 103.4 (x2.41) |
+| Llama2-13b-chat(fused) | GSM-8k      | V100-32G | 22.0            | 45.6(x2.07) |
+| Llama2-13b-chat(fused) | Humaneval-x   | A100-80G | 35.0            | 137.3(x3.92)  |
+| Llama2-13b-chat(fused) | Humaneval-x      | V100-32G | 21.5            | 57.0(x2.65) |
+| ChatGLM2-6b            | Dolly-15k   | A100-80G | 45.6            | 108.4 (x2.38) |
+| ChatGLM2-6b            | GSM-8k      | A100-80G | 43.3            | 94.0 (x2.17)  |
 
 
 We test 5 examples with Llama2-7b-chat and dolly dataset, inference time without lookahead (the left figure) is 15.7s (48.2token/s), while inference time with lookahead is 6.4s (112.9token/s), speedup is 2.34.
@@ -100,11 +108,13 @@ We use the first 1000 samples for evaluation and the rest for trie-tree cache co
 Our method could obtain significant acceleration in RAG (Retrieval Augmented Generation) scenarios. However, there is no real-life datasets available currently. Therefore, we only evaluate on our private datasets and models. 
 AntGLM-10B is a LLM developed by Ant Group with [GLM](https://huggingface.co/THUDM/glm-10b-chinese) architecture. 
 
-| model          | scenarios       | GPU           | 🤗 transformers | Lookahead    |
-|----------------|---------------|---------------|-----------------|--------------|
-| AntGLM-10b     | Citizen Biz Agent     | A100-80G      | 52.4            | 280.9(x5.36) |
-| AntGLM-10b     | Enterprise Info QA    | A100-80G      | 50.7            | 259.1(x5.11) |
-| AntGLM-10b     | Health Suggestion     | A100-80G      | 51.6            | 240.2(x4.66) |
+| model          | scenarios       | GPU | 🤗 transformers | Lookahead    |
+|----------------|---------------|--|-----------------|--------------|
+| AntGLM-10b     | Citizen Biz Agent     | A100-80G | 52.4            | 280.9(x5.36) |
+| AntGLM-10b     | Citizen Biz Agent     | A10 | 20.3            | 105.1(x5.18) |
+| AntGLM-10b     | Citizen Biz Agent     | V100-32G | 27.3            | 118.9(x4.36) |
+| AntGLM-10b     | Enterprise Info QA    | A100-80G | 50.7            | 259.1(x5.11) |
+| AntGLM-10b     | Health Suggestion     | A100-80G | 51.6            | 240.2(x4.66) |
 
 
 [//]: # (![llama_without_lookahead]&#40;./pia/lookahead/figures/glm_la_off.gif&#41;![llama_with_lookahead]&#40;./pia/lookahead/figures/glm_la_on.gif&#41;)
@@ -136,18 +146,21 @@ Note that our work is different from the other method named [lookahead decoding]
 ### Hierarchical multi-branch draft
 
 
-![flow](./pia/lookahead/figures/flow.png)
-
-[//]: # (![dynamic]&#40;./pia/lookahead/figures/dynamic.gif&#41;)
-![dynamic](https://github.com/alipay/PainlessInferenceAcceleration/blob/main/pia/lookahead/figures/dynamic.gif)
+![workflow](./pia/lookahead/figures/flow.png)
 
 
+![mask](https://github.com/alipay/PainlessInferenceAcceleration/blob/main/pia/lookahead/figures/dynamic.gif)
 
-## Lincense （使用协议）
 
-协议为CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/)
+![construction](https://github.com/alipay/PainlessInferenceAcceleration/blob/main/pia/lookahead/figures/trie_construct.gif)
 
-使用本项目前，请先阅读LICENSE.txt。如果您不同意该使用协议中列出的条款、法律免责声明和许可，您将不得使用本项目中的这些内容。
+
+![retrieve](https://github.com/alipay/PainlessInferenceAcceleration/blob/main/pia/lookahead/figures/trie_retrieve.gif)
+
+
+## Lincense
+
+CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/)
 
 ## Installation
 
@@ -203,17 +216,34 @@ Each supported models are included and  can be used for correctness evaluation.
 python [model name]_example.py
 ```
 
-To evaluation speedup of `lookahead`, we can run the scripts in the path `benchmarks/`,
+## Benchmarks
 
+To evaluation speedup of `lookahead`, we can run the scripts in the path `benchmarks/`, the preprocess of datasets can be found in `benchmarks/preprocess_sample.py`. 
+
+To inspect running details of lookahead, we can turn on `return_dict_in_generate`, i.e.,
+
+```python
+outputs = model.generate(...,
+                        return_dict_in_generate=True
+                        )
+output_ids = outputs.sequences
+kwargs = outputs.kwargs
+# edls: short for effective decoding lengths, i.e., generate token count in a forward, therefore edls always >=1 ( even without lookahead, we will generate one token in a forward, so edls=1)
+edls = kwargs['edls']
+# dls: short of decoding lengths, i.e., token count in a forward, always >= 1. Note that it is set to 1 intead of prompt length in the prefill stage.
+dls = kwargs['dls']
+# fts: short for forward time(s), the first is the prefill time and others are decoding times.
+fts = kwargs['fts']
+#qts: short of query time(s), i.e., the time for retrieving a sub trie tree.
+qts = kwargs['qts']
+```
 
 
 ## Customize Model
 
 <details>
 
-<summary>
-
-To support a customize model, usually we only need add a few lines, here is a example for supporting Llama: </summary>
+<summary>To support a customize model, usually we only need add a few lines, here is a example for supporting Llama: </summary>
 
 ```python
 
