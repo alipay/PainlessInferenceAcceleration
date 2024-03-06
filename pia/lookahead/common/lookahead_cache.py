@@ -13,7 +13,7 @@ import numpy as np
 class Node():
     __slots__ = ['freqs', 'children']
 
-    def __init__(self, children=None, freqs=None):
+    def __init__(self, children, freqs):
         self.children = children
         self.freqs = freqs
 
@@ -22,7 +22,7 @@ class Node():
 
 
 class Tree():
-    def __init__(self, token_id, max_node=512, max_output_node=256):
+    def __init__(self, token_id, max_node=65536, max_output_node=512):
         self.token_id = token_id
         self.max_node = max_node
         self.max_output_node = max_output_node
@@ -30,23 +30,20 @@ class Tree():
         self.n_output_node = 0
         self.nodes = {}
 
-    def put(self, token_ids, mode='output', idx=-1):
+    def put(self, token_ids, mode='output', idx=0, freq=1.0):
         assert mode in ('input', 'output')
         if mode == 'output':
-            assert idx == -1
-        else:
-            assert idx >= 0
-        self._put(token_ids, self.nodes, mode=mode, idx=idx, freq=1.0)
+            idx = -1
+        self._put(token_ids, self.nodes, mode=mode, idx=idx, freq=freq)
 
     def _put(self, token_ids, nodes, mode='output', freq=1.0, idx=-1):
-
         while True:
             if len(token_ids) == 0:
                 break
             t = token_ids[0]
             node = nodes.get(t, None)
             if node is None:
-                n = self._pack(token_ids, idx=idx, freq=freq)
+                n = self._pack(token_ids, idx, freq=freq)
                 nodes.update(n)
                 self.n_node += len(token_ids)
                 if mode == 'output':
@@ -57,11 +54,11 @@ class Tree():
             nodes = node.children
             token_ids = token_ids[1:]
 
-    def _pack(self, token_ids, idx=-1, freq=1.0):
+    def _pack(self, token_ids, idx, freq=1.0):
         ps = {}
         for token in token_ids[::-1]:
             freqs = {idx: freq}
-            p = Node(children=ps, freqs=freqs)
+            p = Node(ps, freqs)
             ps = {token: p}
         return ps
 
@@ -75,7 +72,8 @@ class Tree():
             return [token_id], np.ones((1, 1), dtype=np.int64), [0, 0]
 
         freqs = []
-        self._get_freqs(nodes, freqs, idx, output_weight)
+        self._dfs_get_freqs(nodes, freqs, idx, output_weight)
+        # self._bfs_get_freqs(nodes, freqs, idx, output_weight)
 
         min_mix_freq = 1e9
         min_input_freq = 1e9
@@ -145,20 +143,35 @@ class Tree():
         mask = mask[:size, :size]
         return ids, mask, sizes
 
-    def _get_freqs(self, nodes, freqs, idx, output_weight):
-        for tid, node in nodes.items():
+    def _dfs_get_freqs(self, nodes, freqs, idx, output_weight):
+        for node in nodes.values():
             fo = node.freqs.get(-1, 0.0)
             fi = node.freqs.get(idx, 0.0)
             if fo > 0 or fi > 0:
                 fm = (1.0 - output_weight) * fi + output_weight * fo
-                freqs.append([len(freqs), fi, fo, fm])
+                freqs.append([None, fi, fo, fm])
                 if len(node.children) > 0:
-                    self._get_freqs(node.children, freqs, idx, output_weight)
+                    self._dfs_get_freqs(node.children, freqs, idx, output_weight)
 
-    def get_one_branch(self, token_ids, max_length=8, mode='output', idx=-1):
+    def _bfs_get_freqs(self, nodes, freqs, idx, output_weight):
+        node_list = [nodes]
+        while len(node_list) > 0:
+            update_node_list = []
+            for nodes in node_list:
+                for node in nodes.values():
+                    fo = node.freqs.get(-1, 0.0)
+                    fi = node.freqs.get(idx, 0.0)
+                    if fo > 0 or fi > 0:
+                        fm = (1.0 - output_weight) * fi + output_weight * fo
+                        freqs.append([None, fi, fo, fm])
+                        if len(node.children) > 0:
+                            update_node_list.append(node.children)
+            node_list = update_node_list
+
+    def get_one_branch(self, token_ids, max_length=8, mode='mix', idx=0):
         assert mode in ('input', 'output', 'mix')
 
-        match_token_id, nodes = self._match(token_ids, mode=mode)
+        match_token_id, nodes = self._match(token_ids, mode=mode, idx=idx)
         if len(nodes) == 0:
             token_id = token_ids[-1] if len(token_ids) > 0 else self.token_id
             return [token_id], np.ones((1, 1), dtype=np.int64), [0, 0]
@@ -194,7 +207,7 @@ class Tree():
             else:
                 for t, node in nodes.items():
                     freqs = node.freqs
-                    freq = freqs.get(idx, 0.0)
+                    freq = freqs.get(-1, 0.0)
                     if freq > 0:
                         if freq > max_freq:
                             max_freq = freq
@@ -208,7 +221,7 @@ class Tree():
 
         return ids, np.tril(np.ones((length + 1, length + 1), dtype=np.int64), 0), [length]
 
-    def _match(self, token_ids, mode='output', idx=-1):
+    def _match(self, token_ids, mode='mix', idx=0):
         nodes = self.nodes
         token_id = None
         if len(token_ids) == 0:
@@ -248,7 +261,6 @@ class Tree():
                 return
             fi = node.freqs.get(idx, 0.0)
             fo = node.freqs.get(-1, 0.0)
-            # fm = (1 - output_weight) * fi + output_weight * fo
             if mode == 'mix':
                 if fi < min_input_freq and fo < min_output_freq and fm < min_mix_freq:
                     continue
@@ -291,7 +303,6 @@ class Tree():
     def _squeeze(self, nodes):
         for t, p in list(nodes.items()):
             fo = p.freqs.get(-1, 0.0)
-            # TODO
             if fo > 1.0:
                 p.freqs[-1] *= 0.5
                 if len(p.children) > 0:
@@ -299,34 +310,31 @@ class Tree():
             else:
                 nodes.pop(t)
 
-    def _count_node(self, ps, sizes):
-        l = len(ps)
+    def _count_node(self, nodes, sizes):
+        l = len(nodes)
         sizes[0] += l
-        for t, p in ps.items():
-            if len(p.children) > 0:
-                self._count_node(p.children, sizes)
+        for t, n in nodes.items():
+            if len(n.children) > 0:
+                self._count_node(n.children, sizes)
 
-    def reset_input_freq(self):
+    def reset_input_freq(self, idx):
         if len(self.nodes) == 0:
             return
-        self._reset_input_freq(self.nodes)
+        self._reset_input_freq(self.nodes, idx)
 
-    def _reset_input_freq(self, ps):
-        for t, p in ps.items():
-            freqs = p.freqs
-            hit = False
-            for idx, freq in list(freqs.items()):
-                if idx >= 0 and freq > 0.0:
-                    freqs[idx] = 0.0
-                    hit = True
-            if not hit:
+    def _reset_input_freq(self, nodes, idx):
+        for t, node in nodes.items():
+            freqs = node.freqs
+            f = freqs.get(idx, 0.0)
+            if f == 0.0:
                 continue
-            if len(p.children) > 0:
-                self._reset_input_freq(p.children)
+            freqs[idx] = 0.0
+            if len(node.children) > 0:
+                self._reset_input_freq(node.children, idx)
 
 
 class LookaheadCache():
-    def __init__(self, debug=False, eos_ids=(2,), stop_words=None, max_node=512, max_output_node=256):
+    def __init__(self, debug=False, eos_ids=(2,), stop_words=None, max_node=65536, max_output_node=512):
         self.debug = debug
         self.eos_ids = eos_ids if eos_ids is not None else [None]
         self.max_node = max_node
@@ -338,13 +346,12 @@ class LookaheadCache():
         self.stop_words = stop_words if stop_words is not None else {}
         self.default_mask = np.ones((1, 1), dtype=np.int64)
 
-    def put(self, token_ids, branch_length=8, final=False, mode='output', idx=-1):
+    def put(self, token_ids, branch_length=8, final=False, mode='output', idx=0):
         for eos in self.eos_ids:
             if eos in token_ids:
                 token_ids = token_ids[:token_ids.index(eos)]
         if len(token_ids) >= 2:
             ts = len(token_ids)  # ts: token_ids size
-
             for i in range(ts - 1):
                 token_id = token_ids[i]
                 tup = token_ids[i + 1:i + branch_length + 1]
@@ -353,16 +360,16 @@ class LookaheadCache():
                 tree = self.mem.get(token_id, None)
                 if tree is not None:
                     tree.put(tup, mode=mode, idx=idx)
+                    self._update_trees.add(tree)
                 else:
                     tree = Tree(token_id, max_node=self.max_node, max_output_node=self.max_output_node)
                     tree.put(tup, mode=mode, idx=idx)
                     self.mem[token_id] = tree
-                self._update_trees.add(tree)
                 if mode == 'input':
                     self._update_input_trees.add(tree)
 
         if final:
-            self.reset_input_freqs()
+            self.reset_input_freqs(idx)
             self.squeeze_branch_counts()
 
     def stream_put(self, token_ids, branch_length=8, final=False, mode='output', idx=0):
@@ -385,17 +392,17 @@ class LookaheadCache():
                     print(f'input token:{token_id} tokens:{tup}')
                 tree = self.mem.get(token_id, None)
                 if tree:
-                    tree.put(tup, mode='output', idx=-1)
+                    tree.put(tup, mode='output', idx=idx)
                 else:
                     tree = Tree(token_id, max_node=self.max_node, max_output_node=self.max_output_node)
-                    tree.put(tup, mode='output', idx=-1)
+                    tree.put(tup, mode='output', idx=idx)
                     self.mem[token_id] = tree
                 self._update_trees.add(tree)
             if not final:
                 self._output_ids[idx] = output_ids[ts - branch_length:]
         if final:
             self._output_ids[idx] = []
-            self.reset_input_freqs()
+            self.reset_input_freqs(idx)
             self.squeeze_branch_counts()
 
     def hier_get(self, token_ids, decoding_length=64, branch_length=8, min_input_size=0, min_output_size=0, mode='mix',
@@ -504,7 +511,6 @@ class LookaheadCache():
                 # token count is enough, not need retrieve again
                 if s >= branch_length // 2:
                     break
-        print(f'{decoding_ids=}')
         if decoding_ids is None:
             decoding_ids = token_ids[-1:]
 
@@ -557,28 +563,26 @@ class LookaheadCache():
     def fresh(self):
         self.mem = {}
 
-    def reset_input_freqs(self):
+    def reset_input_freqs(self, idx):
         if len(self._update_input_trees) > 0:
-            for c in self._update_input_trees:
-                c.reset_input_freq()
+            for t in self._update_input_trees:
+                t.reset_input_freq(idx)
             self._update_input_trees.clear()
 
     def squeeze_branch_counts(self):
         if len(self._update_trees) >= 1024:
-            for c in self._update_trees:
-                c.squeeze()
+            for t in self._update_trees:
+                t.squeeze()
             self._update_trees.clear()
 
-    def save_mem(self, save_mem_dir):
-        cache_mem = self.mem
-        serialized_object = pickle.dumps(cache_mem)
+    def save_mem(self, save_dir):
+        serialized_object = pickle.dumps(self.mem)
         json_string = json.dumps(serialized_object.decode('latin-1'))
-        with open(save_mem_dir, 'w') as f:
+        with open(save_dir, 'w') as f:
             json.dump(json_string, f)
 
-    def load_mem(self, load_mem_dir):
-        with open(load_mem_dir, 'r') as f:
+    def load_mem(self, load_dir):
+        with open(load_dir, 'r') as f:
             json_string = json.load(f)
-        deserialized_object = pickle.loads(json.loads(json_string).encode('latin-1'))
-        cache_mem = deserialized_object
-        self.mem = cache_mem
+        self.mem = pickle.loads(json.loads(json_string).encode('latin-1'))
+
