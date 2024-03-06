@@ -12,7 +12,7 @@ local_path_dict = {
     'chatglm': '/mntnlp/common_base_model/chatglm2',
     'chatglm3': '/mntnlp/common_base_model/chatglm3-6b',
     'codellama': '/mntnlp/common_base_model/CodeLlama-7b-Instruct-hf',
-    'glm': '/mntnlp/nanxiao/lookahead_benchmark/antrag' ,
+    'glm': '/mntnlp/nanxiao/lookahead/antglm' ,
     'gpt2': '/mntnlp/common_base_model/gpt2',
     'gptj': '/mntnlp/common_base_model/gpt-j-6b',
     'internlm': '/mntnlp/liangchen/internlm2-chat-7b',
