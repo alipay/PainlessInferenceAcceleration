@@ -143,19 +143,20 @@ With the efficient hierarchical structure, we can lookahead tens fo branches, th
 Note that our work is different from the other method named [lookahead decoding](https://github.com/hao-ai-lab/LookaheadDecoding). 
 
 
-### Hierarchical multi-branch draft
-
-
+### Lookahead workflow
 ![workflow](./pia/lookahead/figures/flow.png)
 
 
+### Lookahead mask
 ![mask](https://github.com/alipay/PainlessInferenceAcceleration/blob/main/pia/lookahead/figures/dynamic.gif)
 
-
+### Trie construction
 ![construction](https://github.com/alipay/PainlessInferenceAcceleration/blob/main/pia/lookahead/figures/trie_construct.gif)
 
 
+### Trie retrieve
 ![retrieve](https://github.com/alipay/PainlessInferenceAcceleration/blob/main/pia/lookahead/figures/trie_retrieve.gif)
+
 
 
 ## Lincense
