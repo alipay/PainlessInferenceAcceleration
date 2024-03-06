@@ -6,7 +6,7 @@ Copyright (c) Ant Financial Service Group and its affiliates.
 
 import sys
 import torch
-from transformers import AutoTokenizer
+from transformers import AutoTokenizer, CodeLlamaTokenizer
 
 from pia.lookahead.common.lookahead_cache import LookaheadCache
 from benchmark import Benchmark
@@ -19,7 +19,7 @@ class LlameBenchmark(Benchmark):
         # from pia.lookahead.models.llama.modeling_llama import LlamaForCausalLM
         # fused op version llama
         from pia.lookahead.models.llama.modeling_llama_batch import LlamaForCausalLM 
-        tokenizer = AutoTokenizer.from_pretrained(token_dir)
+        tokenizer = CodeLlamaTokenizer.from_pretrained(token_dir)
         tokenizer.pad_token = tokenizer.eos_token
         tokenizer.padding_side = 'left'
         model = LlamaForCausalLM.from_pretrained(model_dir
@@ -34,23 +34,22 @@ class LlameBenchmark(Benchmark):
         self.eos = tokenizer.eos_token_id
         self.eop = None
 
-
-model_dir = '/mntnlp/common_base_model/llama2-13b-chat'
-worker = LlameBenchmark(log_dir='llama_benchmark')
+model_dir = '/mntnlp/common_base_model/codellama-13b-instruct-hf'
+worker = LlameBenchmark(log_dir='codellama_benchmark')
 worker.initialize(model_dir=model_dir, token_dir=model_dir)
 
-# answers in the warmup samples are used for constructing trie-tree cache
-# warmup_prompt_dir = '/mntnlp/nanxiao/dataset/dolly_15k/train.jsonl'
-# warmup_dataset_dir = '/mntnlp/nanxiao/dataset/lookahead/dolly_15k_llama2_7b_chat/train_v100.jsonl'
-# worker.save_answers(warmup_prompt_dir, warmup_dataset_dir, batch_size=1, max_count=1000, use_lookahead=False)
+# # answers in the warmup samples are used for constructing trie-tree cache
+# warmup_prompt_dir = '/mntnlp/nanxiao/dataset/humaneval-x/train.jsonl'
+# warmup_dataset_dir = '/mntnlp/nanxiao/dataset/lookahead/humaneval_x_codellama_13b/train.jsonl'
+# worker.save_answers(warmup_prompt_dir, warmup_dataset_dir, answer_name='response', batch_size=1, max_count=None, use_lookahead=True)
 
 # the dataset can be found in lookahead/datasets/dataset.py
-dataset_dir = '/mntnlp/nanxiao/dataset/lookahead/dolly_15k_llama2_13b_chat/test.jsonl'
-warmup_dataset_dir = '/mntnlp/nanxiao/dataset/lookahead/dolly_15k_llama2_13b_chat/train.jsonl'
+dataset_dir = '/mntnlp/nanxiao/dataset/humaneval-x/test.jsonl'
+warmup_dataset_dir = '/mntnlp/nanxiao/dataset/lookahead/humaneval_x_codellama_13b/train.jsonl'
 worker.load_prompts(prompt_dir=dataset_dir, warmup_prompt_dir=warmup_dataset_dir)
 
 # test correctness with lookahead decoding
-worker.batch_chat(worker.prompts[:1],
+worker.batch_chat(worker.prompts[:5],
                   max_new_tokens=256,
                   decoding_length=16,
                   branch_length=4,
@@ -62,4 +61,4 @@ max_new_tokens = 256
 chat_count = 1000
 warmup_count = 10000
 worker.perf_check(worker.prompts[:chat_count], warmup_ids=worker.warmup_ids[:warmup_count],
-                  sizes=[32], lens=[16], max_new_tokens=max_new_tokens)
+                  sizes=[128], lens=[12], max_new_tokens=max_new_tokens)

@@ -36,7 +36,7 @@ from transformers.utils import add_start_docstrings, add_start_docstrings_to_mod
 
 # from transformers.modeling_utils import PreTrainedModel
 from pia.lookahead.common.pretrained_model_batch import LookaheadPreTrainedModel
-# from pia.lookahead.csrc.triton.rms_norm import rmsnorm_wrapper
+from pia.lookahead.csrc.triton.rms_norm import rmsnorm_wrapper
 
 logger = logging.get_logger(__name__)
 
@@ -100,7 +100,7 @@ class LlamaRMSNorm(nn.Module):
 #         super().__init__()
 #         self.weight = nn.Parameter(torch.ones(hidden_size))
 #         self.variance_epsilon = eps
-#
+
 #     def forward(self, hidden_states):
 #         return rmsnorm_wrapper(hidden_states, self.weight, eps=self.variance_epsilon)
 

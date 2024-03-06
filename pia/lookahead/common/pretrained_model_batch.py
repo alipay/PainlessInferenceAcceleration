@@ -711,6 +711,7 @@ class LookaheadPreTrainedModel(PreTrainedModel):
                 decoding_mode = decoding_mode + '_mix'
             fmt, mode = decoding_mode.split('_')
             sub_decoding_length = max(decoding_length // len(decoding_qids), 1)
+            ts = time.time()
             decoding_ids, decoding_masks, hit_sizes = self.lookahead_cache.bat_get(decoding_qids,
                                                                                          decoding_length=sub_decoding_length,
                                                                                          branch_length=branch_length,
@@ -718,6 +719,7 @@ class LookaheadPreTrainedModel(PreTrainedModel):
                                                                                          mode=mode,
                                                                                          indices=batch_indices,
                                                                                          decoding_mode=fmt)
+            qt = time.time()-ts
             sizes = list(set([len(x) for x in decoding_ids]))
             assert len(sizes) == 1
             input_id_slice = torch.tensor(decoding_ids, device=input_ids.device)
@@ -728,6 +730,7 @@ class LookaheadPreTrainedModel(PreTrainedModel):
             decoding_attention_mask = torch.cat(
                 [attention_mask[:, :, min_cur: min_cur + sizes[0], :min_cur], decoding_mask_tensor], dim=-1)
 
+            decoding_kwargs['qts'].append(qt)
             decoding_kwargs.update({'decoding_qids': decoding_qids,
                                     'decoding_ids': decoding_ids,
                                     'decoding_masks': decoding_masks,
@@ -1156,7 +1159,8 @@ class LookaheadPreTrainedModel(PreTrainedModel):
             'pad': pad_token_id if pad_token_id is not None else 2,
             'edls': [],
             'dls': [],
-            'fts': []
+            'fts': [],
+            'qts': []
         })
 
         decoding_length = decoding_kwargs.get('decoding_length', 63)
@@ -1312,7 +1316,9 @@ class LookaheadPreTrainedModel(PreTrainedModel):
             else:
                 kwargs = {'dls': model_kwargs['decoding_kwargs']['dls'],
                           'edls': model_kwargs['decoding_kwargs']['edls'],
-                          'fts': model_kwargs['decoding_kwargs']['fts']}
+                          'fts': model_kwargs['decoding_kwargs']['fts'],
+                          'qts': model_kwargs['decoding_kwargs']['qts']
+                          }
                 return LookaheadDecoderOnlyOutput(
                     sequences=input_ids,
                     scores=scores,
