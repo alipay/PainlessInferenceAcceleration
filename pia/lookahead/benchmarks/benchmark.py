@@ -13,6 +13,7 @@ import random
 import sys
 import time
 from pstats import SortKey
+from rouge_score import rouge_scorer
 
 import torch
 
@@ -239,7 +240,7 @@ class Benchmark():
         speedup = opt_speed / org_speed
         print(f'speed:{org_speed:.2f}->{opt_speed:.2f} speedup:{speedup:.3f}')
 
-    def perf_check(self, queries, warmup_ids=None, max_new_tokens=256, sizes=(32, 64),
+    def perf_check(self, queries, answers=None, warmup_ids=None, max_new_tokens=256, sizes=(32, 64),
                    lens=(4, 8, 12), decoding_mode='hier',
                    batch_size=1, max_node_rate=16, max_query_length=2):
         wc = len(warmup_ids) if warmup_ids is not None else 0
@@ -250,6 +251,8 @@ class Benchmark():
         speeds = []
         outputs = {}
         lookahead_cache = self.model.lookahead_cache
+        scorer = rouge_scorer.RougeScorer(['rougeL'], use_stemmer=True)
+
         for i, decoding_length in enumerate(sizes):
             for j, branch_length in enumerate(lens):
                 if decoding_length < branch_length * batch_size:
@@ -274,6 +277,7 @@ class Benchmark():
                 ts = time.time()
                 n_b = len(queries) // batch_size
                 times = []
+                scores = []
                 for k in range(n_b):
                     qs_ = queries[k * batch_size:(k + 1) * batch_size]
                     ts_ = time.time()
@@ -291,6 +295,10 @@ class Benchmark():
                     out_char += sum([len(x) for x in output_texts])
                     out_token += sum([len(x) for x in output_id_list])
                     bs = len(qs_)
+                    if answers is not None:
+                        for i, output_text in enumerate(output_texts):
+                            ans = answers[k * batch_size+i]
+                            scores.append( scorer.score(prediction=output_text, target=ans)["rougeL"].fmeasure )
                     dls_ = kwargs.get('dls', [])
                     dls.extend(dls_[bs:] if len(dls_) > bs else [])
                     edls_ = kwargs.get('edls', [])
@@ -328,12 +336,13 @@ class Benchmark():
                 mem = ms['reserved_bytes.large_pool.peak'] / 1e9
                 speedup = speeds[-1] / speeds[0]
                 times = [round(x, 3) for x in times]
+                score = sum(scores)/max(len(scores),1.0)
                 log_str = f"mode:{decoding_mode} bs:{batch_size} " \
                           f"decoding_length:{decoding_length} branch_length:{branch_length} " \
                           f"query:{len(queries)} warmup:{wc} " \
                           f"input:{in_token:.1f} output:{out_token:.1f} " \
                           f"edl:{edl:.3f}/{dl:.3f}/{pt:.3f}/{gt:.3f} time:{t:.3f} " \
-                          f"speed:{speed:.1f} mem:{mem:.3f} "
+                          f"speed:{speed:.1f} mem:{mem:.3f} acc:{score:.4f}"
                 print(log_str)
                 if self.logger is not None:
                     self.logger.write(log_str + '\n')
