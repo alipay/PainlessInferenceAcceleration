@@ -20,6 +20,8 @@ local_path_dict = {
     'opt':  '/mntnlp/common_base_model/opt_6b7',
     # 'opt': '/Users/yaozhao/dataset/models/opt-125m',
     'qwen': '/mntnlp/common_base_model/Qwen-7B-Chat',
+    'qwen2': '/mntnlp/common_base_model/Qwen__Qwen1.5-1.8B-Chat',
+    'qwen2_quan': '/mntnlp/common_base_model/Qwen__Qwen1.5-14B-Chat-GPTQ-Int4',
     'qwen_quant': '/mntnlp/liangchen/qwen/Qwen-7B-Chat-Int4',
     'mistral': '/mntnlp/common_base_model/mistralai__Mistral-7B-v0.1',
     'mixtral': '/mntnlp/common_base_model/Mixtral-8x7B-Instruct-v0.1'
