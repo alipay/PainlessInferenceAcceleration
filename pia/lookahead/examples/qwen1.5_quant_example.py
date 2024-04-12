@@ -15,13 +15,7 @@ from pia.lookahead.models.qwen2.modeling_qwen2 import Qwen2ForCausalLM
 from pia.lookahead.examples import local_path_dict
 
 model_dir = local_path_dict.get('qwen2_quan', 'your/model/path')
-# model_dir = '/mntnlp/common_base_model/Qwen__Qwen1.5-14B-Chat-GPTQ-Int4'
-# model_dir = '/mnt7/data/open_source/dino-vitb16/model/qwen_quant'
 
-# nf4_config = BitsAndBytesConfig(
-#     load_in_4bit=True,
-#     bnb_4bit_quant_type="nf4",
-# )
 
 dtype = torch.float16 if torch.cuda.is_available() else torch.float32
 device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
@@ -30,12 +24,11 @@ model = Qwen2ForCausalLM.from_pretrained(model_dir
                                        , torch_dtype="auto"
                                        , low_cpu_mem_usage=True
                                        , device_map={"": device}
-                                    #    , quantization_config=nf4_config
                                        )
 
 tokenizer = AutoTokenizer.from_pretrained(model_dir)
-# stop_words = [tokenizer.encode(x)[0] for x in [',', '.', ' ', '，','。']]
 prompt = "杭州在哪里？"
+
 inputs = tokenizer(prompt, return_tensors="pt")
 messages = [
     {"role": "system", "content": "You are a helpful assistant."},
@@ -49,7 +42,7 @@ text = tokenizer.apply_chat_template(
 model_inputs = tokenizer([text], return_tensors="pt").to(device)
 
 
-for use_lookahead in [False, False, True, True]:
+for use_lookahead in [False, False, True, True, True]:
     decoding_length = 64
     branch_length = 12
     debug_lookahead = False
@@ -76,7 +69,6 @@ for use_lookahead in [False, False, True, True]:
     input_length = model_inputs.input_ids.size(-1)
     output_ids = output_ids[0, input_length:].tolist()
     response = tokenizer.decode(output_ids)
-    # input_text = tokenizer.decode(input_ids[0])
     te = time.time()
     token_count = len(tokenizer.encode(response))
     print(f'lookahead:{use_lookahead} time:{te - ts:.3f}s speed:{token_count/(te-ts):.1f}token/s response:\n{response}\n')
