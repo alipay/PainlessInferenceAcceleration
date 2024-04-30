@@ -753,7 +753,7 @@ class LookaheadPreTrainedModel(PreTrainedModel):
                 }
             )
             if position_ids is not None:
-                indices = torch.sum(decoding_attention_mask, dim=3).squeeze(1)[0]
+                indices = torch.sum(decoding_attention_mask, dim=3).squeeze(1)[0] - 1
                 model_inputs["position_ids"] = self._get_position_ids(position_ids, indices=indices, prefill=False)
 
         return model_inputs
