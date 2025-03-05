@@ -15,7 +15,7 @@
  */
 
 /*
-Copy from https://github.com/NVIDIA/FasterTransformer/blob/main/src/fastertransformer/kernels/reduce_kernel_utils.cuh
+Adapt from https://github.com/NVIDIA/FasterTransformer/blob/main/src/fastertransformer/kernels/reduce_kernel_utils.cuh
 Modified by Chen Liang
 */
 
