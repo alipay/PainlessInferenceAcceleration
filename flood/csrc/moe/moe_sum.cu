@@ -1,5 +1,5 @@
-// The file is copied from https://github.com/vllm-project/vllm/blob/main/csrc/moe/moe_align_sum_kernels.cu
-
+// Adapt from from https://github.com/vllm-project/vllm/blob/main/csrc/moe/moe_align_sum_kernels.cu
+// Copyright (c) 2023, vLLM team. All rights reserved.
 
 #include <torch/all.h>
 #include <ATen/cuda/CUDAContext.h>

@@ -15,7 +15,7 @@
  */
 
  /*
-Copy from https://github.com/flashinfer-ai/flashinfer/blob/main/include/flashinfer/pos_enc.cuh
+Adapt (Heavily) from https://github.com/flashinfer-ai/flashinfer/blob/main/include/flashinfer/pos_enc.cuh
 
 Modified by Chen Liang
 */

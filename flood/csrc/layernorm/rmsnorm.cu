@@ -16,7 +16,7 @@
 
 
 /*
-Copy from https://github.com/NVIDIA/FasterTransformer/blob/main/src/fastertransformer/kernels/layernorm_kernels.cu
+Adapted (Heavily) from https://github.com/NVIDIA/FasterTransformer/blob/main/src/fastertransformer/kernels/layernorm_kernels.cu
 
 Modified by Chen Liang
 */
