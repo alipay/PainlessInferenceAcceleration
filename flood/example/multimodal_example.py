@@ -16,8 +16,7 @@ random.seed(7)
 if __name__ == '__main__':
     mp.set_start_method('spawn', force=True)
 
-    model_path = '/mntnlp/common_base_model/Meta-Llama-3-8B-Instruct'  # llama
-    # model_path = '/mnt/nas_acr89/nanxiao/chat_80b'  # bailing
+    model_path = '/mntnlp/common_base_model/Qwen__Qwen2.5-7B-Instruct'
 
     data_path = 'dummy'
     pred_path = 'tmp.jsonl'
@@ -41,7 +40,7 @@ if __name__ == '__main__':
                  n_proc=1,
                  cache_size=0.9,
                  slot_size=8192,
-                 schedule_mode='multimodal_separate',
+                 schedule_mode='pingpong',
                  max_prefill_token=1024,
                  sync_wait_time=(4.0, 4.0),
                  queue_timeout=0.001,
@@ -57,8 +56,8 @@ if __name__ == '__main__':
                  debug=True,
                  output_file_name=pred_path,
                  output_file_mode='w+',
-                 embedding_dir='/mnt/nas_acr89/nanxiao/mm/embs.safetensors',
-                 logger='antoc.log')
+                 embedding_dir='embs.safetensors',
+                 logger='multimodel.log')
 
     # start process
     input_queue, chunk_queue, working_queue, output_queues = worker.initialize()
