@@ -48,12 +48,7 @@ if __name__ == '__main__':
 
     global worker, input_queue, output_queues
 
-    # model_path = '/mntnlp/common_base_model/Llama-3.1-8B-Instruct' # llama
-    # model_path = '/mnt/prev_nas/nanxiao/llama3'  # llama(empty)
-    # model_path = '/mntnlp/common_base_model/Qwen__Qwen2.5-0.5B-Instruct'
-    # model_path = '/mnt/nas_acr89/jingyue/med-fp8'  # llama(fp8 dynamic)
-    # model_path = '/mnt/prev_nas/nanxiao/bailing'  # bailing(empty)
-    model_path = '/home/admin/logs/bailing'
+    model_path = '/mntnlp/common_base_model/Qwen__Qwen2.5-7B-Instruct'
 
     pred_path = 'tmp.jsonl'
 

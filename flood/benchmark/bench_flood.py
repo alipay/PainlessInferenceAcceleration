@@ -40,7 +40,7 @@ if __name__ == '__main__':
                  n_proc=n_proc,
                  cache_size=None,
                  slot_size=8192,
-                 schedule_mode='separate',
+                 schedule_mode='pingpong',
                  max_prefill_token=1024,
                  sync_wait_time=(4.0, 4.0),
                  queue_timeout=0.0005,
@@ -65,7 +65,7 @@ if __name__ == '__main__':
 
     # do benchmark
     print(
-        f'\n****************  start benchmark:{time.time() % 1000:.3f}  *******************\n')
+        f'\n*********  start benchmark:{time.time() % 1000:.3f}  ***********\n')
     for i, req in enumerate(worker.stream_generate(reqs,
                                                    input_queue,
                                                    output_queues,

@@ -16,6 +16,7 @@ for response in requests.post(url, json=data, stream=True):
     text = response.decode('utf-8').replace('\n\n', '')
     print(text, flush=True, end='')
 
+
 # with requests.post(url, json=data, stream=True) as r:
 #     for chunk in r.iter_content(1):
 #         print(chunk, flush=True, end='')
