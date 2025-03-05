@@ -15,10 +15,7 @@ random.seed(7)
 if __name__ == '__main__':
     mp.set_start_method('spawn', force=True)
 
-    # model_path = '/mntnlp/common_base_model/Meta-Llama-3-8B-Instruct'  # llama
-    # model_path = '/mntnlp/common_base_model/Llama-3.1-8B-Instruct' # llama
-    # model_path = '/mnt/nas_acr89/nanxiao/chat_80b'  # bailing
-    model_path = '/mntnlp/common_base_model/Qwen__Qwen2.5-0.5B-Instruct'
+    model_path = '/mntnlp/common_base_model/Qwen__Qwen2.5-7B-Instruct'
 
     pred_path = 'tmp.jsonl'
 
@@ -26,13 +23,13 @@ if __name__ == '__main__':
     worker = LLM(model_path,
                  n_stage=1,
                  n_proc=1,
-                 schedule_mode='low_latency',
+                 schedule_mode='timely',
                  eos_token_id=None,
                  debug=False,
                  output_file_name=pred_path,
                  output_file_mode='w+',
                  output_field_names=('output_text',),
-                 logger='antoc.log')
+                 logger='stream.log')
 
     # start process
     input_queue, chunk_queue, working_queue, output_queues = worker.initialize()

@@ -75,14 +75,15 @@ async def benchmark(reqs, request_rate: float = 1.0):
         token_counts += token_count
     input_length = sum([req.input_length for req in reqs]) / n_output
     output_length = token_counts / n_output
-    line = f'sample:{n_output} length:{input_length:.0f}/{output_length:.0f} qps:{request_rate:.2f} duration:{bench_time:.1f}s ttft:{ttfts / n_output:.3f}s latency:{latencies / n_output:.3f}s throughput:{token_counts / bench_time:.2f}token/s'
+    line = (f'sample:{n_output} length:{input_length:.0f}/{output_length:.0f} '
+            f'qps:{request_rate:.2f} duration:{bench_time:.1f}s '
+            f'ttft:{ttfts / n_output:.3f}s latency:{latencies / n_output:.3f}s'
+            f' throughput:{token_counts / bench_time:.2f}token/s')
     with open('server.log', 'a+') as logger:
         log(logger, line)
 
 
 if __name__ == '__main__':
-    # model_path = '/mnt/nas_acr89/jingyue/med-fp8'  # llama(fp8 dynamic)
-    # model_path = '/mnt/prev_nas/nanxiao/llama3'  # llama(empty)
 
     ils = [100, 500, 1000, 2000, 4000, 16384, 16384, 32768, 65536]
     ols = [300, 300, 300, 500, 500, 1, 1, 1, 1]
@@ -94,11 +95,9 @@ if __name__ == '__main__':
         reqs = Reader.read_dummy_dataset(max_count=cs[i], input_length=ils[i],
                                          output_length=ols[i], flunc=0.0)
 
+        # model_path = '/mntnlp/common_base_model/Qwen__Qwen2.5-7B-Instruct'
         # data_path = '/mntnlp/nanxiao/dataset/sharegpt/ShareGPT_V3_unfiltered_cleaned_split.json'
         # reqs = Reader.read_sharegpt_dataset(data_path, model_path, max_count=2000)
-
-        # sort_by = 'random'
-        # reqs = Reader.sort_by(reqs, key=sort_by)
 
         benchmark_result = asyncio.run(
             benchmark(reqs, request_rate=request_rates[i]))
