@@ -72,16 +72,6 @@
     }                                           \
   }()
 
-// static inline __device__ float to_float(half src)
-// {
-//     return __half2float(src);
-// }
-
-// static inline __device__ float to_float(__nv_bfloat16 src)
-// {
-//     return  __bfloat162float(src);
-// }
-
 template <typename T_OUT, typename T_IN>
 __device__ inline T_OUT flood_cast(T_IN val) { return val; }
 template <>
