@@ -48,26 +48,6 @@
     }                                                                            \
   }()
 
-#define DISPATCH_PYTORCH_DTYPE_TO_FLOOD_INT_TYPE(pytorch_dtype, flood_type, ...) \
-  [&]() {                                                                        \
-    switch (pytorch_dtype)                                                       \
-    {                                                                            \
-    case at::ScalarType::Int:                                                    \
-    {                                                                            \
-      using flood_type = int;                                                    \
-      return __VA_ARGS__();                                                      \
-    }                                                                            \
-    case at::ScalarType::Long:                                                   \
-    {                                                                            \
-      using flood_type = int64_t;                                                \
-      return __VA_ARGS__();                                                      \
-    }                                                                            \
-    default:                                                                     \
-      using flood_type = int;                                                    \
-      return __VA_ARGS__();                                                      \
-    }                                                                            \
-  }()
-
 #define HEADDIM_SWITCH(head_dim, HEAD_DIM, ...) \
   [&] {                                         \
     if (head_dim == 64)                         \
@@ -91,16 +71,6 @@
       return __VA_ARGS__();                     \
     }                                           \
   }()
-
-// static inline __device__ float to_float(half src)
-// {
-//     return __half2float(src);
-// }
-
-// static inline __device__ float to_float(__nv_bfloat16 src)
-// {
-//     return  __bfloat162float(src);
-// }
 
 template <typename T_OUT, typename T_IN>
 __device__ inline T_OUT flood_cast(T_IN val) { return val; }
