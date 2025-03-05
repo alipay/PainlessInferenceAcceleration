@@ -48,26 +48,6 @@
     }                                                                            \
   }()
 
-#define DISPATCH_PYTORCH_DTYPE_TO_FLOOD_INT_TYPE(pytorch_dtype, flood_type, ...) \
-  [&]() {                                                                        \
-    switch (pytorch_dtype)                                                       \
-    {                                                                            \
-    case at::ScalarType::Int:                                                    \
-    {                                                                            \
-      using flood_type = int;                                                    \
-      return __VA_ARGS__();                                                      \
-    }                                                                            \
-    case at::ScalarType::Long:                                                   \
-    {                                                                            \
-      using flood_type = int64_t;                                                \
-      return __VA_ARGS__();                                                      \
-    }                                                                            \
-    default:                                                                     \
-      using flood_type = int;                                                    \
-      return __VA_ARGS__();                                                      \
-    }                                                                            \
-  }()
-
 #define HEADDIM_SWITCH(head_dim, HEAD_DIM, ...) \
   [&] {                                         \
     if (head_dim == 64)                         \
