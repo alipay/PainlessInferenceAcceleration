@@ -17,7 +17,7 @@
  * limitations under the License.
  */
 
-// The file is copied from https://github.com/vllm-project/vllm/blob/main/csrc/moe/topk_softmax_kernels.cu
+// Adapt from https://github.com/vllm-project/vllm/blob/main/csrc/moe/topk_softmax_kernels.cu
 // Modified by Chen Liang
 
 #include <torch/all.h>
