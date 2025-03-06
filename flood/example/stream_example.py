@@ -33,5 +33,5 @@ if __name__ == '__main__':
     worker.launch(input_queue, chunk_queue, working_queue, output_queues)
 
     request = FloodRequest('rid', input_text='hi!', output_length=1000)
-    for seg in worker.stream_generate(request, input_queue, output_queues):
+    for seg in worker.async_stream_generate(request, input_queue, output_queues):
         print(seg, end='', flush=True)

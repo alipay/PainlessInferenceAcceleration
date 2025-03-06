@@ -39,6 +39,7 @@ Additionally, we have developed an attention kernel, termed SegmentAttention, to
 - Inference of multi-modal models
 - Sampling methods
 
+Our framework is 
 
 ## Models we support
 
