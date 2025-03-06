@@ -66,7 +66,7 @@ Additionally, we have developed an attention kernel, termed SegmentAttention, to
 
 ### Throughput
 
-Performance is measured by token/s(tokens per second) of generated tokens. The version of vLLM is 0.6.6.post2, we enable the chunk prefill with chunk size 2048, other parameters are the same as default. The model archetechure of Ling can be found in the [technical report](https://github.com/inclusionAI/Ling/blob/master/Ling_Technical_Report_V1.pdf).
+Performance is measured by token/s(tokens per second) of generated tokens. The version of vLLM is 0.6.6.post2, we enable the chunk prefill with chunk size 2048, other parameters are the same as default. The model archetechure of Ling can be found in the [Ling technical report](https://github.com/inclusionAI/Ling/blob/master/Ling_Technical_Report_V1.pdf).
 
 
 | model    | dataset     | GPU      | vLLM | flood    | speedup |
@@ -79,7 +79,7 @@ Performance is measured by token/s(tokens per second) of generated tokens. The v
 ### Kernels
 
 Performance is measured by TFLOPS. Attention head number is 64, kv head number is 8, and kv head dimension is 128. More detail can be found in benchmark/bench_seg_attn.py.
-We use flash-attn-2 in A100 and flahs-attn-3 in H20.
+We use flash-attn-2 in A100 and flash-attn-3 in H20.
 
 | Device | BatchSize   |  Q_len    | K_len      | flash-attn | seg-attn    | speedup |
 |-------------|----------|-------------|----------|-----------------|--------------|--------------|
@@ -112,7 +112,7 @@ We mainly develop and benchmark on the environment below, lower version may also
 - transformers >= 4.47.1
 - flash-attn >= 2.6.3 is required if use `fa2` kernel 
 - flash-attn-3 >= 3.0.0 is required if use `fa3` kernel
-- vLLM >= 0.6.2 is required if use int8 quantization
+- vLLM >= 0.6.2 is required if use INT8 quantization
 
 
 ## Quick Start
@@ -129,8 +129,9 @@ Flood is inspired by FlashAttention 2&3, vLLM, flashinfer projects.
 
 ## Citations
 
-TBD
+[TBD]
 
 ## Contact Us
 For technical questions and feature requests, please use Github issues or discussions.
+
 
