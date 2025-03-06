@@ -125,7 +125,7 @@ To reproduce the reported performance, run the `benchmark/bench_flood.py`.
 
 ## ACKNOWLEDGE
 
-Flood is inspired by FlashAttention 2&3, vLLM, flashinfer projects.
+Flood is inspired by FlashAttention 2&3, FasterTransformer, vLLM, flashinfer projects.
 
 
 ## Citations
