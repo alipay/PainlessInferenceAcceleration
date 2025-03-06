@@ -17,7 +17,7 @@
 
 - [2024/01] We fully support repetition_penalty parameter.
 
-- [2024/01] We support Mistral & Mixtral. [example](https://github.com/alipay/PainlessInferenceAcceleration/blob/main/pia/lookahead/examples/mixtral_example.py)
+- [2024/01] We support Mistral & Mixtral. [example](https://github.com/alipay/PainlessInferenceAcceleration/blob/main/lookahead/examples/mixtral_example.py)
 
 - [2023/12] We released our [Lookahead paper](https://arxiv.org/abs/2312.12728) on arXiv!
 
@@ -87,14 +87,14 @@ We use the test set for evaluation and the train set for trie-tree cache constru
 
 We test 5 examples with Llama2-7b-chat and dolly dataset, inference time without lookahead (the left figure) is 15.7s (48.2token/s), while inference time with lookahead is 6.4s (112.9token/s), speedup is 2.34.
 
-[//]: # (![glm_without_lookahead]&#40;./pia/lookahead/figures/llama_la_off.gif&#41;![glm_with_lookahead]&#40;./pia/lookahead/figures/llama_la_on.gif&#41;)
+[//]: # (![glm_without_lookahead]&#40;./lookahead/figures/llama_la_off.gif&#41;![glm_with_lookahead]&#40;./lookahead/figures/llama_la_on.gif&#41;)
 [//]: # (<div align=center>)
 
-[//]: # (<img src="./pia/lookahead/figures/llama_la_off.gif" width="50%"><img src="./pia/lookahead/figures/llama_la_on.gif" width="50%">)
+[//]: # (<img src="./lookahead/figures/llama_la_off.gif" width="50%"><img src="./lookahead/figures/llama_la_on.gif" width="50%">)
 
 [//]: # (</div>)
 <div align=center>
-<img src="https://github.com/alipay/PainlessInferenceAcceleration/blob/main/pia/lookahead/figures/llama_la_off.gif" width="50%"><img src="https://github.com/alipay/PainlessInferenceAcceleration/blob/main/pia/lookahead/figures/llama_la_on.gif" width="50%">
+<img src="https://github.com/alipay/PainlessInferenceAcceleration/blob/main/lookahead/figures/llama_la_off.gif" width="50%"><img src="https://github.com/alipay/PainlessInferenceAcceleration/blob/main/lookahead/figures/llama_la_on.gif" width="50%">
 </div>
 
 
@@ -115,18 +115,18 @@ AntGLM-10B is a LLM developed by Ant Group with [GLM](https://huggingface.co/THU
 | AntGLM-10b     | Health Suggestion     | A100-80G | 51.6            | 240.2(x4.66) |
 
 
-[//]: # (![llama_without_lookahead]&#40;./pia/lookahead/figures/glm_la_off.gif&#41;![llama_with_lookahead]&#40;./pia/lookahead/figures/glm_la_on.gif&#41;)
+[//]: # (![llama_without_lookahead]&#40;./lookahead/figures/glm_la_off.gif&#41;![llama_with_lookahead]&#40;./lookahead/figures/glm_la_on.gif&#41;)
 
 We test 5 examples with AntGLM-10B and AntRag dataset, inference time without lookahead (the left figure) is 16.9s (33.8token/s), while inference time with lookahead is 3.9s (147.6token/s), speedup is 4.37.
 
 [//]: # (<div align=center>)
 
-[//]: # (<img src="./pia/lookahead/figures/glm_la_off.gif" width="50%"><img src="./pia/lookahead/figures/glm_la_on.gif" width="50%">)
+[//]: # (<img src="./lookahead/figures/glm_la_off.gif" width="50%"><img src="./lookahead/figures/glm_la_on.gif" width="50%">)
 
 [//]: # (</div>)
 
 <div align=center>
-<img src="https://github.com/alipay/PainlessInferenceAcceleration/blob/main/pia/lookahead/figures/glm_la_off.gif" width="50%"><img src="https://github.com/alipay/PainlessInferenceAcceleration/blob/main/pia/lookahead/figures/glm_la_on.gif" width="50%">
+<img src="https://github.com/alipay/PainlessInferenceAcceleration/blob/main/lookahead/figures/glm_la_off.gif" width="50%"><img src="https://github.com/alipay/PainlessInferenceAcceleration/blob/main/lookahead/figures/glm_la_on.gif" width="50%">
 </div>
 
 ## Introduction
@@ -147,13 +147,13 @@ Note that our work is different from the other method named [lookahead decoding]
 ![workflow](lookahead/figures/flow.png)
 
 
-![mask](https://github.com/alipay/PainlessInferenceAcceleration/blob/main/pia/lookahead/figures/dynamic.gif)
+![mask](https://github.com/alipay/PainlessInferenceAcceleration/blob/main/lookahead/figures/dynamic.gif)
 
 
-![construction](https://github.com/alipay/PainlessInferenceAcceleration/blob/main/pia/lookahead/figures/trie_construct.gif)
+![construction](https://github.com/alipay/PainlessInferenceAcceleration/blob/main/lookahead/figures/trie_construct.gif)
 
 
-![retrieve](https://github.com/alipay/PainlessInferenceAcceleration/blob/main/pia/lookahead/figures/trie_retrieve.gif)
+![retrieve](https://github.com/alipay/PainlessInferenceAcceleration/blob/main/lookahead/figures/trie_retrieve.gif)
 
 
 ## Lincense
