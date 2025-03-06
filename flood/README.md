@@ -33,13 +33,13 @@ Furthermore, Flood utilizes segmentable blocks instead of paged blocks for kvcac
 Additionally, we have developed an attention kernel, termed SegmentAttention, to function with the segmentable kvcache. Flood currently supports a range of features, including:
 - Chunk pre-fill capabilities 
 - Quantization techniques utilizing FP8 and INT8 formats
-- Multi-node inference
 - Stream-based inference
 - PPL (Perplexity) evaluation
 - Inference of multi-modal models
 - Sampling methods
+- Multi-node inference(experimental)
 
-Our framework is 
+Our framework is undergoing rapid iteration, which may result in some features having bugs. If you encounter any issues, please feel free to report them.
 
 ## Models we support
 
