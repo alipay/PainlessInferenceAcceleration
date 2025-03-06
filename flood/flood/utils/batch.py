@@ -11,7 +11,6 @@ import numpy as np
 import torch
 import torch.distributed as dist
 
-from flood.ops.draft import retrieve_draft_table
 from flood.utils.sampling import Sampling
 
 """
@@ -273,7 +272,6 @@ class Batch:
         qls = [1] * bs
         input_ids = [x.output_ids[-1] for x in reqs]
 
-        input_ids = torch.tensor(input_ids, dtype=torch.int32, device=device)
         position_ids = [x.input_length + len(x.output_ids) - 1 for x in reqs]
         max_q_length = 1
         max_k_length = max(position_ids) + 1
@@ -304,7 +302,24 @@ class Batch:
                 k_lengths.append(k_length)
                 k_segs.append(len(segs))
 
+
+        for _, req in enumerate(reqs):
+            if req.target_ids or req.temperature \
+                 or req.top_k or req.top_p or req.min_p:
+                samplings.append(Sampling(target_ids=req.target_ids,
+                                          temperature=req.temperature,
+                                          top_k=req.top_k, 
+                                          top_p=req.top_p,
+                                          min_p=req.min_p))
+            else:
+                samplings.append(None)
+
+        if all([x is None for x in samplings]):
+            samplings = None
+
+
         kls = k_lengths
+        input_ids = torch.tensor(input_ids, dtype=torch.int32, device=device)
         position_ids = torch.tensor(position_ids, dtype=torch.int32,
                                     device=device)
         q_offsets = torch.arange(bs + 1, dtype=torch.int32, device=device)
@@ -312,20 +327,8 @@ class Batch:
         q_lengths = torch.tensor(q_lengths, dtype=torch.int32, device=device)
         k_lengths = torch.tensor(k_lengths, dtype=torch.int32, device=device)
         k_segs = torch.tensor(k_segs, dtype=torch.int32, device=device)
-        cache_indices = torch.tensor(cache_indices,
-                                              dtype=torch.int32, device=device)
-
-        for _, req in enumerate(reqs):
-            if req.target_ids or req.temperature or req.top_k or req.top_p or req.min_p:
-                samplings.append(Sampling(target_ids=req.target_ids,
-                                          temperature=req.temperature,
-                                          top_k=req.top_k, top_p=req.top_p,
-                                          min_p=req.min_p))
-            else:
-                samplings.append(None)
-
-        if all([x is None for x in samplings]):
-            samplings = None
+        cache_indices = torch.tensor(cache_indices, dtype=torch.int32, 
+                                     device=device)
 
         return Batch(batch_size=bs,
                      token_count=bs,
@@ -348,114 +351,6 @@ class Batch:
                      qls=qls,
                      kls=kls
                      )
-
-    @staticmethod
-    def lookahead_batching(reqs, meta, device=torch.device(0), branch_length=4,
-                           branch_count=4):
-        assert 2 ** (int(round(math.log2(branch_length)))) == branch_length
-
-        bs = len(reqs)
-
-        retrieve_key_ids = [x.output_ids[-2:] if len(x.output_ids) >= 2 else [0,
-                                                                              x.output_ids[
-                                                                                  0]]
-                            for x in reqs]
-        input_ids = retrieve_draft_table(retrieve_key_ids,
-                                         meta.freq_table,
-                                         meta.draft_table,
-                                         meta.table_size,
-                                         meta.branch_length,
-                                         meta.draft_count,
-                                         branch_count,
-                                         branch_length)
-
-        max_seg = max([len(x.segs) for x in reqs])
-        if max_seg == 1:
-            k_offsets = [x.segs[0][0] for x in reqs] + [reqs[-1].segs[0][0]]
-        else:
-            k_offsets = sum(
-                [[y[0] for y in x.segs] + [0] * (max_seg - len(x.segs)) for x in
-                 reqs], [])
-
-        max_seg = max([len(x.segs) for x in reqs])
-        samplings = []
-        qls = [branch_count * branch_length] * bs
-
-        position_ids = []
-        cache_indices = []
-        k_lengths = []
-        for i, req in enumerate(reqs):
-            s = req.input_length + len(req.output_ids)
-            n_seg = len(req.segs)
-            offset = k_offsets[i]
-            position_ids.extend(
-                [s - 1 + j for j in range(branch_count * branch_length)])
-            if max_seg == 1:
-                k_lengths.append(position_ids[-1] + 1)
-                cache_indices.extend([s - 1 + j + k_offsets[i] for j in
-                                               range(
-                                                   branch_count * branch_length)])
-            else:
-                cache_indices.extend(
-                    [s - 1 + j + k_offsets[i][n_seg - 1] for j in
-                     range(branch_count * branch_length)])
-                k_length = [0] + [x[1] - x[0] for x in req.segs[:-1]] + [
-                    position_ids[-1] + 1]
-                k_length = k_length + [0] * (max_seg - len(req.segs))
-                k_length = itertools.cumsum(sum, k_length)
-                k_lengths.extend(k_length)
-
-        max_q_length = branch_count * branch_length
-        max_k_length = max(position_ids) + 1
-
-        position_ids = torch.tensor(position_ids, dtype=torch.int32,
-                                    device=device)
-
-        kls = k_lengths
-        q_lengths = qls
-        q_offsets = (branch_count * branch_length) * torch.arange(bs + 1,
-                                                                  dtype=torch.int32,
-                                                                  device=device)
-        k_offsets = torch.tensor(k_offsets, dtype=torch.int32, device=device)
-        q_lengths = torch.tensor(q_lengths, dtype=torch.int32, device=device)
-        k_lengths = torch.tensor(k_lengths, dtype=torch.int32, device=device)
-        cache_indices = torch.tensor(cache_indices,
-                                              dtype=torch.int32, device=device)
-
-        for _, req in enumerate(reqs):
-            if req.target_ids or req.temperature or req.top_k or req.top_p or req.min_p:
-                samplings.append(
-                    Sampling(target_ids=req.target_ids,
-                             temperature=req.temperature, top_k=req.top_k,
-                             top_p=req.top_p,
-                             min_p=req.min_p))
-            else:
-                samplings.append(None)
-
-        if all([x is None for x in samplings]):
-            samplings = None
-
-        return Batch(batch_size=bs,
-                     token_count=bs,
-                     mode=2,
-                     input_ids=input_ids,
-                     position_ids=position_ids,
-                     pids=position_ids,
-                     q_offsets=q_offsets,
-                     k_offsets=k_offsets,
-                     max_q_length=max_q_length,
-                     max_k_length=max_k_length,
-                     q_lengths=q_lengths,
-                     k_lengths=k_lengths,
-                     cache_indices=cache_indices,
-                     samplings=samplings,
-                     reqs=reqs,
-                     max_seg=max_seg,
-                     mask=None,
-                     qls=qls,
-                     kls=kls
-                     )
-
 
     @staticmethod
     def mix_batching(reqs, slots, device=torch.device(0), min_rate=0.95,

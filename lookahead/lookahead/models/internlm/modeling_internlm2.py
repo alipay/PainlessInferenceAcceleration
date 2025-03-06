@@ -39,8 +39,8 @@ from transformers.utils import (
     replace_return_docstrings,
 )
 # from transformers.modeling_utils import PreTrainedModel
-from pia.lookahead.common.pretrained_model import LookaheadPreTrainedModel
-from pia.lookahead.models.internlm.configuration_internlm import InternLMConfig as InternLM2Config
+from lookahead.common.pretrained_model import LookaheadPreTrainedModel
+from lookahead.models.internlm.configuration_internlm import InternLMConfig as InternLM2Config
 
 try:
     from transformers.generation.streamers import BaseStreamer
