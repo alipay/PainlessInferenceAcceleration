@@ -71,22 +71,22 @@ Performance is measured by token/s(tokens per second) of generated tokens. The v
 
 
 | model    | dataset     | GPU      | vLLM | flood    | speedup |
-|-------------|-------------|----------|-----------------|--------------|--------------|
-| Llama3-8B   | shareGPT  | 1*A100 |     3201    | 4529 | 1.41 |
+|-----------|-------------|----------|------------|----------|----------|
+| Llama3-8B | shareGPT  | 1*A100 |     3201   | 4529 | 1.41 |
 | Ling-Lite | shareGPT|  1 * H20  |  4355 | 5869 | 1.35 |
 | Ling-Lite | shareGPT|  1 * A100 | 3576 | 5451 | 1.52 |
 | Ling-Plus(FP8)| shareGPT | 8 * H20 | 2742 | 6569 | 2.40 |
 
 ### Kernels
 
-Performance is measured by TFLOPS. Attention head number is 64, kv head number is 8, and kv head dimension is 128. More detail can be found in benchmark/bench_seg_attn.py.
+Performance is measured by TFLOPS (TFLOPs/second). Attention head number is 64, kv head number is 8, and kv head dimension is 128. More detail can be found in benchmark/bench_seg_attn.py.
 We use flash-attn-2 in A100 and flash-attn-3 in H20.
 
-| Device | BatchSize   |  Q_len    | K_len      | flash-attn | seg-attn    | speedup |
-|-------------|----------|-------------|----------|-----------------|--------------|--------------|
-|A100|  1  | 1024  | 1024 |     99.19    | 107.35 | 1.08 |
+| Device | BatchSize  |  Q_len   | K_len  | flash-attn | seg-attn | speedup |
+|---------|----------|----------|--------|-----------|---------|----------|
+|A100|  1  | 1024  | 1024 |     99.19 | 107.35 | 1.08 |
 |A100 | 128 | 1|  1024  |  10.65 | 13.56  | 1.27 |
-|H20|  1  | 1024  | 1024 |   90.28      | 96.05 | 1.06 |
+|H20|  1  | 1024  | 1024 |   90.28   | 96.05 | 1.06 |
 |H20 | 128 | 1|  1024  | 7.16  |  22.63 | 3.16 |
 
 
