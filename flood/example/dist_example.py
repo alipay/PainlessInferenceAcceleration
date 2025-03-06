@@ -34,17 +34,21 @@ os.environ['PORT'] = PORT
 
 # print(f'{RANK=} {WORLD_SIZE=} {MASTER_ADDR=} {MASTER_PORT=}')
 
-# os.environ['CUDA_VISIBLE_DEVICES'] = '0,1,2,3' if RANK==0 else '4,5,6,7'
 # os.environ["TORCH_CPP_LOG_LEVEL"]="INFO"
 # os.environ["TORCH_DISTRIBUTED_DEBUG"] = "DETAIL"
 # os.environ["NCCL_SHM_DISABLE"] = "1"  
 os.environ["NCCL_IB_DISABLE"] = "1"
+os.environ["NCCL_CHECKS_DISABLE"] = "1"
 # os.environ["TORCH_NCCL_USE_COMM_NONBLOCKING"] = "1" 
 # os.environ["TORCH_NCCL_AVOID_RECORD_STREAMS"] = "0" 
-os.environ["NCCL_CHECKS_DISABLE"] = "1"
 
-# python /076074/framework/example/dist_example.py
+# USAGE
+# on node 1:  python /076074/framework/example/dist_example.py
 # --master=ip --port=40000 --world-size=2 --rank=0
+# on node 2:  python /076074/framework/example/dist_example.py
+# --master=ip --port=40000 --world-size=2 --rank=1
+
+# NOTE: this is an experimental feature, may contain bugs.
 
 
 if __name__ == '__main__':

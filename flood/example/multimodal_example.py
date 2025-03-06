@@ -18,17 +18,13 @@ if __name__ == '__main__':
 
     model_path = '/mntnlp/common_base_model/Qwen__Qwen2.5-7B-Instruct'
 
-    data_path = 'dummy'
-    pred_path = 'tmp.jsonl'
-    sort_by = 'random'
-
     # read prompt
     reqs = Reader.read_dummy_dataset(model_path, max_count=1000,
                                      input_length=500, output_length=200,
                                      flunc=0.1)
     if len(reqs) == 0:
         exit()
-    reqs = Reader.sort_by(reqs, key=sort_by)
+    reqs = Reader.sort_by(reqs, key='random')
     for req in reqs:
         req.rid = str(req.rid)
         req.emb_idx = 1
@@ -52,9 +48,9 @@ if __name__ == '__main__':
                  batch_size_step=None,
                  batch_size_round_frac=0.0,  # 0.585
                  min_decode_rate=1.0,
-                 eos_token_id=(128009, 128001),
+                 eos_token_id=None,
                  debug=True,
-                 output_file_name=pred_path,
+                 output_file_name='tmp.jsonl',
                  output_file_mode='w+',
                  embedding_dir='embs.safetensors',
                  logger='multimodel.log')
@@ -64,8 +60,6 @@ if __name__ == '__main__':
     worker.launch(input_queue, chunk_queue, working_queue, output_queues)
 
     # do benchmark
-    log_info = f'dataset:{data_path}/{sort_by}'
     print(
         f'\n****************  start benchmark:{time.time() % 1000:.3f}  *******************\n')
-    worker.generate(reqs, input_queue, output_queues, print_count=10,
-                    log_info=log_info)
+    worker.generate(reqs, input_queue, output_queues, print_count=10)
