@@ -89,7 +89,7 @@ if __name__ == '__main__':
                  batch_size_round_frac=0.0,  # 0.585
                  min_decode_rate=1.0, # 0.8
                  eos_token_id=eos_token_id,
-                 kernels=('sa',),
+                 kernels=('fa3',),
                  output_file_name='tmp.jsonl',
                  output_file_mode='w+',
                  logger='ignore.log',
