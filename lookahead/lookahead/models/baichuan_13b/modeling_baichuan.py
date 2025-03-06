@@ -14,9 +14,9 @@ from transformers.utils import logging
 from transformers.generation.utils import GenerationConfig
 
 
-from pia.lookahead.common.pretrained_model import LookaheadPreTrainedModel
-from pia.lookahead.models.baichuan_13b.configuration_baichuan import BaichuanConfig
-from pia.lookahead.models.baichuan_13b.generation_utils import build_chat_input, TextIterStreamer
+from lookahead.common.pretrained_model import LookaheadPreTrainedModel
+from lookahead.models.baichuan_13b.configuration_baichuan import BaichuanConfig
+from lookahead.models.baichuan_13b.generation_utils import build_chat_input, TextIterStreamer
 
 
 logger = logging.get_logger(__name__)

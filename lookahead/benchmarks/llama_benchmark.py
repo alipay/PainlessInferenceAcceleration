@@ -8,7 +8,7 @@ import sys
 import torch
 from transformers import AutoTokenizer
 
-from pia.lookahead.common.lookahead_cache import LookaheadCache
+from lookahead.common.lookahead_cache import LookaheadCache
 from benchmark import Benchmark
 
 
@@ -16,9 +16,9 @@ class LlameBenchmark(Benchmark):
 
     def initialize(self, model_dir=None, token_dir=None, **kwargs):
         # org version llama
-        # from pia.lookahead.models.llama.modeling_llama import LlamaForCausalLM
+        # from lookahead.models.llama.modeling_llama import LlamaForCausalLM
         # fused op version llama
-        from pia.lookahead.models.llama.modeling_llama_batch import LlamaForCausalLM 
+        from lookahead.models.llama.modeling_llama_batch import LlamaForCausalLM 
         tokenizer = AutoTokenizer.from_pretrained(token_dir)
         tokenizer.pad_token = tokenizer.eos_token
         tokenizer.padding_side = 'left'
@@ -35,7 +35,7 @@ class LlameBenchmark(Benchmark):
         self.eop = None
 
 
-model_dir = '/mntnlp/common_base_model/llama2-13b-chat'
+model_dir = '/mntnlp/common_base_model/llama2-7b-chat'
 worker = LlameBenchmark(log_dir='llama_benchmark')
 worker.initialize(model_dir=model_dir, token_dir=model_dir)
 

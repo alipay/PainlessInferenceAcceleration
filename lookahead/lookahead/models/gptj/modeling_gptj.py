@@ -40,7 +40,7 @@ from transformers.utils import (
 from transformers.utils.model_parallel_utils import assert_device_map, get_device_map
 
 # from transformers.modeling_utils import PreTrainedModel
-from pia.lookahead.common.pretrained_model import LookaheadPreTrainedModel
+from lookahead.common.pretrained_model import LookaheadPreTrainedModel
 
 logger = logging.get_logger(__name__)
 

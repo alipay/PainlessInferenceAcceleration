@@ -33,9 +33,9 @@ from transformers.utils import add_start_docstrings, add_start_docstrings_to_mod
     replace_return_docstrings
 
 # from transformers.modeling_utils import PreTrainedModel
-from lookahead.lookahead.common.pretrained_model_batch import LookaheadPreTrainedModel
+from lookahead.common.pretrained_model_batch import LookaheadPreTrainedModel
 from flash_attn import flash_attn_with_kvcache
-from lookahead.lookahead.csrc.triton.rms_norm import rmsnorm_wrapper
+from lookahead.csrc.triton.rms_norm import rmsnorm_wrapper
 
 
 logger = logging.get_logger(__name__)

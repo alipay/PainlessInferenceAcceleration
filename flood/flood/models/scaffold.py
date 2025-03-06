@@ -446,10 +446,10 @@ class {self.model_name}Model(PreTrainedModel):
         self.padding_idx = config.pad_token_id
         self.vocab_size = config.vocab_size
 
-        rank = int(os.environ.get('RANK', '0'))
-        world_size = int(os.environ.get('WORLD_SIZE', '1'))
+        self.rank = int(os.environ.get('RANK', '0'))
+        self.world_size = int(os.environ.get('WORLD_SIZE', '1'))
 
-        if rank == 0:
+        if self.rank == 0:
             self.{self.emb_name} = AutoEmbedding.from_pretrained(config, 
                                                                 config.vocab_size, 
                                                                 config.hidden_size, 
@@ -459,10 +459,10 @@ class {self.model_name}Model(PreTrainedModel):
 
         n_layer = config.{self.num_layers_name}
         layers = []
-        local_size = n_layer // world_size
+        local_size = n_layer // self.world_size
         for i in range(n_layer):
-            layer_idx = i if i // local_size == rank else None
-            layer_idx = -1 if layer_idx == n_layer - 1 and rank == world_size - 1 else layer_idx
+            layer_idx = i if i // local_size == self.rank else None
+            layer_idx = -1 if layer_idx == n_layer - 1 and self.rank == self.world_size - 1 else layer_idx
             layers.append({self.model_name}DecoderLayer(config, layer_idx=layer_idx))
         self.layers = torch.nn.ModuleList(layers)
 
@@ -508,9 +508,9 @@ class {self.model_name}ForCausalLM(PreTrainedModel):
         self.model = {self.model_name}Model(config)
         self.vocab_size = config.vocab_size
 
-        rank = int(os.environ.get('RANK', '0'))
-        world_size = int(os.environ.get('WORLD_SIZE', '1'))
-        if rank == world_size - 1:
+        self.rank = int(os.environ.get('RANK', '0'))
+        self.world_size = int(os.environ.get('WORLD_SIZE', '1'))
+        if self.rank == self.world_size - 1:
             self.{self.head_name} = AutoLinear.from_pretrained(config.hidden_size, 
                                                     config.vocab_size, 
                                                     bias=False, 
@@ -558,12 +558,10 @@ class {self.model_name}ForCausalLM(PreTrainedModel):
 
         n_devices = len(device_list)
         n_layers = len(self.model.layers)
-        rank = int(os.environ.get('RANK', '0'))
-        world_size = int(os.environ.get('WORLD_SIZE', '1'))
         for i, indices in enumerate(device_list):
             stream = streams[i]
             with torch.cuda.stream(stream):
-                if i == 0 and rank == 0:
+                if i == 0 and self.rank == 0:
                     batch_meta_info.to(torch.device(0), non_blocking=True)
                     hidden_states = self.model.{self.emb_name}(batch_meta_info.input_ids)
                     embeddings = batch_meta_info.embeddings
@@ -590,7 +588,7 @@ class {self.model_name}ForCausalLM(PreTrainedModel):
                     hidden_states = hidden_states.to(device, non_blocking=True)
                     batch_meta_info.to(device, non_blocking=True)
                 else:
-                    if rank == world_size - 1 and hidden_states is not None:
+                    if self.rank == self.world_size - 1 and hidden_states is not None:
                         hidden_states = self.model.{self.final_norm_name}(hidden_states)
                         logits = self.{self.head_name}(hidden_states)
                         outputs = self.sampler(logits, batch_meta_info=batch_meta_info)

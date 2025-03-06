@@ -34,7 +34,7 @@ from transformers.utils import add_start_docstrings, add_start_docstrings_to_mod
     replace_return_docstrings
 
 # from transformers.modeling_utils import PreTrainedModel
-from lookahead.lookahead.common.pretrained_model_batch import LookaheadPreTrainedModel
+from lookahead.common.pretrained_model_batch import LookaheadPreTrainedModel
 
 logger = logging.get_logger(__name__)
 

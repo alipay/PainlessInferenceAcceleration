@@ -2,8 +2,8 @@
 import json
 from transformers import AutoTokenizer
 
-from pia.lookahead.models.glm.tokenization_glm import GLMChineseTokenizer
-from pia.lookahead.common.lookahead_cache import LookaheadCache
+from lookahead.models.glm.tokenization_glm import GLMChineseTokenizer
+from lookahead.common.lookahead_cache import LookaheadCache
 
 from benchmark import Benchmark
 

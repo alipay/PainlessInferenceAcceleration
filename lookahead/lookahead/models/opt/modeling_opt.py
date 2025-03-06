@@ -36,7 +36,7 @@ from transformers.utils import (
 )
 
 # from transformers.modeling_utils import PreTrainedModel
-from pia.lookahead.common.pretrained_model import LookaheadPreTrainedModel
+from lookahead.common.pretrained_model import LookaheadPreTrainedModel
 
 logger = logging.get_logger(__name__)
 
