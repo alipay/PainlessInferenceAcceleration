@@ -21,7 +21,7 @@ Flood is a highly effective inference framework designed for offline application
 Furthermore, Flood utilizes segmentable blocks instead of paged blocks for kvcache management, thereby enhancing the continuity of the kvcache for requests.
 
 <div align=center>
-<img src="./figures/segcache.png" width="50%">
+<img src="./figures/segcache.png" width="80%">
 </div>
 
 [//]: # (<div align=center>)
