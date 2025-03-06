@@ -31,7 +31,8 @@ Furthermore, Flood utilizes segmentable blocks instead of paged blocks for kvcac
 [//]: # (</div>)
 
 Additionally, we have developed an attention kernel, termed SegmentAttention, to function with the segmentable kvcache. Flood currently supports a range of features, including:
-- Chunk prefill 
+- Zero-overhead continuous batching
+- Chunked prefill 
 - Inference of Quantization(FP8/INT8) models
 - Inference of multi-modal models
 - Streaming inference
@@ -79,8 +80,8 @@ Performance is measured by token/s(tokens per second) of generated tokens. The v
 
 ### Kernels
 
-Performance is measured by TFLOPS (TFLOPs/second). Attention head number is 64, kv head number is 8, and kv head dimension is 128. More detail can be found in benchmark/bench_seg_attn.py.
-We use flash-attn-2 in A100 and flash-attn-3 in H20.
+Performance is measured by TFLOPS (TFLOPs/second). Attention head number is 64, kv head number is 8, and kv head dimension is 128. We use `flash_attn_2_cuda.varlen_fwd` of flash-attn-2 in A100 and `flash_attn_3_cuda.fwd` of flash-attn-3 in H20. 
+More detail can be found in benchmark/bench_seg_attn.py.
 
 | Device | BatchSize  |  Q_len   | K_len  | flash-attn | seg-attn | speedup |
 |---------|----------|----------|--------|-----------|---------|----------|
