@@ -64,7 +64,6 @@ pip-delete-this-directory.txt
 *.egg-info
 *.log
 *.bin 
-*.so 
 *.pyc
 *.json 
 *.jsonl

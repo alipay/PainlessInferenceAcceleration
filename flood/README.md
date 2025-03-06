@@ -123,7 +123,7 @@ A simple example can be found in `example/simple_example.py`.
 To reproduce the reported performance, run the `benchmark/bench_flood.py`.
 
 
-## AKKNOWLEDGE
+## ACKNOWLEDGE
 
 Flood is inspired by FlashAttention 2&3, vLLM, flashinfer projects.
 
@@ -134,7 +134,7 @@ Flood is inspired by FlashAttention 2&3, vLLM, flashinfer projects.
 ```
 @misc{zhao2025flood,
 title={Flood: An throughput-oriented Inference Framework for Large Language Model with pipeline parallelism and segmentable cache},
-author={Yao Zhao and Chen Liang and Jingyue Hu and Zixuan Cheng and Zhen Wang and Longfei Li}
+author={Yao Zhao and Chen Liang and Jingyu Hu and Zixuan Cheng and Zhen Wang and Longfei Li}
 }
 ```
 
