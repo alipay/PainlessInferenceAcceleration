@@ -33,7 +33,7 @@ from transformers.activations import ACT2FN
 from transformers.cache_utils import Cache, DynamicCache
 from transformers.modeling_attn_mask_utils import _prepare_4d_causal_attention_mask, _prepare_4d_causal_attention_mask_for_sdpa
 from transformers.modeling_outputs import BaseModelOutputWithPast, CausalLMOutputWithPast, SequenceClassifierOutputWithPast
-from pia.lookahead.common.pretrained_model import LookaheadPreTrainedModel
+from lookahead.common.pretrained_model import LookaheadPreTrainedModel
 
 from transformers.utils import (
     add_start_docstrings,

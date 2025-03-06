@@ -17,16 +17,13 @@ if __name__ == '__main__':
 
     model_path = '/mntnlp/common_base_model/Qwen__Qwen2.5-7B-Instruct'
 
-    pred_path = 'tmp.jsonl'
-
-    # load 8b model with 2*A100
     worker = LLM(model_path,
                  n_stage=1,
                  n_proc=1,
                  schedule_mode='timely',
                  eos_token_id=None,
                  debug=False,
-                 output_file_name=pred_path,
+                 output_file_name='tmp.jsonl',
                  output_file_mode='w+',
                  output_field_names=('output_text',),
                  logger='stream.log')

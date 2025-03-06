@@ -49,7 +49,7 @@ from transformers.utils import (
 )
 from transformers.utils.import_utils import is_torch_fx_available
 from transformers.models.llama.configuration_llama import LlamaConfig
-from pia.lookahead.csrc.triton.rms_norm import rmsnorm_wrapper
+from lookahead.csrc.triton.rms_norm import rmsnorm_wrapper
 
 
 if is_flash_attn_2_available():

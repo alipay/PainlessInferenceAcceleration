@@ -9,8 +9,8 @@ import torch
 from tqdm import tqdm
 
 # from vllm import LLM, SamplingParams
-from pia.lookahead.common.lookahead_cache import LookaheadCache
-from pia.lookahead.models.llama.modeling_llama import LlamaForCausalLM
+from lookahead.common.lookahead_cache import LookaheadCache
+from lookahead.models.llama.modeling_llama import LlamaForCausalLM
 from transformers import AutoTokenizer
 
 

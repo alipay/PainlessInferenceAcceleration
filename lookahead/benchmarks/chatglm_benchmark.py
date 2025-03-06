@@ -8,15 +8,15 @@ import sys
 import torch
 from transformers import AutoTokenizer
 
-from pia.lookahead.common.lookahead_cache import LookaheadCache
+from lookahead.common.lookahead_cache import LookaheadCache
 from benchmark import Benchmark
 
 
 class ChatglmBenchmark(Benchmark):
 
     def initialize(self, model_dir=None, token_dir=None, **kwargs):
-        from pia.lookahead.models.chatglm.modeling_chatglm import ChatGLMForConditionalGeneration
-        from pia.lookahead.models.chatglm.tokenization_chatglm import ChatGLMTokenizer
+        from lookahead.models.chatglm.modeling_chatglm import ChatGLMForConditionalGeneration
+        from lookahead.models.chatglm.tokenization_chatglm import ChatGLMTokenizer
         model = ChatGLMForConditionalGeneration.from_pretrained(model_dir
                                                  , cache_dir='../'
                                                  , torch_dtype=torch.float16

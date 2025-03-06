@@ -8,7 +8,7 @@ import sys
 import torch
 from transformers import AutoTokenizer, CodeLlamaTokenizer
 
-from pia.lookahead.common.lookahead_cache import LookaheadCache
+from lookahead.common.lookahead_cache import LookaheadCache
 from benchmark import Benchmark
 
 
@@ -16,9 +16,9 @@ class LlameBenchmark(Benchmark):
 
     def initialize(self, model_dir=None, token_dir=None, **kwargs):
         # org version llama
-        # from pia.lookahead.models.llama.modeling_llama import LlamaForCausalLM
+        # from lookahead.models.llama.modeling_llama import LlamaForCausalLM
         # fused op version llama
-        from pia.lookahead.models.llama.modeling_llama_batch import LlamaForCausalLM 
+        from lookahead.models.llama.modeling_llama_batch import LlamaForCausalLM 
         tokenizer = CodeLlamaTokenizer.from_pretrained(token_dir)
         tokenizer.pad_token = tokenizer.eos_token
         tokenizer.padding_side = 'left'

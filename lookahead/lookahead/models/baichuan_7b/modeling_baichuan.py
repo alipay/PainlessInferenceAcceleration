@@ -32,8 +32,8 @@ import torch.utils.checkpoint
 from torch import nn
 from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss
 
-from pia.lookahead.common.pretrained_model import LookaheadPreTrainedModel
-from pia.lookahead.models.baichuan_7b.configuration_baichuan import BaiChuanConfig
+from lookahead.common.pretrained_model import LookaheadPreTrainedModel
+from lookahead.models.baichuan_7b.configuration_baichuan import BaiChuanConfig
 
 
 logger = logging.get_logger(__name__)
