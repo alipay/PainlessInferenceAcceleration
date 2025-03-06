@@ -245,7 +245,7 @@ def get_flash_attn_meta(qls, kls, mask=None):
     return meta
 
 
-def test_seg_attn(max_seg=1, mode='prefill', even=True, causal=True):
+def bench_seg_attn(max_seg=1, mode='prefill', even=True, causal=True):
     device = torch.device('cuda:0')
     dtype = torch.bfloat16
     qo_head = 64
@@ -303,13 +303,8 @@ def test_seg_attn(max_seg=1, mode='prefill', even=True, causal=True):
     if mask:
         attn_mask = torch.zeros((mask_size, mask_size), dtype=torch.uint8,
                                 device=device)
-        # attn_mask = torch.zeros((mask_size,mask_size),dtype=torch.float32, device=device)
         for i in range(mask_size):
             attn_mask[i, i + 1:] = 1
-            # if i > 1:
-            #     attn_mask[i,1] = 1
-        # attn_mask[:] = 1
-        # print(f'{attn_mask=}')
     else:
         attn_mask = None
 
@@ -333,59 +328,26 @@ def test_seg_attn(max_seg=1, mode='prefill', even=True, causal=True):
     k = torch.cat(ks, 0)
     v = torch.cat(vs, 0)
 
-    # ks = torch.stack([k]*group,2).view(sum(kls), qo_head, dim)
-    # vs = torch.stack([v]*group,2).view(sum(kls), qo_head, dim)
-
     seg_attn_meta = get_seg_attn_meta(qls, klss, mask=attn_mask)
 
     flash_attn_meta = get_flash_attn_meta(qls, kls, mask=attn_mask)
 
-    if mask:
-        assert qls[0] == mask_size and len(qls) == 1
-        torch_mask = -10000 * torch.cat([torch.zeros((qls[0], kls[0] - qls[0]),
-                                                     dtype=torch.float32,
-                                                     device=device),
-                                         attn_mask.float()], dim=1)
-        org_output = \
-        torch_attn(q[None], k[None], v[None], causal=True, mask=torch_mask)[0]
-    else:
-        org_output = flash_attn(q, k, v, flash_attn_meta, causal=causal)
-    torch.cuda.synchronize()
+    print(f'\nseg:{max_seg} mode:{mode} causal:{causal} bs:{len(qls)} q:{qls[0]} k:{kls[0]} qo_head:{qo_head} kv_head:{kv_head} dim:{dim}')
+    n_repeat = 1000
+    org_time = benchmark_func(flash_attn, q, k, v, flash_attn_meta,
+                            causal=causal, ref_flops=flops,
+                            n_repeat=n_repeat)
+    benchmark_func(seg_attn, q, k, v, seg_attn_meta, causal=causal,
+                n_repeat=n_repeat, ref_time=org_time, ref_flops=flops)
 
-    opt_output = seg_attn(q, k, v, seg_attn_meta, causal=causal)
-    torch.cuda.synchronize()
-
-    # print("org",org_output.dtype,org_output.shape)
-    # print("opt",opt_output.dtype,opt_output.shape)
-    errs = (opt_output.float() - org_output.float()).abs()
-    err = errs.mean().item()
-    amp = org_output.float().abs().mean().item()
-    rate = err / amp
-
-    desc = f'seg:{max_seg} mode:{mode}/{causal} bs:{len(qls)} q:{qls[0]} k:{kls[0]} qo_head:{qo_head} kv_head:{kv_head} dim:{dim}'
-
-    print(f"\n{desc} err:{err:.4f} rate:{rate:.3f}")
-    if math.isnan(rate) or rate > 0.02:
-        print(
-            f"org max:{torch.max(org_output).item():.3f} min:{torch.min(org_output).item():.3f}")
-        print(
-            f"opt max:{torch.max(opt_output).item():.3f} min:{torch.min(opt_output).item():.3f}")
-
-        print(torch.isnan(opt_output).float().argmax())
-
-        print("org_output[:,0,0]", org_output[:, 0, 0])
-        print("opt_output[:,0,0]", opt_output[:, 0, 0])
-
-        print("org_output[0,:,0]", org_output[0, :, 0])
-        print("opt_output[0,:,0]", opt_output[0, :, 0])
-
-        print("org_output[0,0,:]", org_output[0, 0, :])
-        print("opt_output[0,0,:]", opt_output[0, 0, :])
-        torch.testing.assert_close(opt_output.float(), org_output.float(),
-                                   rtol=0.05, atol=0.1)
 
 if __name__ == '__main__':
     for max_seg in [1,2,4]:
         for mode in ['prefill', 'decode', 'mix']:
             for even in [True, False]:
-                test_seg_attn(max_seg=max_seg, mode=mode, even=even, causal=True)
+                bench_seg_attn(max_seg=max_seg, mode=mode, even=even, causal=True)
+    # for max_seg in [1, 2, 4]:
+    #     for even in [True, False]:
+    #         bench_seg_attn(max_seg=max_seg, mode='spec', even=even, causal=True)
+    # bench_seg_attn(max_seg=1, mode='prefill', even=True, causal=True)
+    # bench_seg_attn(max_seg=2, mode='spec', even=True, causal=True)

@@ -14,10 +14,10 @@ except:
     print("flash_attn_2_cuda not found!")
 
 try:
-    import flashattn_hopper_cuda
+    import flash_attn_3_cuda
 except:
-    flashattn_hopper_cuda = None
-    print("flashattn_hopper_cuda not found!")
+    flash_attn_3_cuda = None
+    print("flash_attn_3_cuda not found!")
 
 
 class AutoAttention():
@@ -139,21 +139,56 @@ class Fp16Attention3(torch.nn.Module):
         key_states, value_states = cache.update(key_states, value_states,
                                                 self.layer_idx, batch_meta_info)
 
-        outputs = flashattn_hopper_cuda.varlen_fwd(
-            query_states,
-            key_states,
-            value_states,
-            None,  # out_
-            batch_meta_info.q_offsets,
-            batch_meta_info.k_offsets,
-            None,  # meta.seqused_q,
-            batch_meta_info.k_lengths,
-            batch_meta_info.max_q_length,
-            batch_meta_info.max_k_length,
-            self.softmax_scale,
-            True,  # causal 
-            -1,  # window_size_left
-            -1,  # window_size_right
-        )
+        # outputs = flashattn_hopper_cuda.varlen_fwd(
+        #     query_states,
+        #     key_states,
+        #     value_states,
+        #     None,  # out_
+        #     batch_meta_info.q_offsets,
+        #     batch_meta_info.k_offsets,
+        #     None,  # meta.seqused_q,
+        #     batch_meta_info.k_lengths,
+        #     batch_meta_info.max_q_length,
+        #     batch_meta_info.max_k_length,
+        #     self.softmax_scale,
+        #     True,  # causal 
+        #     -1,  # window_size_left
+        #     -1,  # window_size_right
+        # )
+        causal = True
+        pack_gqa = True
+        outputs = flash_attn_3_cuda.fwd(
+                query_states,
+                key_states,
+                value_states,
+                None,
+                None,
+                None,
+                None,
+                batch_meta_info.q_offsets,
+                batch_meta_info.k_offsets,
+                None,
+                batch_meta_info.q_lengths,
+                batch_meta_info.k_lengths,
+                batch_meta_info.max_q_length,
+                batch_meta_info.max_k_length,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                self.softmax_scale,
+                causal,
+                -1,
+                -1,
+                0.0,
+                False,
+                0,
+                pack_gqa,
+                0
+            )
         return outputs[0]
 
