@@ -130,8 +130,15 @@ Flood is inspired by FlashAttention 2&3, vLLM, flashinfer projects.
 ## Citations
 
 [TBD]
+```
+@misc{zhao2025flood,
+title={Flood: An throughput-oriented Inference Framework for Large Language Model with pipeline parallelism and segmentable cache},
+author={Yao Zhao and Chen Liang and Jingyue Hu and Zixuan Cheng and Zhen Wang and Longfei Li}
+}
+```
 
 ## Contact Us
-For technical questions and feature requests, please use Github issues or discussions.
+For technical questions and feature requests, please use Github issues or discussions. 
+
 
 
