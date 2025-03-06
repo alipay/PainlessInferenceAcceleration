@@ -70,3 +70,6 @@ pip-delete-this-directory.txt
 *.jsonl
 *.txt
 *_ignore.py
+*.xml
+*.iml
+.idea
