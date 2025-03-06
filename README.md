@@ -15,7 +15,7 @@
 
 ## *News or Update* 🔥
 
-- [2025/03] We release our throughput-oriented inference framework [`FLOOD`](https://github.com/alipay/PainlessInferenceAcceleration/blob/main/flood/README.md).
+- [2025/03] We release our throughput-oriented inference framework [`FLOOD`](./flood/README.md).
 
 - [2024/01] We support all models of baichuan family (Baichuan-7b & 13b, Baichuan2-7b & 13b) for lookahead.
 
@@ -23,19 +23,19 @@
 
 - [2024/01] We support Mistral & Mixtral for lookahead.
 
-- [2023/12] We released our latency-oriented inference framework `LOOKAHEAD`.
+- [2023/12] We released our latency-oriented inference framework [`LOOKAHEAD`](./lookahead/README.md).
 
 
 ## Introduction
 
 Our repo, PIA (short for Painless Inference Acceleration), is designed for LLM inference and currently contains three key works:
 
-- [`FLOOD`](https://github.com/alipay/PainlessInferenceAcceleration/blob/main/flood/README.md): It employs pure pipeline parallelism to enhance inference throughput, thereby reducing communication costs typically associated with tensor parallelism. 
+- [`FLOOD`](./flood/README.md): It employs pure pipeline parallelism to enhance inference throughput, thereby reducing communication costs typically associated with tensor parallelism. 
 
-- [`LOOKAHEAD`](https://github.com/alipay/PainlessInferenceAcceleration/blob/main/lookahead/README.md): It uses an on-the-fly trie-tree cache to prepare hierarchical multi-branch drafts, without the demand for assist models (e.g., speculative decoding) or additional head training (e.g., block decoding). 
+- [`LOOKAHEAD`](./lookahead/README.md): It uses an on-the-fly trie-tree cache to prepare hierarchical multi-branch drafts, without the demand for assist models (e.g., speculative decoding) or additional head training (e.g., block decoding). 
 With the efficient hierarchical structure, we can lookahead tens fo branches, therefore significantly improve generated tokens in a forward pass.
 
-- [`IPAD`](https://github.com/alipay/PainlessInferenceAcceleration/blob/main/ipad/README.md): It applies iterative pruning and distillation techniques to reduce the model size.
+- [`IPAD`](./ipad/README.md): It applies iterative pruning and distillation techniques to reduce the model size.
 
 
 ## Citations
