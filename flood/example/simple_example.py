@@ -22,8 +22,6 @@ if __name__ == '__main__':
 
     model_path = '/mntnlp/common_base_model/Qwen__Qwen2.5-7B-Instruct'
 
-    pred_path = 'tmp.jsonl'
-
     # reqs = [Request(0, input_text='tell me a joke.', output_length=32)]  
     reqs = [Request(0, input_text='tell me a joke.', output_length=64),
             Request(1, input_text='make me laugh.', output_length=64)]
@@ -33,10 +31,7 @@ if __name__ == '__main__':
                  n_proc=1,
                  eos_token_id=None,
                  debug=True,
-                 alloc_early_exit_rate=0.95,
-                 slot_first_alloc_rate=0.5,
-                 slot_fully_alloc_under=8,
-                 output_file_name=pred_path,
+                 output_file_name='tmp.jsonl',
                  output_file_mode='w+',
                  logger='example.log')
 
