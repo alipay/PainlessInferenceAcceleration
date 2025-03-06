@@ -21,25 +21,25 @@
 
 - [2024/01] We fully support repetition_penalty parameter for lookahead.
 
-- [2024/01] We support Mistral & Mixtral for lookahead. [example](https://github.com/alipay/PainlessInferenceAcceleration/blob/main/lookahead/examples/mixtral_example.py) 
+- [2024/01] We support Mistral & Mixtral for lookahead.
 
 - [2023/12] We released our latency-oriented inference framework `LOOKAHEAD`.
 
 
 ## Introduction
 
-Our repo PIA (short for Painless Inference Acceleration) is used for LLM inference, it contains three work currently:
+Our repo, PIA (short for Painless Inference Acceleration), is designed for LLM inference and currently contains three key works:
 
-- [`FLOOD`](https://github.com/alipay/PainlessInferenceAcceleration/blob/main/flood/README.md): It uses pure pipeline parallelism to improve inference throughput, which can reduce the communication cost in tensor parallelism. 
+- [`FLOOD`](https://github.com/alipay/PainlessInferenceAcceleration/blob/main/flood/README.md): It employs pure pipeline parallelism to enhance inference throughput, thereby reducing communication costs typically associated with tensor parallelism. 
 
 - [`LOOKAHEAD`](https://github.com/alipay/PainlessInferenceAcceleration/blob/main/lookahead/README.md): It uses an on-the-fly trie-tree cache to prepare hierarchical multi-branch drafts, without the demand for assist models (e.g., speculative decoding) or additional head training (e.g., block decoding). 
 With the efficient hierarchical structure, we can lookahead tens fo branches, therefore significantly improve generated tokens in a forward pass.
 
-- [`IPAD`](https://github.com/alipay/PainlessInferenceAcceleration/blob/main/ipad/README.md): It uses iteratively pruning and distillation to shrink model size.
+- [`IPAD`](https://github.com/alipay/PainlessInferenceAcceleration/blob/main/ipad/README.md): It applies iterative pruning and distillation techniques to reduce the model size.
 
 
 ## Citations
-
+```
 @inproceedings{10.1145/3637528.3671614,
 author = {Zhao, Yao and Xie, Zhitian and Liang, Chen and Zhuang, Chenyi and Gu, Jinjie},
 title = {Lookahead: An Inference Acceleration Framework for Large Language Model with Lossless Generation Accuracy},
@@ -51,8 +51,9 @@ booktitle = {Proceedings of the 30th ACM SIGKDD Conference on Knowledge Discover
 pages = {6344–6355},
 series = {KDD '24}
 }
+```
 
-
+```
 @inproceedings{10.1145/3589335.3648321,
 author = {Wang, Maolin and Zhao, Yao and Liu, Jiajia and Chen, Jingdong and Zhuang, Chenyi and Gu, Jinjie and Guo, Ruocheng and Zhao, Xiangyu},
 title = {Large Multimodal Model Compression via Iterative Efficient Pruning and Distillation},
@@ -64,3 +65,4 @@ booktitle = {Companion Proceedings of the ACM Web Conference 2024},
 pages = {235–244},
 series = {WWW '24}
 }
+```
