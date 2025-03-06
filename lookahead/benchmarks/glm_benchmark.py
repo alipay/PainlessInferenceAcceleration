@@ -8,15 +8,15 @@ import sys
 import torch
 from transformers import AutoTokenizer
 
-from pia.lookahead.common.lookahead_cache import LookaheadCache
+from lookahead.common.lookahead_cache import LookaheadCache
 from benchmark import Benchmark
 
 
 class GlmBenchmark(Benchmark):
 
     def initialize(self, model_dir=None, token_dir=None, **kwargs):
-        from pia.lookahead.models.glm.modeling_glm_batch import GLMForConditionalGeneration
-        from pia.lookahead.models.glm.tokenization_glm import GLMChineseTokenizer
+        from lookahead.models.glm.modeling_glm_batch import GLMForConditionalGeneration
+        from lookahead.models.glm.tokenization_glm import GLMChineseTokenizer
         model = GLMForConditionalGeneration.from_pretrained(model_dir
                                                             , torch_dtype=torch.float16
                                                             , low_cpu_mem_usage=True

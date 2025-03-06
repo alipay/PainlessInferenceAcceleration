@@ -64,7 +64,7 @@ from transformers.utils import (
 from .configuration_mixtral import MixtralConfig
 
 
-from pia.lookahead.common.pretrained_model import LookaheadPreTrainedModel
+from lookahead.common.pretrained_model import LookaheadPreTrainedModel
 
 if is_flash_attn_2_available():
     from flash_attn import flash_attn_func, flash_attn_varlen_func

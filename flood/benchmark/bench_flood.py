@@ -41,7 +41,7 @@ if __name__ == '__main__':
                  cache_size=None,
                  slot_size=8192,
                  schedule_mode='pingpong',
-                 max_prefill_token=1024,
+                 chunk_size=1024,
                  sync_wait_time=(4.0, 4.0),
                  queue_timeout=0.0005,
                  max_slot_alloc_fail_count=1,

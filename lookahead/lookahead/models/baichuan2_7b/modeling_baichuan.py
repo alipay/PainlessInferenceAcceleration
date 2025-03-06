@@ -38,9 +38,9 @@ from transformers.utils import logging, ContextManagers
 import os
 from contextlib import contextmanager
 
-from pia.lookahead.common.pretrained_model import LookaheadPreTrainedModel
-from pia.lookahead.models.baichuan2_7b.configuration_baichuan import BaichuanConfig
-from pia.lookahead.models.baichuan2_7b.generation_utils import build_chat_input, TextIterStreamer
+from lookahead.common.pretrained_model import LookaheadPreTrainedModel
+from lookahead.models.baichuan2_7b.configuration_baichuan import BaichuanConfig
+from lookahead.models.baichuan2_7b.generation_utils import build_chat_input, TextIterStreamer
 
 logger = logging.get_logger(__name__)
 

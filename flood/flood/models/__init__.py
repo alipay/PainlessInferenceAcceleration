@@ -1,10 +1,9 @@
 
-from flood.models.modeling_llama_ignore import LlamaForCausalLM
-from flood.models.modeling_bailing_ignore import BailingForCausalLM
-from flood.models.modeling_bailing_moe_ignore import BailingMoeForCausalLM
-from flood.models.modeling_qwen2_ignore import Qwen2ForCausalLM
-from flood.models.modeling_glm import GLMForCausalLM
-from flood.models.modeling_deepseek_ignore import DeepseekForCausalLM
+from flood.models.modeling_llama import LlamaForCausalLM
+from flood.models.modeling_bailing import BailingForCausalLM
+from flood.models.modeling_bailing_moe import BailingMoeForCausalLM
+from flood.models.modeling_qwen2 import Qwen2ForCausalLM
+from flood.models.modeling_deepseek import DeepseekForCausalLM
 
 
 model_class_map = {
@@ -12,7 +11,6 @@ model_class_map = {
     "BailingForCausalLM": BailingForCausalLM,
     "BailingMoeForCausalLM": BailingMoeForCausalLM,
     "Qwen2ForCausalLM": Qwen2ForCausalLM,
-    "GLMForCausalLM": GLMForCausalLM,
     "DeepseekForCausalLM": DeepseekForCausalLM
 }
 
@@ -29,5 +27,4 @@ model_attr_map = {
     "DEFAULT": ModelAttr(),
     "BailingForCausalLM": ModelAttr(emb_name='model.word_embeddings'),
     "BailingMoeForCausalLM": ModelAttr(emb_name='model.word_embeddings'),
-    "GLMForCausalLM": ModelAttr(emb_name='glm.word_embeddings', layer_name='glm.transformer.layers', norm_name='glm.transformer.final_layernorm')
 }
