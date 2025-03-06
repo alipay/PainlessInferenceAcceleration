@@ -34,7 +34,7 @@ Additionally, we have developed an attention kernel, termed SegmentAttention, to
 - Chunk prefill 
 - Quantization techniques utilizing FP8 and INT8 formats
 - Inference of multi-modal models
-- Stream-based inference
+- Streaming inference
 - PPL (Perplexity) evaluation
 - Sampling methods
 - Multi-node inference(experimental)
