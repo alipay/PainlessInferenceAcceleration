@@ -15,7 +15,9 @@
 
 ## *News or Update* 🔥
 
-- [2025/03] We release our throughput-oriented inference framework [`FLOOD`](./flood/README.md).
+- [2025/03] We upgrade our inference framework `LOOKAHEAD` to [`FLOOD`](./flood/README.md).
+
+- [2024/05] We release the code of [`IPaD`](./ipad/README.md).
 
 - [2024/01] We support all models of baichuan family (Baichuan-7b & 13b, Baichuan2-7b & 13b) for lookahead.
 
@@ -28,15 +30,16 @@
 
 ## Introduction
 
-Our repo, PIA (short for Painless Inference Acceleration), is designed for LLM inference and currently contains three key works:
+Our repo, PIA (short for Painless Inference Acceleration), is designed for LLM inference, and currently contains three key features:
 
-- [`FLOOD`](./flood/README.md): It employs pure pipeline parallelism to enhance inference throughput, thereby reducing communication costs typically associated with tensor parallelism. 
+- [`FLOOD`](./flood/README.md): It employs pure pipeline parallelism to enhance inference throughput, thereby reducing communication costs typically associated with tensor parallelism. `FLOOD` is designed as the successor to our previous framework, `LOOKAHEAD`, in order to achieve optimal performance across both small and large batch sizes.
 
 - [`LOOKAHEAD`](./lookahead/README.md): It uses an on-the-fly trie-tree cache to prepare hierarchical multi-branch drafts, without the demand for assist models (e.g., speculative decoding) or additional head training (e.g., block decoding). 
-With the efficient hierarchical structure, we can lookahead tens fo branches, therefore significantly improve generated tokens in a forward pass.
+With the efficient hierarchical structure, we can lookahead tens of branches, therefore significantly improve generated token count in a forward pass. It is important to note that `LOOKAHEAD` is fully based on `transformers`, which is inefficient for serving large models. Consequently, we have updated `LOOKAHEAD` to `FLOOD` and will maintain only minimal support for `LOOKAHEAD`.
 
 - [`IPAD`](./ipad/README.md): It applies iterative pruning and distillation techniques to reduce the model size.
 
+Other features, including quantization, KV cache sparsification, will release soon. 
 
 ## Citations
 ```
