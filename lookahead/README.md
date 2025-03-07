@@ -50,10 +50,6 @@ ISSUE 4. Qwen model may generate slightly different responses with lookahead whe
 
 <del> TODO1: Support the latest version  [🤗 transformers](https://github.com/huggingface/transformers) ]. Currently it's based on 4.30.2. </del>
 
-TODO2: Integrate our work [FastCoT](https://arxiv.org/pdf/2311.08263.pdf)
-
-TODO3: Optimize batch inference implementation with flash-attention.
-
 
 ## Performance Comparison
 
