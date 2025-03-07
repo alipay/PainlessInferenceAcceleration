@@ -1,0 +1,13 @@
+#!/bin/bash
+read -r line # Ignore first argument
+
+# Nothing to push, simply exit.
+if [[ -z $line ]]; then
+  exit 0
+fi
+
+stdInArgs=($line)
+localRef=${stdInArgs[1]}
+remoteRef=${stdInArgs[3]}
+exec </dev/tty
+$HOME/.git-pre-push-hook/git-pre-push-hook $2 $localRef $remoteRef
