@@ -18,11 +18,11 @@ random.seed(7)
 if __name__ == '__main__':
     mp.set_start_method('spawn', force=True)
 
-    model_path = 'your/model/path'
+    model_path = '/mntnlp/common_base_model/Llama-3.1-8B-Instruct'
     # reqs = Reader.read_fix_dataset(model_path, max_count=1, output_length=100)
 
-    reqs = Reader.read_dummy_dataset(max_count=10000, input_length=512,
-                                     output_length=512, flunc=0.1)
+    reqs = Reader.read_dummy_dataset(max_count=10000, input_length=128,
+                                     output_length=128, flunc=0.1)
 
     # data_path = 'your/path/ShareGPT_V3_unfiltered_cleaned_split.json'
     # reqs = Reader.read_sharegpt_dataset(data_path, model_path, max_count=10000)
@@ -66,7 +66,7 @@ if __name__ == '__main__':
     # do benchmark
     print(
         f'\n*********  start benchmark:{time.time() % 1000:.3f}  ***********\n')
-    for i, req in enumerate(worker.stream_generate(reqs,
+    for i, req in enumerate(worker.request_stream_generate(reqs,
                                                    input_queue,
                                                    output_queues,
                                                    print_count=0)):

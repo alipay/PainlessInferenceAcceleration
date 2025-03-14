@@ -20,9 +20,8 @@ random.seed(7)
 if __name__ == '__main__':
     mp.set_start_method('spawn', force=True)
 
-    model_path = '/mntnlp/common_base_model/Qwen__Qwen2.5-7B-Instruct'
+    model_path = '/mntnlp/common_base_model/Llama-3.1-8B-Instruct'
 
-    # reqs = [Request(0, input_text='tell me a joke.', output_length=32)]  
     reqs = [Request(0, input_text='tell me a joke.', output_length=64),
             Request(1, input_text='make me laugh.', output_length=64)]
 

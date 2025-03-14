@@ -920,7 +920,7 @@ def seg_attn_fwd(q, k, v, meta, causal=False):
     TOKEN = BLOCK_M // GROUP
     num_m_block = (meta.max_q_length - 1) // TOKEN + 1
     num_warps = 8
-    num_stages = 2 if sm == 89 or meta.mask is not None else 3
+    num_stages = 2 if 80 < sm <= 89 or meta.mask is not None else 3
     grid = lambda META: (batch, kv_heads, num_m_block)
 
     if SINGLE:
