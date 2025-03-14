@@ -62,7 +62,6 @@ pip-delete-this-directory.txt
 *.pyc
 *.json 
 *.jsonl
-*.txt
 *_ignore.py
 *.xml
 *.iml
