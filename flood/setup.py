@@ -153,7 +153,7 @@ ext_modules.append(
 setup(
     name="flood",
     version=__version__,
-    license="CC-BY-4.0",
+    license="MIT",
     license_files=("LICENSE",),
     description="Flood Inference Framework",
     URL="http://gitlab.alibaba-inc.com/infer/framework.git",

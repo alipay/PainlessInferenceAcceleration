@@ -171,7 +171,10 @@ class LlamaAttention(torch.nn.Module):
 
         batch_meta_info = kwargs['batch_meta_info']
 
-        self.rope(query_states, key_states, batch_meta_info.q_offsets, batch_meta_info.pids)
+        self.rope(query_states, 
+                  key_states, 
+                  batch_meta_info.q_offsets if batch_meta_info.draft_offsets is None else batch_meta_info.draft_offsets, 
+                  batch_meta_info.pids)
 
         attn_output = self.attention(query_states, key_states, value_states, 
                                      batch_meta_info, past_key_value)
@@ -375,11 +378,15 @@ class LlamaForCausalLM(PreTrainedModel):
                     if self.rank == self.world_size - 1 and hidden_states is not None:
                         hidden_states = self.model.norm(hidden_states)
                         logits = self.lm_head(hidden_states)
-                        outputs = self.sampler(logits, batch_meta_info=batch_meta_info)
+                        outputs = self.sampler(logits, batch_meta_info)  # returned batch_meta_info
                     else:
                         outputs = hidden_states
                 stream.synchronize()
 
         sync_layers[-1]()
+
+        # TODO: adapt for multi-node serving
+        if batch_meta_info.mode == 2:
+            batch_meta_info.spec.update_cache(batch_meta_info.cache_src_indices, batch_meta_info.cache_dst_indices, past_key_values)
 
         return outputs

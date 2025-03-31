@@ -36,6 +36,14 @@ class Req:
     def size_of_segs(self):
         return sum([x[1] - x[0] for x in self.segs])
 
+    def iterate_target(self):
+        index = 0
+        for i, target in enumerate(self.target_ids):
+            if index + self.input_length <= self.done < index + self.input_length + len(target):
+                offset = self.done - index - self.input_length
+                return i, offset, target[offset:]
+            index += len(target)
+        return None, None, None
 
 class Request:
     def __init__(self, rid, input_text=None, input_ids=None, output_text=None,

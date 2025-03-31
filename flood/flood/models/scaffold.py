@@ -598,6 +598,10 @@ class {self.model_name}ForCausalLM(PreTrainedModel):
 
         sync_layers[-1]()
 
+        # TODO: adapt for multi-node serving
+        if batch_meta_info.mode == 2:
+            batch_meta_info.spec.update_cache(batch_meta_info.cache_src_indices, batch_meta_info.cache_dst_indices, past_key_values)
+
         return outputs
 """
         return line

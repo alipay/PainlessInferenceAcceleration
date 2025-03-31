@@ -10,7 +10,7 @@ import time
 
 import torch.multiprocessing as mp
 
-from flood.common.dist_llm import DistLLM
+from flood.facade.dist_llm import DistLLM
 from flood.utils.request import Request
 
 random.seed(7)

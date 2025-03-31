@@ -7,7 +7,7 @@ import random
 
 import torch.multiprocessing as mp
 
-from flood.common.llm import LLM
+from flood.facade.llm import LLM
 from flood.utils.request import Request as FloodRequest
 
 random.seed(7)

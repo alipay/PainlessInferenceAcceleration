@@ -38,7 +38,7 @@ def sample_from_logit_kernel(
                      other=-10000.0)
     values = values / t
 
-    others = tl.full((1,), 0.0, dtype=probs.dtype)
+    others = tl.full((1,), 0.0, dtype=values.dtype)
 
     max_values = tl.max(values)
     exps = tl.exp(values - max_values)
@@ -66,6 +66,10 @@ def sample_from_logit_kernel(
                     tl.store(outputs + bid, token_id)
                     stop = True
             acc += prob
+
+    if not stop:
+        token_id = tl.load(topk_indices + bid * max_top_k)
+        tl.store(outputs + bid, token_id)
 
 
 def sample_from_logit(logits, temperature, top_k, top_p, min_p, max_top_k):
