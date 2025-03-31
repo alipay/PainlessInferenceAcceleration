@@ -24,6 +24,7 @@ from transformers import AutoTokenizer
 
 from flood.layers.linear import NativeLinear
 from flood.layers.sync import TaskSyncLayer
+from flood.utils.speculative import Lookahead
 from flood.utils.batch import Batch, Slot
 from flood.utils.cache import SegmentCache
 from flood.utils.reader import Reader
@@ -32,10 +33,8 @@ from flood.models import model_class_map, model_attr_map
 
 random.seed(7)
 # os.environ['CUDA_LAUNCH_BLOCKING']='1'
-# os.environ["PYTORCH_NO_CUDA_MEMORY_CACHING"] = '1'
-# os.environ["PYTORCH_USE_CUDA_DSA"] = "1"
-# os.environ['CUDA_VISIBLE_DEVICES'] = '4,5'
-# os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'expandable_segments:True'
+
+
 os.environ['TOKENIZERS_PARALLELISM'] = 'false'
 
 
@@ -241,9 +240,16 @@ class LLM():
             self.cache_size = cache_size
         self.cache = self.init_kv_cache(self.cache_size, self.cache_dtype)
 
-        self.cuda_sm_count = torch.cuda.get_device_properties(
-            0).multi_processor_count
-
+        if self.spec_algo == 'lookahead':
+            self.branch_length = 4
+            self.max_retrieve_count = 4
+            self.spec_buf = self.branch_length * self.max_retrieve_count
+            self.spec = Lookahead(table_size=2 ** 24,
+                                  branch_count=8*self.max_retrieve_count,
+                                  branch_length=self.branch_length,
+                                  vocab_size=self.model.vocab_size)
+        else:
+            self.spec_buf = 0
 
     def load_model(self, model_path, device_list, n_stage):
         ts = time.time()
@@ -468,8 +474,8 @@ class LLM():
         fails = []
         chunks = []
         waits = []
+        options = []
         step = 0
-        # input_device = torch.device(0)
         input_device = torch.device('cpu')
         fe = None
         if self.embedding_dir is not None:
@@ -477,7 +483,7 @@ class LLM():
         while True:
 
             # both empty, wait
-            input_empty = input_queue.empty() and fail_sample_count.value == 10 ** self.n_proc
+            input_empty = input_queue.empty() and fail_sample_count.value == 10 ** self.n_proc  and len(chunks) == 0 and len(options) == 0
             working_empty = working_queue.empty() and len(waits) == 0
             if input_empty and working_empty:
                 time.sleep(0.1)
@@ -536,6 +542,27 @@ class LLM():
                             update_chunks.append(req)
                     chunks = update_chunks
 
+                if len(options) > 0:
+                    update_options = []
+                    for req in options:
+                        # prefill must have be done 
+                        gap = req.done - req.input_length 
+                        assert gap >= 0
+                        target = req.iterate_target()[2]
+                        assert target is not None
+                        n_token = len(target)
+                        if n_tokens < chunk_size:
+                            if n_tokens + n_token <= chunk_size:
+                                n_tokens += n_token
+                                req.todo = n_token
+                            else:
+                                todo = chunk_size - n_tokens
+                                n_tokens += todo
+                                req.todo = todo
+                            reqs.append(req)
+                        else:
+                            update_options.append(req)
+                    options = update_options
                 if n_tokens < chunk_size and len(fails) > 0:
                     update_fails = []
                     for req in fails:
@@ -563,6 +590,8 @@ class LLM():
                         except:
                             break
                         # assert req.done == 0
+                        if self.spec_algo == 'lookahead':
+                            self.spec.update_state(req.input_ids)
                         n_token = req.input_length
                         if n_tokens + n_token <= chunk_size:
                             n_tokens += n_token
@@ -589,6 +618,7 @@ class LLM():
                                                allocate_rate=self.slot_first_alloc_rate,
                                                fully_alloc_under=self.slot_fully_alloc_under,
                                                cache_size=self.cache_size,
+                                               buffer=self.spec_buf,
                                                embeddings=embs)
 
                 if batch.batch_size > 0:
@@ -606,7 +636,7 @@ class LLM():
                     print(
                         f'******** No slots available! task:{task_id} pid:{os.getpid()} dbs:{dbs} ' \
                         f'ips:{input_queue.qsize()} counts:{counts.value} state:{state.value} ' \
-                        f'size:{sizes} {slot_stat} ********')
+                        f'size:{sizes} slots:{slot_stat} ********')
                     for req in reqs:
                         if req.done == 0:
                             fails.append(req)
@@ -644,7 +674,7 @@ class LLM():
                         assert req.input_length + len(
                             req.output_ids) >= req.size_of_segs()
                         slot_size = ((req.input_length +
-                                      req.output_length - 1) // 16 + 1) * 16
+                                      req.output_length - 1  + self.spec_buf) // 16 + 1) * 16
                         extend_length = slot_size - (
                                 req.segs[-1][1] - req.segs[-1][0])
                         old_segs = copy.deepcopy(req.segs)
@@ -675,14 +705,24 @@ class LLM():
                     time.sleep(0.001)
                     continue
 
-                batch = Batch.decoding_batching(reqs, device=input_device)
+                if any([len(x.segs) > 1 for x in reqs]):
+                    pass
+                if self.spec_algo == 'lookahead':
+                    # TODO: tune the params with different batch size
+                    batch = Batch.lookahead_batching(reqs,
+                                                     self.spec,
+                                                     device=input_device,
+                                                     retrieve_length=4,
+                                                     retrieve_count=4)
+                else:
+                    batch = Batch.decoding_batching(reqs, device=input_device)
                 task_type = 'decode'
 
             te = time.time()
             batching_time = te - ts
 
             ts = te
-            next_token_id_list = self.model.forward(input_ids=batch.input_ids,
+            self.model.forward(input_ids=batch.input_ids,
                                                     position_ids=batch.position_ids,
                                                     past_key_values=self.cache,
                                                     batch_meta_info=batch,
@@ -694,34 +734,48 @@ class LLM():
             forward_time = te - ts
             ts = te
 
-            for i, req in enumerate(reqs):
+            for i, req in enumerate(batch.reqs):
                 if req.todo > 0 and req.done + req.todo < req.input_length:
                     req.done += req.todo
                     req.todo = 0
                     chunks.append(req)
                 else:
-                    next_token_id = next_token_id_list[i]
-                    if isinstance(next_token_id, list):
-                        if req.target_ids is not None:  # PPL
-                            req.output_ids.append(next_token_id)
-                        else:  # spec decoding
-                            req.output_ids.extend(next_token_id)
-                    else:  # decode
-                        req.output_ids.append(next_token_id)
                     # reduce pickle cost
                     if task_type == 'prefill':
                         req.input_id = []
 
-                    if (len(req.output_ids) >= req.output_length or
-                            next_token_id in self.eos_token_id):
-                        output_queue.put(req)
-                        Batch.recycle(slots, req.segs)
-                        counts.value -= 1
-                    elif req.input_length + len(
-                            req.output_ids) >= req.size_of_segs():
-                        waits.append(req)
+                    if req.target_ids is None:
+                        if len(req.output_ids) >= req.output_length or req.output_ids[-1] in self.eos_token_id:
+                            output_queue.put(req)
+                            if self.spec_algo == 'lookahead':
+                                self.spec.update_state(req.output_ids)
+                            Batch.recycle(slots, req.segs)
+                            counts.value -= 1
+                        elif req.input_length + len(
+                                req.output_ids) >= req.size_of_segs():
+                            waits.append(req)
+                        else:
+                            working_queue.put(req)
                     else:
-                        working_queue.put(req)
+                        if isinstance(req.target_ids, list):
+                            if req.todo == 0: # not chunked
+                                req.done = req.input_length 
+                                options.append(req)
+                            else:  # chunked
+                                if req.done + req.todo < req.input_length + sum([len(x) for x in req.target_ids]):  # unfinished
+                                    req.done += req.todo
+                                    req.todo = 0
+                                    options.append(req)
+                                else:
+                                    output_queue.put(req)
+                                    Batch.recycle(slots, req.segs)
+                                    counts.value -= 1
+                        elif len(req.output_ids) >= 1:
+                            output_queue.put(req)
+                            Batch.recycle(slots, req.segs)
+                            counts.value -= 1
+                        else:
+                            working_queue.put(req)
 
             LLM.update_digit(fail_sample_count, task_id + 1,
                              len(fails) + len(chunks))
@@ -733,8 +787,7 @@ class LLM():
                 wks = working_queue.qsize()
                 fail_str = f'{str(fail_sample_count.value)[1:]}'
                 tokens = batch.token_count
-                bs_str = f'{tokens}/{batch.batch_size}' \
-                    if batch.mode == 0 else f'{dbs}/{batch.batch_size}'
+                bs_str = f'{batch.batch_size}/{tokens}'
                 times = (f'{batching_time * 1000:.1f}/'
                          f'{forward_time * 1000:.1f}/{recycle_time * 1000:.1f}')
                 print(
@@ -1524,7 +1577,7 @@ class LLM():
 
     @staticmethod
     def log_mem():
-        free_memory, total_memory = torch.cuda.mem_get_info(torch.device(0))
+        free_memory, total_memory = torch.cuda.mem_get_info(torch.device(i))
         used_memory = total_memory - free_memory
         print(
             f"pid:{os.getpid() % 100} used:{used_memory / 2 ** 30:.2f}GiB "

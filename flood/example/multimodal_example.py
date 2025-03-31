@@ -8,7 +8,7 @@ import time
 
 import torch.multiprocessing as mp
 
-from flood.common.llm import LLM
+from flood.facade.llm import LLM
 from flood.utils.reader import Reader
 
 random.seed(7)
@@ -19,7 +19,7 @@ if __name__ == '__main__':
     model_path = '/mntnlp/common_base_model/Qwen__Qwen2.5-7B-Instruct'
 
     # read prompt
-    reqs = Reader.read_dummy_dataset(model_path, max_count=1000,
+    reqs = Reader.read_dummy_dataset(max_count=1000,
                                      input_length=500, output_length=200,
                                      flunc=0.1)
     if len(reqs) == 0:

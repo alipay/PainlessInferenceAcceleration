@@ -29,17 +29,16 @@ class SegmentCache(Cache):
             The default `dtype` to use when initializing the layer.
     """
 
-    def __init__(self, max_token: int, num_layers: int = 32, num_heads=64,
+    def __init__(self, max_token: int, num_layers: int = 32, 
                  num_key_value_heads: int = 8, head_dim: int = 128, dtype=None,
                  devices=()) -> None:
         super().__init__()
         self.max_token = max_token
         self.num_layers = num_layers
-        self.num_heads = num_heads
         self.head_dim = head_dim
 
-        self.dtype = dtype if dtype is not None else torch.float16
         self.num_key_value_heads = num_key_value_heads
+        self.dtype = dtype
 
         self.key_cache: List[torch.Tensor] = []
         self.value_cache: List[torch.Tensor] = []

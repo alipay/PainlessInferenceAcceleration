@@ -167,11 +167,12 @@ class DistLLM(LLM):
         input_device = torch.device('cpu')
         while True:
             comm_device = None
+            # only support two nodes currently
             if self.rank > 0:
                 batch = Batch()
                 hidden_states = batch.recv(src=self.rank - 1, group=group)
                 ts_ = time.time()
-                next_token_id_list = self.model.forward(
+                hidden_states = self.model.forward(
                     input_ids=batch.input_ids,
                     hidden_states=hidden_states,
                     position_ids=batch.position_ids,
@@ -184,12 +185,12 @@ class DistLLM(LLM):
                 if self.debug:
                     modes = 'prefill' if batch.mode == 0 else 'decode'
                     print(
-                        f'rank:{self.rank} task:{task_id} {modes} 
-                        token:{batch.token_count} time:{(te_ - ts_) * 1000:.2f}ms')
+                        f'rank:{self.rank} task:{task_id} {modes} ' \
+                        f'token:{batch.token_count} time:{(te_ - ts_) * 1000:.2f}ms')
 
                 if self.rank == self.world_size - 1:
                     dist.send_object_list(
-                        [[batch.mode, batch.reqs, next_token_id_list]], dst=0,
+                        [[batch.mode, batch.reqs]], dst=0,
                         group=group, device=comm_device)
                 continue
 
@@ -390,7 +391,7 @@ class DistLLM(LLM):
             batching_time = te - ts
 
             ts = time.time()
-            next_token_id_list = self.model.forward(input_ids=batch.input_ids,
+            hidden_states = self.model.forward(input_ids=batch.input_ids,
                                                     position_ids=batch.position_ids,
                                                     past_key_values=self.cache,
                                                     batch_meta_info=batch,
@@ -402,8 +403,7 @@ class DistLLM(LLM):
             ts = time.time()
 
             if self.rank < self.world_size - 1:
-                hs = next_token_id_list
-                batch.send(hs, dst=self.rank + 1, group=group)
+                batch.send(hidden_states, dst=self.rank + 1, group=group)
 
             if self.rank == 0:
                 objects = [None]
@@ -412,9 +412,7 @@ class DistLLM(LLM):
                 objects = objects[0]
                 mode = objects[0]
                 reqs = objects[1]
-                next_token_id_list = objects[2]
                 for i, req in enumerate(reqs):
-                    next_token_id = next_token_id_list[i]
                     req = reqs[i]
                     if req.todo > 0 and req.done + req.todo < req.input_length:
                         req.done += req.todo
