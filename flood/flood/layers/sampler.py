@@ -5,7 +5,6 @@ Copyright (c) Ant Financial Service Group and its affiliates.
 
 import torch
 
-from flood.ops.draft import verify_draft, update_draft_cache
 from flood.ops.sample import sample_from_logit
 
 
@@ -30,6 +29,8 @@ class Sampler(torch.nn.Module):
                                               next_ids,
                                               batch_meta_info=batch_meta_info)
             output_ids = [[y for y in x if y!=-1] for x in output_ids.tolist()]
+            # accept_counts = [len(x) for x in output_ids]
+            # print(f'{accept_counts=}')
             for i, req in enumerate(reqs):
                 req.output_ids.extend(output_ids[i])
             # print(f'{output_ids=} {cache_src_indices=} {cache_dst_indices=}')

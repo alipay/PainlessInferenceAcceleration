@@ -327,7 +327,6 @@ class LlamaForCausalLM(PreTrainedModel):
             print('patch lm_head')            
             self.lm_head.patch()
 
-
     @torch.inference_mode()
     def forward(
         self,

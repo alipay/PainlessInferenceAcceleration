@@ -356,7 +356,10 @@ class {self.model_name}Attention(torch.nn.Module):
 
         batch_meta_info = kwargs['batch_meta_info']
 
-        self.rope(query_states, key_states, batch_meta_info.q_offsets, batch_meta_info.pids)
+        self.rope(query_states, 
+                  key_states, 
+                  batch_meta_info.q_offsets if batch_meta_info.draft_offsets is None else batch_meta_info.draft_offsets, 
+                  batch_meta_info.pids)
 
         attn_output = self.attention(query_states, key_states, value_states, 
                                      batch_meta_info, past_key_value)

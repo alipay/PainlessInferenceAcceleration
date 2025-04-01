@@ -6,14 +6,18 @@ Copyright (c) Ant Financial Service Group and its affiliates.
 import os
 
 os.environ['TOKENIZERS_PARALLELISM'] = 'false'
+# os.environ['CUDA_LAUNCH_BLOCKING']='1'
+
 
 import random
 import time
-
+import torch
 import torch.multiprocessing as mp
 
+from transformers import AutoTokenizer
 from flood.facade.llm import LLM
 from flood.utils.request import Request
+from flood.utils.reader import Reader
 
 random.seed(7)
 
@@ -21,16 +25,24 @@ if __name__ == '__main__':
     mp.set_start_method('spawn', force=True)
 
     # model_path = '/mntnlp/common_base_model/Llama-3.1-8B-Instruct'
-    model_path = '/mntnlp/nanxiao/model'
-
-    reqs = [Request(0, input_text='tell me a joke.', output_length=64),
-            Request(1, input_text='make me laugh.', output_length=64)]
+    model_path = '/mntnlp/common_base_model/Qwen__Qwen2.5-14B-Instruct'
+    # model_path = '/mntnlp/nanxiao/model'
+    
+    # without template
+    reqs = [
+            Request(0, input_text='tell me a joke.', output_length=512),
+            # Request(1, input_text='make me laugh.', output_length=512)
+            ]
+    # with template
+    # reqs = Reader.read_fix_dataset(model_path, prompts=['每月销售10万，盈利7000元，需要缴纳那些税'], output_length=512)
 
     worker = LLM(model_path,
                  n_stage=1,  # gpus
                  n_proc=1,
+                 model_dtype=torch.float8_e4m3fn,
+                 cache_size=0.8,
                  eos_token_id=None,
-                 debug=True,
+                 debug=False,
                  spec_algo = 'lookahead',
                  output_file_name='tmp.jsonl',
                  output_file_mode='w+',
@@ -43,11 +55,8 @@ if __name__ == '__main__':
     # do benchmark
     print(
         f'\n**********  start benchmark:{time.time() % 1000:.3f}  **********\n')
-    responses = worker.generate(reqs,
-                                input_queue,
-                                output_queues,
-                                print_count=10)
-    responses = worker.generate(reqs,
-                                input_queue,
-                                output_queues,
-                                print_count=10)
+    for _ in range(10):
+        responses = worker.generate(reqs,
+                                    input_queue,
+                                    output_queues,
+                                    print_count=10)
