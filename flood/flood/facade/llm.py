@@ -32,11 +32,7 @@ from flood.utils.request import Req, Request
 from flood.models import model_class_map, model_attr_map
 
 random.seed(7)
-# os.environ['CUDA_LAUNCH_BLOCKING']='1'
-
-
 os.environ['TOKENIZERS_PARALLELISM'] = 'false'
-
 
 
 class OutputQueue:
@@ -241,8 +237,8 @@ class LLM():
         self.cache = self.init_kv_cache(self.cache_size, self.cache_dtype)
 
         if self.spec_algo == 'lookahead':
-            self.branch_length = 4
-            self.max_retrieve_count = 4
+            self.branch_length = 8
+            self.max_retrieve_count = 2
             self.spec_buf = self.branch_length * self.max_retrieve_count
             self.spec = Lookahead(table_size=2 ** 24,
                                   branch_count=8*self.max_retrieve_count,
@@ -485,8 +481,8 @@ class LLM():
             # both empty, wait
             input_empty = input_queue.empty() and fail_sample_count.value == 10 ** self.n_proc  and len(chunks) == 0 and len(options) == 0
             working_empty = working_queue.empty() and len(waits) == 0
-            if input_empty and working_empty:
-                time.sleep(0.1)
+            if input_empty and working_empty and task_id > 0:
+                time.sleep(0.001)
                 continue
 
             task_type = None
@@ -712,8 +708,7 @@ class LLM():
                     batch = Batch.lookahead_batching(reqs,
                                                      self.spec,
                                                      device=input_device,
-                                                     retrieve_length=4,
-                                                     retrieve_count=4)
+                                                     retrieve_count=self.max_retrieve_count)
                 else:
                     batch = Batch.decoding_batching(reqs, device=input_device)
                 task_type = 'decode'
@@ -745,7 +740,15 @@ class LLM():
                         req.input_id = []
 
                     if req.target_ids is None:
-                        if len(req.output_ids) >= req.output_length or req.output_ids[-1] in self.eos_token_id:
+                        if len(req.output_ids) >= req.output_length or \
+                              self.spec_algo is None and req.output_ids[-1] in self.eos_token_id or \
+                              self.spec_algo is not None and any([x in self.eos_token_id for x in req.output_ids[-self.branch_length-1:]]):
+                            if self.spec_algo is not None:
+                                output_ids = req.output_ids
+                                for j in range(max(-self.branch_length-1,-len(output_ids)),-1):
+                                    if output_ids[j] in self.eos_token_id:
+                                        req.output_ids = output_ids[:j+1]
+                                        break
                             output_queue.put(req)
                             if self.spec_algo == 'lookahead':
                                 self.spec.update_state(req.output_ids)

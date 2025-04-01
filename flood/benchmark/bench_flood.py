@@ -10,7 +10,7 @@ import time
 import torch
 import torch.multiprocessing as mp
 
-from flood.common.llm import LLM
+from flood.facade.llm import LLM
 from flood.utils.reader import Reader
 
 random.seed(7)

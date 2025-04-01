@@ -29,6 +29,10 @@ class Lookahead(Spec):
                  vocab_size=126464,
                  device=torch.device('cuda:0')):
         self.table_size = table_size
+
+        assert 2 ** (int(round(math.log2(branch_length)))) == branch_length
+        assert 2 ** (int(round(math.log2(branch_count)))) == branch_count
+
         self.branch_length = branch_length
         self.branch_count = branch_count
         self.vocab_size = vocab_size
@@ -74,7 +78,7 @@ class Lookahead(Spec):
                                                         masks, 
                                                         bs, 
                                                         meta.retrieve_count, 
-                                                        meta.retrieve_length)
+                                                        self.branch_length)
         return output_ids, cache_src_indices, cache_dst_indces
 
     def update_cache(self, src_idx, dst_idx, caches, **kwargs):

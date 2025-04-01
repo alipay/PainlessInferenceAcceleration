@@ -70,11 +70,9 @@ class Batch:
                  reqs=None,
                  qls=None,
                  kls=None,
-                 retrieve_count=4,
-                 retrieve_length=4,
                  spec=None,
-                 caches=None,
-                 draft_offsets=None
+                 draft_offsets=None,
+                 retrieve_count=None
                  ):
         self.batch_size = batch_size
         self.token_count = token_count
@@ -99,11 +97,9 @@ class Batch:
         self.mask = mask
         self.qls = qls
         self.kls = kls
-        self.retrieve_count = retrieve_count
-        self.retrieve_length = retrieve_length
         self.spec = spec 
-        self.caches = caches
         self.draft_offsets = draft_offsets
+        self.retrieve_count = retrieve_count
 
     @staticmethod
     def prefill_batching(reqs,
@@ -378,9 +374,7 @@ class Batch:
     def lookahead_batching(reqs, 
                            spec, 
                            device=torch.device(0), 
-                           retrieve_length=4,
                            retrieve_count=4):
-        assert 2 ** (int(round(math.log2(retrieve_length)))) == retrieve_length
 
         bs = len(reqs)
 
@@ -394,11 +388,10 @@ class Batch:
                                          spec.table_size,
                                          spec.branch_length,
                                          spec.branch_count,
-                                         retrieve_count,
-                                         retrieve_length)
+                                         retrieve_count)
         input_ids = input_ids.view(-1)
 
-        l = retrieve_count * retrieve_length
+        l = retrieve_count * spec.branch_length
         # max_seg = max([len(x.segs) for x in reqs])
         samplings = []
         qls = [l] * bs
@@ -406,7 +399,7 @@ class Batch:
         max_seg = max([len(x.segs) for x in reqs])
         position_ids = []
         pids = []
-        draft_offsets = [0]
+        draft_offsets = [0]  # used for rope
         cache_indices = []
         k_lengths = []
         k_offsets = []
@@ -417,7 +410,7 @@ class Batch:
             position_ids.extend(
                 [s - 1 + j for j in range(l)])
             pids.extend([s] + [s+1]*(retrieve_count-1))
-            draft_offsets.extend([i*l+(j+1)*retrieve_length+(0 if j==retrieve_count-1 else 1) for j in range(retrieve_count)])
+            draft_offsets.extend([i*l+(j+1)*spec.branch_length+(0 if j==retrieve_count-1 else 1) for j in range(retrieve_count)])
             if max_seg == 1:
                 k_offsets.append(offset)
                 k_lengths.append(position_ids[-1] + 1)
@@ -448,9 +441,7 @@ class Batch:
 
         kls = k_lengths
         q_lengths = qls
-        q_offsets = l * torch.arange(bs + 1,
-                                                                  dtype=torch.int32,
-                                                                  device=device)
+        q_offsets = l * torch.arange(bs + 1, dtype=torch.int32, device=device)
         k_offsets = torch.tensor(k_offsets, dtype=torch.int32, device=device)
         q_lengths = torch.tensor(q_lengths, dtype=torch.int32, device=device)
         k_lengths = torch.tensor(k_lengths, dtype=torch.int32, device=device)
@@ -489,10 +480,9 @@ class Batch:
                      mask=masks,
                      qls=qls,
                      kls=kls,
-                     retrieve_length=retrieve_length,
-                     retrieve_count=retrieve_count,
                      spec=spec, 
-                     draft_offsets=draft_offsets
+                     draft_offsets=draft_offsets, 
+                     retrieve_count=retrieve_count
                      )
 
 

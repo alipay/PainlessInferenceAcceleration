@@ -47,12 +47,13 @@ class Reader:
         return reqs
 
     @staticmethod
-    def read_fix_dataset(tokenizer_path, max_count=1000, output_length=200):
+    def read_fix_dataset(tokenizer_path, prompts=None, max_count=1000, output_length=200):
         tokenizer = AutoTokenizer.from_pretrained(tokenizer_path, trust_remote_code=True)
-        prompts = ['hello! what is your name?',
-                   'tell me a joke!',
-                   '中国的首都是哪里？',
-                   '杭州在哪里？']
+        if prompts is None:
+            prompts = ['hello! what is your name?',
+                    'tell me a joke!',
+                    '中国的首都是哪里？',
+                    '杭州在哪里？']
         reqs = []
         for i, prompt in enumerate(prompts[:max_count]):
             chat = [{"role": "user", "content": prompt}]

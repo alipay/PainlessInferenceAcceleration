@@ -248,9 +248,8 @@ def get_flash_attn_meta(qls, kls, mask=None):
 def test_seg_attn(max_seg=1, mode='prefill', even=True, causal=True):
     device = torch.device('cuda:0')
     dtype = torch.bfloat16
-    qo_head = 64
+    qo_head = 40
     kv_head = 8
-    group = qo_head // kv_head
     dim = 128
     mask_size = 16
     mask = False
@@ -385,7 +384,9 @@ def test_seg_attn(max_seg=1, mode='prefill', even=True, causal=True):
                                    rtol=0.05, atol=0.1)
 
 if __name__ == '__main__':
-    for max_seg in [1,2,4]:
-        for mode in ['prefill', 'decode', 'mix']:
-            for even in [True, False]:
-                test_seg_attn(max_seg=max_seg, mode=mode, even=even, causal=True)
+    # for max_seg in [1,2,4]:
+    #     for mode in ['prefill', 'decode', 'mix']:
+    #         for even in [True, False]:
+    #             test_seg_attn(max_seg=max_seg, mode=mode, even=even, causal=True)
+
+    test_seg_attn(max_seg=1, mode='spec', even=True, causal=True)

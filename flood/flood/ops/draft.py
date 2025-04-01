@@ -123,14 +123,13 @@ def retrieve_draft_table_kernel(
         freq_table,
         draft_table,
         stride,
-        RETRIEVE_COUNT: tl.constexpr,
-        RETRIEVE_LENGTH: tl.constexpr,
         BRANCH_COUNT: tl.constexpr,
         BRANCH_LENGTH: tl.constexpr,
+        RETRIEVE_COUNT: tl.constexpr,
         SIZE: tl.constexpr
 ):
     bid = tl.program_id(0)
-    indices = tl.arange(0, RETRIEVE_LENGTH)
+    indices = tl.arange(0, BRANCH_LENGTH)
 
     p0 = tl.load(tokens + bid * 2)
     p1 = tl.load(tokens + bid * 2 + 1)
@@ -140,7 +139,7 @@ def retrieve_draft_table_kernel(
     hit = False
     max_retry = 8
     hit_count = 0
-    l = RETRIEVE_COUNT * RETRIEVE_LENGTH
+    l = RETRIEVE_COUNT * BRANCH_LENGTH
     min_freq = 1024.0
     for i in range(max_retry):
         if not hit:
@@ -160,7 +159,7 @@ def retrieve_draft_table_kernel(
                         draft_branch = tl.load(
                             draft_table + (bucket_idx + j) * stride + indices)
                         tl.store(
-                            output_tokens + bid * (l + 1) + 1 + idx * RETRIEVE_LENGTH + indices,
+                            output_tokens + bid * (l + 1) + 1 + idx * BRANCH_LENGTH + indices,
                             draft_branch)
                         idx += 1
                 hit = True
@@ -173,7 +172,7 @@ def retrieve_draft_table_kernel(
                 draft_branch = tl.load(
                     draft_table + (bucket_idx + j) * stride + indices)
                 tl.store(
-                    output_tokens + bid * (l + 1) + 1 + idx * RETRIEVE_LENGTH + indices,
+                    output_tokens + bid * (l + 1) + 1 + idx * BRANCH_LENGTH + indices,
                     draft_branch)
                 idx += 1
 
@@ -184,17 +183,16 @@ def retrieve_draft_table(tokens,
                          table_size=2 ** 16,
                          branch_length=8, 
                          branch_count=8, 
-                         retrieve_count=8, 
-                         retrieve_length=8):
+                         retrieve_count=8):
     # tokens: list of [token_id_0,token_id_1], freq_table:[size]  draft_table: [size, length]
     batch_size = len(tokens)
     device = draft_table.device
     tokens = torch.tensor(tokens, 
                           device=device,
                           dtype=draft_table.dtype)
-    assert retrieve_count <= branch_count and retrieve_length <= branch_length
+    assert retrieve_count <= branch_count and branch_length <= branch_length
     # output mask contains current token 
-    l = retrieve_count * retrieve_length
+    l = retrieve_count * branch_length
     output_tokens = torch.zeros((batch_size, l + 1), 
                                 device=device,
                                 dtype=draft_table.dtype)
@@ -203,12 +201,12 @@ def retrieve_draft_table(tokens,
     output_masks = torch.triu(
         torch.ones((batch_size, l, l), 
                     device=device, 
-                    dtype=torch.uint8),
+                    dtype=torch.int8),
         diagonal=1)
     for i in range(batch_size):
         for j in range(1, retrieve_count):
-            output_masks[i,j * retrieve_length + 1:(j + 1) * retrieve_length + 1,
-            1:j * retrieve_length + 1] = 1
+            output_masks[i,j * branch_length + 1:(j + 1) * branch_length + 1,
+            1:j * branch_length + 1] = 1
     output_masks = output_masks.view(batch_size * l, l)
 
     grid = lambda META: (batch_size,)
@@ -218,10 +216,9 @@ def retrieve_draft_table(tokens,
         freq_table,
         draft_table,
         draft_table.stride(0),
-        RETRIEVE_COUNT=retrieve_count,
-        RETRIEVE_LENGTH=retrieve_length,
         BRANCH_COUNT=branch_count,
         BRANCH_LENGTH=branch_length,
+        RETRIEVE_COUNT=retrieve_count,
         SIZE=table_size,
         num_warps=1,
         num_stages=1
@@ -256,7 +253,7 @@ def verify_draft_kernel(tile_input_ids,
                     if accept > max_accept_count:
                         max_accept_idx = i
                         max_accept_count = accept
-                        tl.debug_barrier()
+                        # tl.debug_barrier()
                         # if bid == 0:
                         #     tl.device_print("max_accept_count",max_accept_count)
                         #     tl.device_print("accept",accept)

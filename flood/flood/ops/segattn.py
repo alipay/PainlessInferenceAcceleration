@@ -338,17 +338,11 @@ def single_seg_mask_attn_kernel(
         acc_o += tl.dot(p, v)
 
     sub_gap = gap - mask_free_step * BLOCK_N
-    mask_ptrs = Mask + bid * MASK_SIZE * MASK_SIZE + mid * TOKEN * MASK_SIZE - sub_gap + (
-                                                                                             tl.arange(
-                                                                                                 0,
-                                                                                                 TOKEN))[
-                                                                                         :,
-                                                                                         None] * MASK_SIZE + offs_n[
-                                                                                                             None,
-                                                                                                             :]
+    mask_ptrs = Mask + bid * MASK_SIZE * MASK_SIZE + \
+             mid * TOKEN * MASK_SIZE - sub_gap + \
+                 (tl.arange(0,TOKEN))[:,None] * MASK_SIZE + offs_n[None,:]
     q_pos = (mid * TOKEN + gap) + q_idx[:, None]
-    for n in range(mask_free_step * BLOCK_N, mid * TOKEN + TOKEN + gap,
-                   BLOCK_N):
+    for n in range(mask_free_step * BLOCK_N, mid * TOKEN + TOKEN + gap, BLOCK_N):
         n = tl.multiple_of(n, BLOCK_N)
         if EVEN_N:
             k = tl.load(k_ptrs + n * stride_k)
@@ -400,6 +394,146 @@ def single_seg_mask_attn_kernel(
     else:
         tl.store(out_ptrs, acc_o,
                  mask=(mid * TOKEN * H + offs_m)[:, None] < max_m_off)
+
+
+
+@triton.jit
+def compatible_single_seg_mask_attn_kernel(
+        Q,
+        K,
+        V,
+        Out,
+        softmax_scale,
+        stride_q,
+        stride_k,
+        stride_o,
+        q_offsets,
+        k_offsets,
+        q_lengths,
+        k_lengths,
+        Mask,
+        MASK_SIZE: tl.constexpr,
+        HEADDIM: tl.constexpr,
+        GROUP: tl.constexpr,
+        TOKEN: tl.constexpr,
+        EVEN_M: tl.constexpr,
+        EVEN_N: tl.constexpr,
+        BLOCK_M: tl.constexpr,
+        BLOCK_N: tl.constexpr,
+):
+    bid = tl.program_id(0)
+    hid = tl.program_id(1)
+    mid = tl.num_programs(2) - tl.program_id(2) - 1
+    seqlen_q = tl.load(q_lengths + bid)
+    if mid * TOKEN >= seqlen_q:
+        return
+    offs_m = tl.arange(0, BLOCK_M)
+    offs_n = tl.arange(0, BLOCK_N)
+    offs_d = tl.arange(0, HEADDIM)
+    q_offset = tl.load(q_offsets + bid)
+    k_offset = tl.load(k_offsets + bid)
+    seqlen_k = tl.load(k_lengths + bid)
+    gap = seqlen_k - seqlen_q
+
+    q_idx = offs_m // GROUP
+    H = stride_q // HEADDIM
+    offs_m = offs_m % GROUP + offs_m // GROUP * H
+    max_m_off = min(seqlen_q * H, (mid + 1) * TOKEN * H)
+
+    q_ptrs = (
+            Q + q_offset * stride_q + mid * TOKEN * stride_q + hid * HEADDIM * GROUP + (
+                offs_m[:, None] * HEADDIM + offs_d[None, :])
+    )
+    k_ptrs = (
+            K + k_offset * stride_k + hid * HEADDIM + (
+                offs_n[:, None] * stride_k + offs_d[None, :])
+    )
+    v_ptrs = (
+            V + k_offset * stride_k + hid * HEADDIM + (
+                offs_n[:, None] * stride_k + offs_d[None, :])
+    )
+
+    lse_i = tl.zeros([BLOCK_M], dtype=tl.float32)
+    acc_o = tl.zeros([BLOCK_M, HEADDIM], dtype=tl.float32)
+
+    if EVEN_M:
+        q = tl.load(q_ptrs)
+    else:
+        q = tl.load(q_ptrs,
+                    mask=(mid * TOKEN * H + offs_m)[:, None] < max_m_off,
+                    other=0.0)
+
+    mask_free_step = gap // BLOCK_N
+    for i in range(0, mask_free_step):
+        n = i * BLOCK_N
+
+        k = tl.load(k_ptrs + n * stride_k)
+        qk = tl.dot(q, tl.trans(k))
+
+        p = tl.exp(qk * softmax_scale)
+
+        lse_i += tl.sum(p, 1)
+
+        v = tl.load(v_ptrs + n * stride_k)
+        p = p.to(v.dtype)
+        acc_o += tl.dot(p, v)
+
+
+    sub_gap = gap - mask_free_step * BLOCK_N
+    mask_ptrs = Mask + bid * MASK_SIZE * MASK_SIZE + \
+             mid * TOKEN * MASK_SIZE - sub_gap + \
+                 (tl.arange(0,BLOCK_M)%(GROUP*TOKEN)//GROUP)[:,None] * MASK_SIZE + offs_n[None,:]
+    q_pos = (mid * TOKEN + gap) + q_idx[:, None]
+    for n in range(mask_free_step * BLOCK_N, mid * TOKEN + TOKEN + gap, BLOCK_N):
+        n = tl.multiple_of(n, BLOCK_N)
+        if EVEN_N:
+            k = tl.load(k_ptrs + n * stride_k)
+        else:
+            k = tl.load(k_ptrs + n * stride_k,
+                        mask=(n + offs_n)[:, None] < seqlen_k, other=0.0)
+        qk = tl.dot(q, tl.trans(k))
+
+        if not EVEN_N:
+            qk += tl.where((n + offs_n)[None, :] < seqlen_k, 0, float("-inf"))
+
+        qk += tl.where(q_pos >= (n + offs_n)[None, :], 0, float("-inf"))
+
+        # mask
+        mask = tl.load(mask_ptrs, mask=(offs_n[None, :] < MASK_SIZE) & (
+                    offs_n[None, :] >= sub_gap), other=0.0)
+        qk = tl.where(mask==0, qk, qk-10000.0)
+
+        p = tl.exp(qk * softmax_scale)
+
+        lse_i += tl.sum(p, 1)
+
+        if EVEN_N:
+            v = tl.load(v_ptrs + n * stride_k)
+        else:
+            v = tl.load(v_ptrs + n * stride_k,
+                        mask=(n + offs_n)[:, None] < seqlen_k, other=0.0)
+        p = p.to(v.dtype)
+        acc_o += tl.dot(p, v)
+
+    acc_o = acc_o / lse_i[:, None]
+
+    H = stride_o // HEADDIM
+    offs_m = tl.arange(0, BLOCK_M)
+    offs_m = offs_m % GROUP + offs_m // GROUP * H
+    max_m_off = min(seqlen_q * H, (mid + 1) * TOKEN * H)
+
+    out_ptrs = (
+            Out
+            + q_offset * stride_o + mid * TOKEN * stride_o + hid * HEADDIM * GROUP + (
+                        offs_m[:, None] * HEADDIM + offs_d[None, :])
+    )
+
+    if EVEN_M:
+        tl.store(out_ptrs, acc_o)
+    else:
+        tl.store(out_ptrs, acc_o,
+                 mask=(mid * TOKEN * H + offs_m)[:, None] < max_m_off)
+
 
 
 """
@@ -905,13 +1039,13 @@ def seg_attn_fwd(q, k, v, meta, causal=False):
     BLOCK_N = 128
 
     EVEN_M = all(
-        [x // BLOCK_M * BLOCK_M == x and BLOCK_M // GROUP * GROUP == BLOCK_M for
+        [x % BLOCK_M == 0 and BLOCK_M % GROUP == 0 for
          x in meta.qls])
     if isinstance(meta.kls[0], (list, tuple)):
         EVEN_N = all(
-            [all([y // BLOCK_N * BLOCK_N == y for y in x]) for x in meta.kls])
+            [all([y % BLOCK_N == 0 for y in x]) for x in meta.kls])
     else:
-        EVEN_N = all([x // BLOCK_N * BLOCK_N == x for x in meta.kls])
+        EVEN_N = all([x % BLOCK_N == 0 for x in meta.kls])
 
     # _CudaDeviceProperties(name='NVIDIA H20', major=9, minor=0, total_memory=97285MB, multi_processor_count=78)
     dp = torch.cuda.get_device_properties(0)
@@ -919,10 +1053,16 @@ def seg_attn_fwd(q, k, v, meta, causal=False):
 
     TOKEN = BLOCK_M // GROUP
     num_m_block = (meta.max_q_length - 1) // TOKEN + 1
-    num_warps = 8
-    num_stages = 2 if 80 < sm <= 89 or meta.mask is not None else 3
+    num_warps = 8  # TODO: only for compatible mode
+    if meta.mask is not None and BLOCK_M % GROUP != 0:
+        num_stages = 1
+    elif meta.mask is not None and BLOCK_M % GROUP == 0:
+        num_stages = 2
+    else:
+        num_stages = 3
+    if 80 < sm <= 89:
+        num_stages = max(1, num_stages - 1)
     grid = lambda META: (batch, kv_heads, num_m_block)
-
     if SINGLE:
         if CAUSAL:
             if meta.mask is None:
@@ -952,7 +1092,8 @@ def seg_attn_fwd(q, k, v, meta, causal=False):
                 return o
 
             else:
-                single_seg_mask_attn_kernel[grid](
+                kernel = single_seg_mask_attn_kernel if BLOCK_M % GROUP == 0 else compatible_single_seg_mask_attn_kernel
+                kernel[grid](
                     q,
                     k,
                     v,
