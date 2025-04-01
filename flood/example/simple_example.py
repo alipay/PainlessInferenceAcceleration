@@ -43,7 +43,7 @@ if __name__ == '__main__':
                  cache_size=0.8,
                  eos_token_id=None,
                  debug=False,
-                 spec_algo = 'lookahead',
+                #  spec_algo = 'lookahead',
                  output_file_name='tmp.jsonl',
                  output_file_mode='w+',
                  logger='example.log')
