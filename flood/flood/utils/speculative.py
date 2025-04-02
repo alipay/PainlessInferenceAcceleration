@@ -45,7 +45,7 @@ class Lookahead(Spec):
         torch._dynamo.mark_static_address(self.freq_table)
         torch._dynamo.mark_static_address(self.draft_table)
 
-    def proposal_draft(self, input_ids, retrieve_count=4, retrieve_length=4, **kwargs):
+    def proposal_draft(self, input_ids, retrieve_count=4, **kwargs):
 
         output_tokens, output_masks = retrieve_draft_table(input_ids, 
                                                            self.freq_table,
@@ -54,7 +54,6 @@ class Lookahead(Spec):
                                                            branch_length=self.branch_length,
                                                            branch_count=self.branch_count,
                                                            retrieve_count=retrieve_count,
-                                                           retrieve_length=retrieve_length,
                                                            vocab=self.vocab_size)
         return output_tokens, output_masks
 

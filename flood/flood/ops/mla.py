@@ -9,6 +9,8 @@ import torch
 import triton
 import triton.language as tl
 
+from flood.utils.benchmark import benchmark_func
+
 
 """
 deepseek R1 MLA kernel
@@ -26,346 +28,210 @@ kv_rope: 64
 
 
 
+def scaled_dot_product_attention(query, key_value):
+    # query:[bs, q_length, 128, 576]
+    # key_vaue: [bs, k_length, 576]
+    _, q_length, _, q_dim = query.size()
+    k_length = key_value.size(1)
+    query = query.float()
+    key = key_value.float()
+    value = key_value[:,:,:512].float()
+    query = query.permute(0,2,1,3)  # [bs, 128, q_length, 576]
+    key = key.unsqueeze(1).permute(0,1,3,2)  # [bs, 1, 576, k_length]
+    value = value.unsqueeze(1)   # [bs, 1, k_length, 512]
+    attn_weight = query @ key / math.sqrt(q_dim)  # [bs, 128, q_length, k_length]
+    mask = torch.tril(torch.ones(q_length, k_length, dtype=torch.float32, device=query.device), k_length-q_length)
+    # print(mask)
+    attn_weight -= 10000*(1-mask)
+    lse = torch.exp(attn_weight).sum(-1).permute(0,2,1)
+    attn_weight = torch.softmax(attn_weight, dim=-1, dtype=torch.float32)
+    output = attn_weight @ value  # [bs, 128, q_length, 512]
+    output = output.permute(0,2,1,3).contiguous()
+    return output, lse
 
 
-
-@triton.jit
-def batch_causal_mla_kernel(
-        Q,
-        K,
-        V,
-        Out,
-        softmax_scale,
-        stride_q,
-        stride_k,
-        stride_o,
-        q_offsets,
-        k_offsets,
-        q_lengths,
-        k_lengths,
-        HEADDIM: tl.constexpr,
-        GROUP: tl.constexpr,
-        HEAD: tl.constexpr,
-        EVEN_M: tl.constexpr,
-        EVEN_N: tl.constexpr,
-        BLOCK_M: tl.constexpr,
-        BLOCK_N: tl.constexpr,
-):
-    bid = tl.program_id(0)
-    hid = tl.program_id(1)
-    mid = tl.program_id(2)
-    seqlen_q = tl.load(q_lengths + bid)
-    TOKEN = BLOCK_M // GROUP
-    if mid * TOKEN >= seqlen_q:
-        return
-    offs_m = tl.arange(0, BLOCK_M)
-    offs_n = tl.arange(0, BLOCK_N)
-    offs_d = tl.arange(0, HEADDIM)
-    q_offset = tl.load(q_offsets + bid)
-    k_offset = tl.load(k_offsets + bid)
-    seqlen_k = tl.load(k_lengths + bid)
-
-    H = stride_q // HEADDIM
-    offs_m = offs_m % GROUP + offs_m // GROUP * H
-    max_m_off = min(seqlen_q, (mid + 1) * TOKEN) * H
-    q_ptrs = (
-            Q + q_offset * stride_q + mid * TOKEN * stride_q + hid * HEADDIM * GROUP + (
-                offs_m[:, None] * HEADDIM + offs_d[None, :])
-    )
-    k_ptrs = (
-            K + k_offset * stride_k + hid * HEADDIM + (
-                offs_n[:, None] * stride_k + offs_d[None, :])
-    )
-    v_ptrs = (
-            V + k_offset * stride_k + hid * HEADDIM + (
-                offs_n[:, None] * stride_k + offs_d[None, :])
-    )
-
-    lse_i = tl.zeros([BLOCK_M], dtype=tl.float32)
-    acc_o = tl.zeros([BLOCK_M, HEADDIM], dtype=tl.float32)
-
-    if EVEN_M:
-        q = tl.load(q_ptrs)
-    else:
-        q = tl.load(q_ptrs,
-                    mask=(mid * TOKEN * H + offs_m)[:, None] < max_m_off,
-                    other=0.0)
-
-    for n in range(0, seqlen_k, BLOCK_N):
-        n = tl.multiple_of(n, BLOCK_N)
-
-        if EVEN_N:
-            k = tl.load(k_ptrs + n * stride_k)
-        else:
-            k = tl.load(k_ptrs + n * stride_k,
-                        mask=(n + offs_n)[:, None] < seqlen_k, other=0.0)
-        qk = tl.dot(q, tl.trans(k))
-        if not EVEN_N:
-            qk += tl.where((n + offs_n)[None, :] < seqlen_k, 0, float("-inf"))
-
-        p = tl.exp(qk * softmax_scale)
-
-        lse_i += tl.sum(p, 1)
-
-        if EVEN_N:
-            v = tl.load(v_ptrs + n * stride_k)
-        else:
-            v = tl.load(v_ptrs + n * stride_k,
-                        mask=(n + offs_n)[:, None] < seqlen_k, other=0.0)
-        p = p.to(v.dtype)
-        acc_o += tl.dot(p, v)
-
-    acc_o = acc_o / lse_i[:, None]
-
-    H = stride_o // HEADDIM
-    offs_m = tl.arange(0, BLOCK_M)
-    offs_m = offs_m % GROUP + offs_m // GROUP * H
-    max_m_off = min(seqlen_q, (mid + 1) * TOKEN) * H
-
-    out_ptrs = (
-            Out
-            + q_offset * stride_o + mid * TOKEN * stride_o + hid * HEADDIM * GROUP + (
-                        offs_m[:, None] * HEADDIM + offs_d[None, :])
-    )
-
-    if EVEN_M:
-        tl.store(out_ptrs, acc_o)
-    else:
-        tl.store(out_ptrs, acc_o,
-                 mask=(mid * TOKEN * H + offs_m)[:, None] < max_m_off)
-
-
-
-def batch_mla_fwd(q, k, v, meta, causal=False):
-    _, qo_heads, d = q.shape
-    _, kv_heads, _ = k.shape
-    batch = meta.batch_size
-    softmax_scale = 1.0 / math.sqrt(d)
-
-    o = torch.empty(q.shape, device=q.device, dtype=q.dtype)
-
-    HEADDIM = d
-
-    GROUP = qo_heads // kv_heads
-    CAUSAL = causal if meta.max_q_length > 1 else False
-    SINGLE = meta.max_seg == 1
-    HEAD = qo_heads
-
-    BLOCK_M = 16 if meta.max_q_length == 1 else 128
-    BLOCK_N = 128
-
-    EVEN_M = all(
-        [x // BLOCK_M * BLOCK_M == x and BLOCK_M // GROUP * GROUP == BLOCK_M for
-         x in meta.qls])
-    if isinstance(meta.kls[0], (list, tuple)):
-        EVEN_N = all(
-            [all([y // BLOCK_N * BLOCK_N == y for y in x]) for x in meta.kls])
-    else:
-        EVEN_N = all([x // BLOCK_N * BLOCK_N == x for x in meta.kls])
-
-    # _CudaDeviceProperties(name='NVIDIA H20', major=9, minor=0, total_memory=97285MB, multi_processor_count=78)
-    dp = torch.cuda.get_device_properties(0)
-    sm = dp.major * 10 + dp.minor
-
-    TOKEN = BLOCK_M // GROUP
-    num_m_block = (meta.max_q_length - 1) // TOKEN + 1
-    num_warps = 8
-    num_stages = 2 if 80 < sm <= 89 or meta.mask is not None else 3
-    grid = lambda META: (batch, kv_heads, num_m_block)
-
-
-    batch_causal_mla_kernel[grid](
-        q,
-        k,
-        v,
-        o,
-        softmax_scale,
-        q.stride(0),
-        k.stride(0),
-        o.stride(0),
-        meta.q_offsets,
-        meta.k_offsets,
-        meta.q_lengths,
-        meta.k_lengths,
-        HEADDIM,
-        GROUP,
-        HEAD,
-        BLOCK_M=BLOCK_M,
-        BLOCK_N=BLOCK_N,
-        EVEN_M=EVEN_M,
-        EVEN_N=EVEN_N,
-        num_warps=num_warps,
-        num_stages=num_stages
-    )
-    return o
+# def scaled_dot_product_attention(query, key_value):
+#     # query:[bs, q_length, 128, 576]
+#     # key_vaue: [bs, k_length, 576]
+#     _, q_length, _, q_dim = query.size()
+#     k_length = key_value.size(1)
+#     query = query.clone()
+#     key = key_value.clone()
+#     value = key_value[:,:,:512].clone()
+#     query = query.permute(0,2,1,3)  # [bs, 128, q_length, 576]
+#     key = key.unsqueeze(1).permute(0,1,3,2)  # [bs, 1, 576, k_length]
+#     value = value.unsqueeze(1)   # [bs, 1, k_length, 512]
+#     attn_weight = query @ key / math.sqrt(q_dim)  # [bs, 128, q_length, k_length]
+#     mask = torch.tril(torch.ones(q_length, k_length, dtype=query.dtype, device=query.device), k_length-q_length)
+#     # print(mask)
+#     attn_weight -= 10000*(1-mask)
+#     lse = torch.exp(attn_weight).sum(-1).permute(0,2,1)
+#     attn_weight = torch.softmax(attn_weight, dim=-1, dtype=torch.float32).to(query.dtype)
+#     output = attn_weight @ value  # [bs, 128, q_length, 512]
+#     output = output.permute(0,2,1,3).contiguous()
+#     return output, lse
 
 
 @triton.jit
-def single_seg_causal_mla_kernel(
+def batch_mla_kernel(
         Q,
-        K,
-        V,
+        KV,
         Out,
+        LSE,
         softmax_scale,
-        stride_q,
-        stride_k,
-        stride_o,
-        q_offsets,
-        k_offsets,
-        q_lengths,
-        k_lengths,
-        HEADDIM: tl.constexpr,
-        GROUP: tl.constexpr,
-        HEAD: tl.constexpr,
-        EVEN_M: tl.constexpr,
-        EVEN_N: tl.constexpr,
-        BLOCK_M: tl.constexpr,
-        BLOCK_N: tl.constexpr,
+        q_length,
+        k_length,
+        BLOCK: tl.constexpr,
+        EVEN: tl.constexpr,
 ):
+    # q: [bs, q_len, 128, 576]
+    # kv: [bs, k_len, 576]
+
     bid = tl.program_id(0)
-    hid = tl.program_id(1)
-    mid = tl.program_id(2)
-    seqlen_q = tl.load(q_lengths + bid)
-    TOKEN = BLOCK_M // GROUP
-    if mid * TOKEN >= seqlen_q:
-        return
-    offs_m = tl.arange(0, BLOCK_M)
-    offs_n = tl.arange(0, BLOCK_N)
-    offs_d = tl.arange(0, HEADDIM)
-    q_offset = tl.load(q_offsets + bid)
-    k_offset = tl.load(k_offsets + bid)
-    seqlen_k = tl.load(k_lengths + bid)
+    mid = tl.program_id(1)
 
-    H = stride_q // HEADDIM
-    offs_m = offs_m % GROUP + offs_m // GROUP * H
-    max_m_off = min(seqlen_q, (mid + 1) * TOKEN) * H
-    q_ptrs = (
-            Q + q_offset * stride_q + mid * TOKEN * stride_q + hid * HEADDIM * GROUP + (
-                offs_m[:, None] * HEADDIM + offs_d[None, :])
+    offs_v = tl.arange(0, 512)
+    offs_p = tl.arange(0, 64)
+    offs_h = tl.arange(0, 128)
+    offs_n = tl.arange(0, BLOCK)
+
+    q0_ptrs = (
+            Q + bid * q_length * 128 * 576 + mid * 128 * 576 + (
+                offs_h[:, None] * 576 + offs_v[None, :])
     )
-    k_ptrs = (
-            K + k_offset * stride_k + hid * HEADDIM + (
-                offs_n[:, None] * stride_k + offs_d[None, :])
+    q1_ptrs = (
+            Q + bid * q_length * 128 * 576 + mid * 128 * 576 + 512 + (
+                offs_h[:, None] * 576 + offs_p[None, :])
     )
-    v_ptrs = (
-            V + k_offset * stride_k + hid * HEADDIM + (
-                offs_n[:, None] * stride_k + offs_d[None, :])
+    k0_ptrs = (
+            KV + bid * k_length * 576 + (
+                offs_n[:, None] * 576 + offs_v[None, :])
+    )
+    k1_ptrs = (
+            KV + bid * k_length * 576 + 512 + (
+                offs_n[:, None] * 576 + offs_p[None, :])
     )
 
-    lse_i = tl.zeros([BLOCK_M], dtype=tl.float32)
-    acc_o = tl.zeros([BLOCK_M, HEADDIM], dtype=tl.float32)
+    lse = tl.zeros([128], dtype=tl.float32)
+    acc_o = tl.zeros([128, 512], dtype=tl.float32)
 
-    if EVEN_M:
-        q = tl.load(q_ptrs)
-    else:
-        q = tl.load(q_ptrs,
-                    mask=(mid * TOKEN * H + offs_m)[:, None] < max_m_off,
-                    other=0.0)
+    q0 = tl.load(q0_ptrs)
+    q1 = tl.load(q1_ptrs)
 
-    for n in range(0, seqlen_k, BLOCK_N):
-        n = tl.multiple_of(n, BLOCK_N)
+    max_n = k_length - q_length + mid + 1
 
-        if EVEN_N:
-            k = tl.load(k_ptrs + n * stride_k)
+    steps = tl.cdiv(max_n, BLOCK)
+    # if bid == 0:
+    #     if mid == 1:
+    #         tl.device_print("steps",steps)
+
+    for step in range(steps):
+        n = step * BLOCK
+
+        if EVEN:
+            k0 = tl.load(k0_ptrs + n * 576)
         else:
-            k = tl.load(k_ptrs + n * stride_k,
-                        mask=(n + offs_n)[:, None] < seqlen_k, other=0.0)
-        qk = tl.dot(q, tl.trans(k))
-        if not EVEN_N:
-            qk += tl.where((n + offs_n)[None, :] < seqlen_k, 0, float("-inf"))
+            k0 = tl.load(k0_ptrs + n * 576,
+                         mask=(n + offs_n)[:, None] < max_n, other=0.0)
+        qk = tl.dot(q0, tl.trans(k0))
+
+        if EVEN:
+            k1 = tl.load(k1_ptrs + n * 576 + 512)
+        else:
+            k1 = tl.load(k1_ptrs + n * 576 + 512,
+                        mask=(n + offs_n)[:, None] < max_n, other=0.0)
+
+        qk += tl.dot(q1, tl.trans(k1))
+
+        # pad mask
+        qk += tl.where((n + offs_n)[None, :] < max_n, 0.0, float("-inf"))
 
         p = tl.exp(qk * softmax_scale)
 
-        lse_i += tl.sum(p, 1)
+        lse += tl.sum(p, 1)
 
-        if EVEN_N:
-            v = tl.load(v_ptrs + n * stride_k)
-        else:
-            v = tl.load(v_ptrs + n * stride_k,
-                        mask=(n + offs_n)[:, None] < seqlen_k, other=0.0)
-        p = p.to(v.dtype)
-        acc_o += tl.dot(p, v)
+        if bid == 0:
+            if mid == 0:
+                if step == 15:
+                    tl.device_print("p",p)
 
-    acc_o = acc_o / lse_i[:, None]
+        p = p.to(k0.dtype)
+        acc_o += tl.dot(p, k0)
 
-    H = stride_o // HEADDIM
-    offs_m = tl.arange(0, BLOCK_M)
-    offs_m = offs_m % GROUP + offs_m // GROUP * H
-    max_m_off = min(seqlen_q, (mid + 1) * TOKEN) * H
+    acc_o = (acc_o / lse[:, None]).to(Out.dtype.element_ty)
 
+    # offs_h = tl.arange(0, 128)
+    # offs_v = tl.arange(0, 512)
     out_ptrs = (
-            Out
-            + q_offset * stride_o + mid * TOKEN * stride_o + hid * HEADDIM * GROUP + (
-                        offs_m[:, None] * HEADDIM + offs_d[None, :])
+            Out + bid * q_length * 128 * 512 + mid * 128 * 512 + (
+                offs_h[:, None] * 512 + offs_v[None, :])
     )
 
-    if EVEN_M:
-        tl.store(out_ptrs, acc_o)
-    else:
-        tl.store(out_ptrs, acc_o,
-                 mask=(mid * TOKEN * H + offs_m)[:, None] < max_m_off)
+    tl.store(out_ptrs, acc_o)
+
+    lse_ptrs = LSE + bid * q_length * 128 + mid * 128 + offs_h
+    tl.store(lse_ptrs, lse)
 
 
+def batch_mla_fwd(q, kv, causal=True):
+    # q: [bs, q_len, 128, 576]
+    # kv: [bs, k_len, 576]
+    assert causal
+    bs, q_length, q_heads, q_d = q.shape
+    bs, k_length, k_d = kv.shape
+    assert q_d == k_d
+    softmax_scale = 1.0 / math.sqrt(q_d)
 
-def seg_mla_fwd(q, k, v, meta, causal=False):
-    _, qo_heads, d = q.shape
-    _, kv_heads, _ = k.shape
-    batch = meta.batch_size
-    softmax_scale = 1.0 / math.sqrt(d)
+    v_d = 512
+    o = torch.empty((bs, q_length, q_heads, v_d), device=q.device, dtype=q.dtype)
+    lse = torch.empty((bs, q_length, q_heads), device=q.device, dtype=torch.float32)
 
-    o = torch.empty(q.shape, device=q.device, dtype=q.dtype)
+    BLOCK = 32
 
-    HEADDIM = d
+    EVEN = k_length % BLOCK == 0
 
-    GROUP = qo_heads // kv_heads
-    CAUSAL = causal if meta.max_q_length > 1 else False
-    SINGLE = meta.max_seg == 1
-    HEAD = qo_heads
-
-    BLOCK_M = 16 if meta.max_q_length == 1 else 128
-    BLOCK_N = 128
-
-    EVEN_M = all(
-        [x // BLOCK_M * BLOCK_M == x and BLOCK_M // GROUP * GROUP == BLOCK_M for
-         x in meta.qls])
-    if isinstance(meta.kls[0], (list, tuple)):
-        EVEN_N = all(
-            [all([y // BLOCK_N * BLOCK_N == y for y in x]) for x in meta.kls])
-    else:
-        EVEN_N = all([x // BLOCK_N * BLOCK_N == x for x in meta.kls])
-
-    # _CudaDeviceProperties(name='NVIDIA H20', major=9, minor=0, total_memory=97285MB, multi_processor_count=78)
-    dp = torch.cuda.get_device_properties(0)
-    sm = dp.major * 10 + dp.minor
-
-    TOKEN = BLOCK_M // GROUP
-    num_m_block = (meta.max_q_length - 1) // TOKEN + 1
+    num_m_block = q_length
     num_warps = 8
-    num_stages = 2 if 80 < sm <= 89 or meta.mask is not None else 3
-    grid = lambda META: (batch, kv_heads, num_m_block)
-
-
-    single_seg_causal_mla_kernel[grid](
+    num_stages = 1
+    grid = lambda META: (bs, num_m_block)
+    batch_mla_kernel[grid](
         q,
-        k,
-        v,
+        kv,
         o,
+        lse,
         softmax_scale,
-        q.stride(0),
-        k.stride(0),
-        o.stride(0),
-        meta.q_offsets,
-        meta.k_offsets,
-        meta.q_lengths,
-        meta.k_lengths,
-        HEADDIM,
-        GROUP,
-        HEAD,
-        BLOCK_M=BLOCK_M,
-        BLOCK_N=BLOCK_N,
-        EVEN_M=EVEN_M,
-        EVEN_N=EVEN_N,
+        q_length,
+        k_length,
+        BLOCK=BLOCK,
+        EVEN=EVEN,
         num_warps=num_warps,
         num_stages=num_stages
     )
-    return o
+    return o, lse
+
+
+if __name__ == '__main__':
+    device = 'cuda:0'
+    dtype = torch.bfloat16 
+    bs = 1 
+    q_length = 2
+    k_length = 1024
+    q = torch.randn((bs,q_length,128,576), device=device, dtype=dtype)
+    kv = torch.randn((bs,k_length,576), device=device, dtype=dtype)
+
+    ref_output, ref_lse = scaled_dot_product_attention(q, kv)
+    opt_output, opt_lse = batch_mla_fwd(q, kv)
+
+    # print(f'{ref_output.shape=} {opt_output.shape=}')
+
+    output_err = ((ref_output-opt_output.float()).abs().mean()/ref_output.abs().mean()).item()
+    lse_err = ((ref_lse-opt_lse.float()).abs().mean()/ref_lse.abs().mean()).item()
+
+    print(f"\noutput_err:{output_err:.3f} lse_err:{lse_err:.3f}\n")
+    print(ref_output[0,0,0,:4])
+    print(opt_output[0,0,0,:4])
+    # print(ref_output[0,0,-1,:4])
+    # print(opt_output[0,0,-1,:4])
+    # print(ref_output[0,-1,0,:4])
+    # print(opt_output[0,-1,0,:4])
+    # benchmark_func(batch_mla_fwd, q, kv, n_repeat=100, ref_flops=bs*q_length*k_length*128*(576+512)*2/2)
