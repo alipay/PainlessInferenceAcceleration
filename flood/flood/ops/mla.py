@@ -90,10 +90,10 @@ def batch_mla_kernel(
     bid = tl.program_id(0)
     mid = tl.program_id(1)
 
+    offs_n = tl.arange(0, BLOCK)
+    offs_h = tl.arange(0, 128)
     offs_v = tl.arange(0, 512)
     offs_p = tl.arange(0, 64)
-    offs_h = tl.arange(0, 128)
-    offs_n = tl.arange(0, BLOCK)
 
     q0_ptrs = (
             Q + bid * q_length * 128 * 576 + mid * 128 * 576 + (
@@ -141,7 +141,7 @@ def batch_mla_kernel(
             k1 = tl.load(k1_ptrs + n * 576 + 512,
                         mask=(n + offs_n)[:, None] < max_n, other=0.0)
 
-        qk += tl.dot(q1, tl.trans(k1))
+        qk = tl.dot(q1, tl.trans(k1), qk)
 
         # pad mask
         qk += tl.where((n + offs_n)[None, :] < max_n, 0.0, float("-inf"))
@@ -150,13 +150,15 @@ def batch_mla_kernel(
 
         lse += tl.sum(p, 1)
 
-        if bid == 0:
-            if mid == 0:
-                if step == 15:
-                    tl.device_print("p",p)
+        # if bid == 0:
+        #     if mid == 1:
+        #         if step == 31:
+        #             tl.device_print("p",p)
 
-        p = p.to(k0.dtype)
+        p = p.to(KV.dtype.element_ty)
         acc_o += tl.dot(p, k0)
+        # acc_o = tl.dot(p, k0, acc_o)
+
 
     acc_o = (acc_o / lse[:, None]).to(Out.dtype.element_ty)
 
@@ -166,17 +168,15 @@ def batch_mla_kernel(
             Out + bid * q_length * 128 * 512 + mid * 128 * 512 + (
                 offs_h[:, None] * 512 + offs_v[None, :])
     )
-
     tl.store(out_ptrs, acc_o)
 
     lse_ptrs = LSE + bid * q_length * 128 + mid * 128 + offs_h
     tl.store(lse_ptrs, lse)
 
 
-def batch_mla_fwd(q, kv, causal=True):
+def batch_mla_fwd(q, kv):
     # q: [bs, q_len, 128, 576]
     # kv: [bs, k_len, 576]
-    assert causal
     bs, q_length, q_heads, q_d = q.shape
     bs, k_length, k_d = kv.shape
     assert q_d == k_d
@@ -186,7 +186,9 @@ def batch_mla_fwd(q, kv, causal=True):
     o = torch.empty((bs, q_length, q_heads, v_d), device=q.device, dtype=q.dtype)
     lse = torch.empty((bs, q_length, q_heads), device=q.device, dtype=torch.float32)
 
-    BLOCK = 32
+    # print(f'{q.stride()=} {kv.stride()=} {o.stride()=}')
+
+    BLOCK = 64
 
     EVEN = k_length % BLOCK == 0
 
@@ -213,25 +215,29 @@ def batch_mla_fwd(q, kv, causal=True):
 if __name__ == '__main__':
     device = 'cuda:0'
     dtype = torch.bfloat16 
-    bs = 1 
-    q_length = 2
+    bs = 2
+    q_length = 1024
     k_length = 1024
     q = torch.randn((bs,q_length,128,576), device=device, dtype=dtype)
     kv = torch.randn((bs,k_length,576), device=device, dtype=dtype)
 
     ref_output, ref_lse = scaled_dot_product_attention(q, kv)
     opt_output, opt_lse = batch_mla_fwd(q, kv)
+    opt_output = opt_output.float()
 
     # print(f'{ref_output.shape=} {opt_output.shape=}')
 
-    output_err = ((ref_output-opt_output.float()).abs().mean()/ref_output.abs().mean()).item()
-    lse_err = ((ref_lse-opt_lse.float()).abs().mean()/ref_lse.abs().mean()).item()
+    output_err = ((ref_output-opt_output).abs().mean()/ref_output.abs().mean()).item()
+    lse_err = ((ref_lse-opt_lse).abs().mean()/ref_lse.abs().mean()).item()
 
     print(f"\noutput_err:{output_err:.3f} lse_err:{lse_err:.3f}\n")
-    print(ref_output[0,0,0,:4])
-    print(opt_output[0,0,0,:4])
-    # print(ref_output[0,0,-1,:4])
-    # print(opt_output[0,0,-1,:4])
-    # print(ref_output[0,-1,0,:4])
-    # print(opt_output[0,-1,0,:4])
-    # benchmark_func(batch_mla_fwd, q, kv, n_repeat=100, ref_flops=bs*q_length*k_length*128*(576+512)*2/2)
+    print(f'{ref_output[0,0,0,:4]=}') 
+    print(f'{opt_output[0,0,0,:4]=}')
+
+    print(f'{ref_output[0,-1,0,:4]=}') 
+    print(f'{opt_output[0,-1,0,:4]=}')
+
+    print(f'{ref_output[-1,0,0,:4]=}') 
+    print(f'{opt_output[-1,0,0,:4]=}')
+
+    benchmark_func(batch_mla_fwd, q, kv, n_repeat=100, ref_flops=bs*q_length*k_length*128*(576+512)*2/2)
