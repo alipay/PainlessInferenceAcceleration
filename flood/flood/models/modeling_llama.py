@@ -13,7 +13,8 @@ import torch
 from transformers.cache_utils import Cache
 from transformers.modeling_utils import PreTrainedModel, PretrainedConfig
 
-from flood.ops import RMSNorm, silu_and_mul
+from flood.ops.activation import silu_and_mul
+from flood.ops.norm import RMSNorm
 from flood.utils.batch import Batch
 from flood.layers.linear import AutoLinear
 from flood.layers.rope import AutoRope
@@ -252,10 +253,10 @@ class LlamaModel(PreTrainedModel):
         self.padding_idx = config.pad_token_id
         self.vocab_size = config.vocab_size
 
-        rank = int(os.environ.get('RANK', '0'))
-        world_size = int(os.environ.get('WORLD_SIZE', '1'))
+        self.rank = int(os.environ.get('RANK', '0'))
+        self.world_size = int(os.environ.get('WORLD_SIZE', '1'))
 
-        if rank == 0:
+        if self.rank == 0:
             self.embed_tokens = AutoEmbedding.from_pretrained(config, 
                                                                 config.vocab_size, 
                                                                 config.hidden_size, 
@@ -265,10 +266,10 @@ class LlamaModel(PreTrainedModel):
 
         n_layer = config.num_hidden_layers
         layers = []
-        local_size = n_layer // world_size
+        local_size = n_layer // self.world_size
         for i in range(n_layer):
-            layer_idx = i if i // local_size == rank else None
-            layer_idx = -1 if layer_idx == n_layer - 1 and rank == world_size - 1 else layer_idx
+            layer_idx = i if i // local_size == self.rank else None
+            layer_idx = -1 if layer_idx == n_layer - 1 and self.rank == self.world_size - 1 else layer_idx
             layers.append(LlamaDecoderLayer(config, layer_idx=layer_idx))
         self.layers = torch.nn.ModuleList(layers)
 
@@ -327,6 +328,7 @@ class LlamaForCausalLM(PreTrainedModel):
             print('patch lm_head')            
             self.lm_head.patch()
 
+
     @torch.inference_mode()
     def forward(
         self,
@@ -377,7 +379,7 @@ class LlamaForCausalLM(PreTrainedModel):
                     if self.rank == self.world_size - 1 and hidden_states is not None:
                         hidden_states = self.model.norm(hidden_states)
                         logits = self.lm_head(hidden_states)
-                        outputs = self.sampler(logits, batch_meta_info)  # returned batch_meta_info
+                        outputs = self.sampler(logits, batch_meta_info=batch_meta_info)
                     else:
                         outputs = hidden_states
                 stream.synchronize()

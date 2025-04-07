@@ -75,7 +75,8 @@ import torch
 from transformers.cache_utils import Cache
 from transformers.modeling_utils import PreTrainedModel, PretrainedConfig
 
-from flood.ops import RMSNorm, silu_and_mul
+from flood.ops.activation import silu_and_mul
+from flood.ops.norm import RMSNorm
 from flood.utils.batch import Batch
 from flood.layers.linear import AutoLinear
 from flood.layers.rope import AutoRope
@@ -645,7 +646,7 @@ class {self.model_name}ForCausalLM(PreTrainedModel):
 
 
 # NOTE: file with `_ignore` will not be recorded by git
-postfix = '_ignore.py'   # '_ignore.py' or '.py'
+postfix = '.py'   # '_ignore.py' or '.py'
 
 # llama
 scaffold = Scaffold(model_name='Llama',

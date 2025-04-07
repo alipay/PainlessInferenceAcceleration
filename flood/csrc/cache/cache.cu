@@ -20,16 +20,9 @@ __global__ void update_cache_kernel(uint4* k_out,  uint4* v_out,  uint4* key_sta
     int tid = threadIdx.x;
     int dim = blockDim.x;
 
-    // int slot_id =  __ldg(indices+token_id);
     int slot_id =  indices[token_id];
 
     int offset = token_id * stride +  tid;
-
-    // uint4 tmp1 = __ldg(key_states + offset);
-    // uint4 tmp2 = __ldg(value_states + offset);
-
-    // uint4 tmp1 = key_states[offset];
-    // uint4 tmp2 = value_states[offset];
 
     k_out[slot_id * dim + tid] = key_states[offset];
     v_out[slot_id * dim + tid] = value_states[offset];
@@ -66,16 +59,9 @@ __global__ void update_fusion_cache_kernel(uint4* kv_out,  uint4* kv_states, int
     int tid = threadIdx.x;
     int dim = blockDim.x;
 
-    // int slot_id =  __ldg(indices+token_id);
     int slot_id =  indices[token_id];
 
     int offset = token_id * stride +  tid;
-
-    // uint4 tmp1 = __ldg(key_states + offset);
-    // uint4 tmp2 = __ldg(value_states + offset);
-
-    // uint4 tmp1 = key_states[offset];
-    // uint4 tmp2 = value_states[offset];
 
     kv_out[slot_id * dim + tid] = kv_states[offset];
 
@@ -90,7 +76,6 @@ void update_fusion_cache(torch::Tensor& kv_out,
     dim3 blocks(tok);
     dim3 threads(dim/8);
 
-    // const at::cuda::OptionalCUDAGuard device_guard(device_of(k_out));
     const cudaStream_t current_stream = at::cuda::getCurrentCUDAStream();
     
     update_fusion_cache_kernel

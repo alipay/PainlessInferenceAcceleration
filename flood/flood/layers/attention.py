@@ -6,6 +6,8 @@ Copyright (c) Ant Financial Service Group and its affiliates.
 import torch
 
 from flood.ops.segattn import seg_attn_fwd
+from flood.ops.segmla import seg_mla_fwd
+
 
 try:
     import flash_attn_2_cuda
@@ -18,6 +20,8 @@ try:
 except:
     flash_attn_3_cuda = None
     print("flash_attn_3_cuda not found!")
+
+
 
 
 class AutoAttention():
@@ -37,6 +41,8 @@ class AutoAttention():
                 return Fp16Attention3(layer_idx, softmax_scale=softmax_scale)
             elif 'fa2' in kernels:
                 return Fp16Attention(layer_idx, softmax_scale=softmax_scale)
+            elif 'mla' in kernels:
+                return Fp16SegMla(layer_idx, softmax_scale=softmax_scale)
             else:
                 return Fp16SegAttention(layer_idx, softmax_scale=softmax_scale)
         else:
@@ -75,7 +81,7 @@ class Fp16Attention(torch.nn.Module):
 
     def forward(self, query_states, key_states, value_states, batch_meta_info,
                 cache):
-        key_states, value_states = cache.update(key_states, value_states,
+        key_states, value_states = cache.update_cache(key_states, value_states,
                                                 self.layer_idx, batch_meta_info)
 
         outputs = flash_attn_2_cuda.varlen_fwd(
@@ -113,7 +119,7 @@ class Fp16SegAttention(torch.nn.Module):
 
     def forward(self, query_states, key_states, value_states, batch_meta_info,
                 cache):
-        key_states, value_states = cache.update(key_states, value_states,
+        key_states, value_states = cache.update_cache(key_states, value_states,
                                                 self.layer_idx, batch_meta_info)
         # batch_meta_info.max_seg = 1
         # batch_meta_info.mask = None
@@ -128,6 +134,27 @@ class Fp16SegAttention(torch.nn.Module):
         return output
 
 
+class Fp16SegMla(torch.nn.Module):
+    def __init__(self, layer_idx, softmax_scale=1.0):
+        super().__init__()
+        self.layer_idx = layer_idx
+        self.softmax_scale = softmax_scale
+
+    def forward(self, query_states, key_value_states, batch_meta_info,
+                cache):
+        key_value_states = cache.update_fusion_cache(key_value_states,
+                                                self.layer_idx, batch_meta_info)
+        output = seg_mla_fwd(
+            query_states,
+            key_value_states,
+            batch_meta_info
+        )
+
+        return output
+
+
+
+
 class Fp16Attention3(torch.nn.Module):
     def __init__(self, layer_idx, softmax_scale=1.0):
         super().__init__()
@@ -136,7 +163,7 @@ class Fp16Attention3(torch.nn.Module):
 
     def forward(self, query_states, key_states, value_states, batch_meta_info,
                 cache):
-        key_states, value_states = cache.update(key_states, value_states,
+        key_states, value_states = cache.update_cache(key_states, value_states,
                                                 self.layer_idx, batch_meta_info)
 
         # outputs = flashattn_hopper_cuda.varlen_fwd(

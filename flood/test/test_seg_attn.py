@@ -248,7 +248,7 @@ def get_flash_attn_meta(qls, kls, mask=None):
 def test_seg_attn(max_seg=1, mode='prefill', even=True, causal=True):
     device = torch.device('cuda:0')
     dtype = torch.bfloat16
-    qo_head = 40
+    qo_head = 32
     kv_head = 8
     dim = 128
     mask_size = 16
@@ -296,11 +296,11 @@ def test_seg_attn(max_seg=1, mode='prefill', even=True, causal=True):
     klss = split(kls, max_seg)
     flops = 0
 
-    flash_attn = flash_attn_3 if torch.cuda.get_device_properties(
-            0).major >= 9 else flash_attn_2
-
+    # flash_attn = flash_attn_3 if torch.cuda.get_device_properties(
+    #         0).major >= 9 else flash_attn_2
+    flash_attn = flash_attn_2
     if mask:
-        attn_mask = torch.zeros((mask_size, mask_size), dtype=torch.uint8,
+        attn_mask = torch.zeros((mask_size, mask_size), dtype=torch.int8,
                                 device=device)
         # attn_mask = torch.zeros((mask_size,mask_size),dtype=torch.float32, device=device)
         for i in range(mask_size):
@@ -384,9 +384,9 @@ def test_seg_attn(max_seg=1, mode='prefill', even=True, causal=True):
                                    rtol=0.05, atol=0.1)
 
 if __name__ == '__main__':
-    # for max_seg in [1,2,4]:
-    #     for mode in ['prefill', 'decode', 'mix']:
-    #         for even in [True, False]:
-    #             test_seg_attn(max_seg=max_seg, mode=mode, even=even, causal=True)
+    for max_seg in [1,2,4]:
+        for mode in ['prefill', 'decode', 'mix']:
+            for even in [True, False]:
+                test_seg_attn(max_seg=max_seg, mode=mode, even=even, causal=True)
 
-    test_seg_attn(max_seg=1, mode='spec', even=True, causal=True)
+    # test_seg_attn(max_seg=1, mode='spec', even=True, causal=True)

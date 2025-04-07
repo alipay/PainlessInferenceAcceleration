@@ -7,7 +7,9 @@ import torch
 import torch.nn.functional as F
 from torch.nn import Parameter
 
-from flood.ops import scaled_fp8_quant
+from flood.ops.quantization import scaled_fp8_quant
+from flood.ops.quantization import tile_quant
+from flood.ops.gemm import fp8_tb_gemm
 
 try:
     from vllm import _custom_ops as ops
@@ -85,6 +87,17 @@ class AutoLinear():
                                         weight_dtype=weight_dtype,
                                         bias_dtype=bias_dtype,
                                         config=config)
+        elif quant_type == 'tb_fp8':
+            return DynamicTbW8A8Fp8Linear(in_features,
+                                        out_features,
+                                        weight=weight,
+                                        bias=bias,
+                                        device=device,
+                                        input_scale=input_scale,
+                                        weight_scale=weight_scale,
+                                        weight_dtype=weight_dtype,
+                                        bias_dtype=bias_dtype,
+                                        config=config)
         else:
             raise ValueError(f'unknown quant_type:{quant_type}')
 
@@ -93,6 +106,10 @@ class AutoLinear():
         if not config or not hasattr(config,
                                      'quantization_config') or config.quantization_config is None:
             return None
+
+        # hack for deepseek_v3
+        if config.model_type == 'deepseek_v3':
+            return 'tb_fp8'
 
         conf = config
         if hasattr(config, '_asdict'):
@@ -103,7 +120,7 @@ class AutoLinear():
         conf = conf['quantization_config']
         if hasattr(conf, 'to_dict') and callable(conf.to_dict):
             conf = conf.to_dict()
-        if layer_name in conf['ignore']:
+        if layer_name in conf.get('ignore',[]):
             return None
         conf = conf['config_groups']['group_0']
         if conf['input_activations']['dynamic'] and not conf['weights'][
@@ -744,4 +761,115 @@ class StaticW8A8Int8Linear(torch.nn.Module):
 
     def __repr__(self):
         return (f'StaticW8A8Int8Linear(in_features={self.in_features}, '
+                f'out_features={self.out_features}, bias={self.bias is not None})')
+
+
+
+class DynamicTbW8A8Fp8Linear(torch.nn.Module):
+    def __init__(self,
+                 in_features,
+                 out_features,
+                 weight=None,
+                 bias=None,
+                 dtype=None,
+                 input_scale=None,
+                 weight_scale=None,
+                 device=None,
+                 weight_dtype=None,
+                 bias_dtype=None,
+                 config=None):
+        super().__init__()
+        self.in_features = in_features
+        self.out_features = out_features
+        self.weight = weight
+        self.bias = bias
+        self.input_scale = input_scale
+        self.weight_scale = weight_scale
+        self.device = device
+        self.weight_dtype = torch.float8_e4m3fn
+        self.bias_dtype = bias_dtype or dtype
+        self.config = config
+
+        assert weight is None or isinstance(weight, Parameter)
+        if weight is None:
+            data = torch.empty(out_features, in_features,
+                               dtype=self.weight_dtype)
+            self.weight = Parameter(data, requires_grad=False)
+        else:
+            self.weight = weight
+
+        assert bias is None or isinstance(bias, bool) or isinstance(bias,
+                                                                    Parameter)
+        if bias is None or isinstance(bias, Parameter):
+            self.bias = bias
+        elif bias is False:
+            self.bias = None
+        else:
+            data = torch.empty(out_features, dtype=self.bias_dtype)
+            self.bias = Parameter(data, requires_grad=False)
+
+        assert weight_scale is None or isinstance(weight_scale, Parameter)
+        if weight_scale is None:
+            block_size = 128
+            weight_scale = Parameter(torch.empty(( (out_features-1)//block_size + 1, (in_features-1)//block_size + 1), dtype=torch.float32),
+                                     requires_grad=False)
+
+        self.weight_scale = weight_scale
+
+
+    def forward(self, x):
+        x_q, x_scale = tile_quant(x)
+
+        output = fp8_tb_gemm(x_q, x_scale, self.weight, self.weight_scale, x.dtype)
+        if self.bias is not None:
+            output += self.bias
+        return output
+
+    @staticmethod
+    def merge(linears):
+        assert len(linears) > 1
+        in_features = []
+        out_features = []
+        dtype = None
+        device = None
+        weights = []
+        biases = []
+        scales = []
+        for linear in linears:
+            in_features.append(linear.in_features)
+            out_features.append(linear.out_features)
+            weight = linear.weight.data
+            dtype = weight.dtype
+            device = weight.device
+            weights.append(weight.view(torch.int8))
+            biases.append(None if linear.bias is None else linear.bias.data)
+            scales.append(linear.weight_scale.data)
+
+        assert min(in_features) == max(in_features)
+
+        scale = Parameter(torch.cat(scales, dim=1))
+        weight = torch.cat(weights, dim=0).to(dtype)
+        weight = Parameter(weight, requires_grad=False)
+        bias = None if any([b is None for b in biases]) else Parameter(
+            torch.cat(biases, dim=0), requires_grad=False)
+        in_features = in_features[0]
+        out_features = sum(out_features)
+        config = linears[0].config
+
+        return DynamicTbW8A8Fp8Linear(in_features,
+                                    out_features,
+                                    weight=weight,
+                                    bias=bias,
+                                    weight_scale=scale,
+                                    device=device,
+                                    weight_dtype=None,
+                                    bias_dtype=None,
+                                    config=config)
+
+    def patch(self):
+        # self.weight = Parameter(self.weight.t(), requires_grad=False)
+        pass
+
+    def __repr__(self):
+        return (f'DynamicTbW8A8Fp8Linear(in_features={self.in_features}, '
                 f'out_features={self.out_features}, bias={self.bias is not None})')
