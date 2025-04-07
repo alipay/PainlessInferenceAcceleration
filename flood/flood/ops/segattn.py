@@ -67,7 +67,7 @@ def single_seg_full_attn_kernel(
                 offs_n[:, None] * stride_k + offs_d[None, :])
     )
 
-    lse_i = tl.zeros([BLOCK_M], dtype=tl.float32)
+    lse = tl.zeros([BLOCK_M], dtype=tl.float32)
     acc_o = tl.zeros([BLOCK_M, HEADDIM], dtype=tl.float32)
 
     if EVEN_M:
@@ -91,7 +91,7 @@ def single_seg_full_attn_kernel(
 
         p = tl.exp(qk * softmax_scale)
 
-        lse_i += tl.sum(p, 1)
+        lse += tl.sum(p, 1)
 
         if EVEN_N:
             v = tl.load(v_ptrs + n * stride_k)
@@ -101,7 +101,7 @@ def single_seg_full_attn_kernel(
         p = p.to(v.dtype)
         acc_o += tl.dot(p, v)
 
-    acc_o = acc_o / lse_i[:, None]
+    acc_o = acc_o / lse[:, None]
 
     H = stride_o // HEADDIM
     offs_m = tl.arange(0, BLOCK_M)
@@ -178,7 +178,7 @@ def single_seg_causal_attn_kernel(
                 offs_n[:, None] * stride_k + offs_d[None, :])
     )
 
-    lse_i = tl.zeros([BLOCK_M], dtype=tl.float32)
+    lse = tl.zeros([BLOCK_M], dtype=tl.float32)
     acc_o = tl.zeros([BLOCK_M, HEADDIM], dtype=tl.float32)
 
     # q = tl.load(q_ptrs)
@@ -198,7 +198,7 @@ def single_seg_causal_attn_kernel(
 
         p = tl.exp(qk * softmax_scale)
 
-        lse_i += tl.sum(p, 1)
+        lse += tl.sum(p, 1)
 
         v = tl.load(v_ptrs + n * stride_k)
 
@@ -225,7 +225,7 @@ def single_seg_causal_attn_kernel(
 
         p = tl.exp(qk * softmax_scale)
 
-        lse_i += tl.sum(p, 1)
+        lse += tl.sum(p, 1)
 
         # v = tl.load(v_ptrs + n * stride_k)
         if EVEN_N:
@@ -236,7 +236,7 @@ def single_seg_causal_attn_kernel(
         p = p.to(v.dtype)
         acc_o += tl.dot(p, v)
 
-    acc_o = acc_o / lse_i[:, None]
+    acc_o = acc_o / lse[:, None]
 
     H = stride_o // HEADDIM
     offs_m = tl.arange(0, BLOCK_M)
@@ -313,7 +313,7 @@ def single_seg_mask_attn_kernel(
                 offs_n[:, None] * stride_k + offs_d[None, :])
     )
 
-    lse_i = tl.zeros([BLOCK_M], dtype=tl.float32)
+    lse = tl.zeros([BLOCK_M], dtype=tl.float32)
     acc_o = tl.zeros([BLOCK_M, HEADDIM], dtype=tl.float32)
 
     if EVEN_M:
@@ -332,7 +332,7 @@ def single_seg_mask_attn_kernel(
 
         p = tl.exp(qk * softmax_scale)
 
-        lse_i += tl.sum(p, 1)
+        lse += tl.sum(p, 1)
 
         v = tl.load(v_ptrs + n * stride_k)
         p = p.to(v.dtype)
@@ -367,7 +367,7 @@ def single_seg_mask_attn_kernel(
 
         p = tl.exp(qk * softmax_scale)
 
-        lse_i += tl.sum(p, 1)
+        lse += tl.sum(p, 1)
 
         if EVEN_N:
             v = tl.load(v_ptrs + n * stride_k)
@@ -377,7 +377,7 @@ def single_seg_mask_attn_kernel(
         p = p.to(v.dtype)
         acc_o += tl.dot(p, v)
 
-    acc_o = acc_o / lse_i[:, None]
+    acc_o = acc_o / lse[:, None]
 
     H = stride_o // HEADDIM
     offs_m = tl.arange(0, BLOCK_M)
@@ -454,7 +454,7 @@ def compatible_single_seg_mask_attn_kernel(
                 offs_n[:, None] * stride_k + offs_d[None, :])
     )
 
-    lse_i = tl.zeros([BLOCK_M], dtype=tl.float32)
+    lse = tl.zeros([BLOCK_M], dtype=tl.float32)
     acc_o = tl.zeros([BLOCK_M, HEADDIM], dtype=tl.float32)
 
     if EVEN_M:
@@ -473,7 +473,7 @@ def compatible_single_seg_mask_attn_kernel(
 
         p = tl.exp(qk * softmax_scale)
 
-        lse_i += tl.sum(p, 1)
+        lse += tl.sum(p, 1)
 
         v = tl.load(v_ptrs + n * stride_k)
         p = p.to(v.dtype)
@@ -506,7 +506,7 @@ def compatible_single_seg_mask_attn_kernel(
 
         p = tl.exp(qk * softmax_scale)
 
-        lse_i += tl.sum(p, 1)
+        lse += tl.sum(p, 1)
 
         if EVEN_N:
             v = tl.load(v_ptrs + n * stride_k)
@@ -516,7 +516,7 @@ def compatible_single_seg_mask_attn_kernel(
         p = p.to(v.dtype)
         acc_o += tl.dot(p, v)
 
-    acc_o = acc_o / lse_i[:, None]
+    acc_o = acc_o / lse[:, None]
 
     H = stride_o // HEADDIM
     offs_m = tl.arange(0, BLOCK_M)
@@ -585,7 +585,7 @@ def multi_seg_full_attn_kernel(
                 offs_m[:, None] * HEADDIM + offs_d[None, :])
     )
 
-    lse_i = tl.zeros([BLOCK_M], dtype=tl.float32)
+    lse = tl.zeros([BLOCK_M], dtype=tl.float32)
     acc_o = tl.zeros([BLOCK_M, HEADDIM], dtype=tl.float32)
 
     q = tl.load(q_ptrs, mask=(mid * TOKEN * H + offs_m)[:, None] < max_m_off,
@@ -621,14 +621,14 @@ def multi_seg_full_attn_kernel(
 
             p = tl.exp(qk * softmax_scale)
 
-            lse_i += tl.sum(p, 1)
+            lse += tl.sum(p, 1)
 
             v = tl.load(v_ptrs + n * stride_k)
             # v = tl.load(v_ptrs + n * stride_k, mask=(n + offs_n)[:, None] < seqlen_k, other=0.0)
             p = p.to(v.dtype)
             acc_o += tl.dot(p, v)
 
-    acc_o = acc_o / lse_i[:, None]
+    acc_o = acc_o / lse[:, None]
 
     H = stride_o // HEADDIM
     offs_m = tl.arange(0, BLOCK_M)
@@ -700,7 +700,7 @@ def multi_seg_causal_attn_kernel(
                 offs_m[:, None] * HEADDIM + offs_d[None, :])
     )
 
-    lse_i = tl.zeros([BLOCK_M], dtype=tl.float32)
+    lse = tl.zeros([BLOCK_M], dtype=tl.float32)
     acc_o = tl.zeros([BLOCK_M, HEADDIM], dtype=tl.float32)
 
     q = tl.load(q_ptrs, mask=(mid * TOKEN * H + offs_m)[:, None] < max_m_off,
@@ -742,7 +742,7 @@ def multi_seg_causal_attn_kernel(
 
             p = tl.exp(qk * softmax_scale)
 
-            lse_i += tl.sum(p, 1)
+            lse += tl.sum(p, 1)
 
             if EVEN_N:
                 v = tl.load(v_ptrs + n * stride_k)
@@ -777,7 +777,7 @@ def multi_seg_causal_attn_kernel(
 
         p = tl.exp(qk * softmax_scale)
 
-        lse_i += tl.sum(p, 1)
+        lse += tl.sum(p, 1)
 
         v = tl.load(v_ptrs + n * stride_k)
         p = p.to(v.dtype)
@@ -803,7 +803,7 @@ def multi_seg_causal_attn_kernel(
 
         p = tl.exp(qk * softmax_scale)
 
-        lse_i += tl.sum(p, 1)
+        lse += tl.sum(p, 1)
 
         if EVEN_N:
             v = tl.load(v_ptrs + n * stride_k)
@@ -813,7 +813,7 @@ def multi_seg_causal_attn_kernel(
         p = p.to(v.dtype)
         acc_o += tl.dot(p, v)
 
-    acc_o = acc_o / lse_i[:, None]
+    acc_o = acc_o / lse[:, None]
 
     H = stride_o // HEADDIM
     offs_m = tl.arange(0, BLOCK_M)
@@ -881,7 +881,7 @@ def multi_seg_mask_attn_kernel(
                 offs_m[:, None] * HEADDIM + offs_d[None, :])
     )
 
-    lse_i = tl.zeros([BLOCK_M], dtype=tl.float32)
+    lse = tl.zeros([BLOCK_M], dtype=tl.float32)
     acc_o = tl.zeros([BLOCK_M, HEADDIM], dtype=tl.float32)
 
     gap = seqlen_total_k - seqlen_q
@@ -923,7 +923,7 @@ def multi_seg_mask_attn_kernel(
 
             p = tl.exp(qk * softmax_scale)
 
-            lse_i += tl.sum(p, 1)
+            lse += tl.sum(p, 1)
 
             if EVEN_N:
                 v = tl.load(v_ptrs + n * stride_k)
@@ -957,7 +957,7 @@ def multi_seg_mask_attn_kernel(
 
         p = tl.exp(qk * softmax_scale)
 
-        lse_i += tl.sum(p, 1)
+        lse += tl.sum(p, 1)
 
         v = tl.load(v_ptrs + n * stride_k)
         p = p.to(v.dtype)
@@ -994,14 +994,14 @@ def multi_seg_mask_attn_kernel(
         qk = tl.reshape(qk, (TOKEN * GROUP, BLOCK_N), can_reorder=False)
 
         p = tl.exp(qk * softmax_scale)
-        lse_i += tl.sum(p, 1)
+        lse += tl.sum(p, 1)
 
         v = tl.load(v_ptrs + n * stride_k,
                     mask=(n + offs_n)[:, None] < seqlen_k_seg, other=0.0)
         p = p.to(v.dtype)
         acc_o += tl.dot(p, v)
 
-    acc_o = acc_o / lse_i[:, None]
+    acc_o = acc_o / lse[:, None]
 
     H = stride_o // HEADDIM
     offs_m = tl.arange(0, BLOCK_M)
@@ -1049,8 +1049,8 @@ def seg_attn_fwd(q, k, v, meta, causal=False):
         EVEN_N = all([x % BLOCK_N == 0 for x in meta.kls])
 
     # _CudaDeviceProperties(name='NVIDIA H20', major=9, minor=0, total_memory=97285MB, multi_processor_count=78)
-    dp = torch.cuda.get_device_properties(0)
-    sm = dp.major * 10 + dp.minor
+    prop = torch.cuda.get_device_properties(0)
+    sm = prop.major * 10 + prop.minor
 
     TOKEN = BLOCK_M // GROUP
     num_m_block = (meta.max_q_length - 1) // TOKEN + 1

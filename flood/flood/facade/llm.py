@@ -234,6 +234,7 @@ class LLM():
                 f'length(bs=128):{self.cache_size // self.n_proc // 128}')
         else:
             self.cache_size = cache_size
+        assert self.cache_size > 0
         self.cache = self.init_kv_cache(self.cache_size, self.cache_dtype)
 
         if self.spec_algo == 'lookahead':
@@ -378,10 +379,10 @@ class LLM():
             layer = layers[i]
             device = next(layer.parameters()).device
             devices.append(device)
+        dims = [self.model.config.kv_lora_rank+self.model.config.qk_rope_head_dim] if self.model_type =='DeepseekV3ForCausalLM' else [self.kv_heads*self.head_dim]*2
         cache = SegmentCache(max_token,
                              num_layers=self.n_layer,
-                             num_key_value_heads=self.kv_heads,
-                             head_dim=self.head_dim,
+                             dims=dims,
                              dtype=cache_dtype,
                              devices=devices)
         return cache
@@ -479,7 +480,7 @@ class LLM():
         while True:
 
             # both empty, wait
-            input_empty = input_queue.empty() and fail_sample_count.value == 10 ** self.n_proc  and len(chunks) == 0 and len(options) == 0
+            input_empty = input_queue.empty() and fail_sample_count.value == 10 ** self.n_proc and len(chunks) == 0 and len(options) == 0
             working_empty = working_queue.empty() and len(waits) == 0
             if input_empty and working_empty and task_id > 0:
                 time.sleep(0.001)
@@ -628,7 +629,7 @@ class LLM():
                     sizes = [str(x.todo or x.input_length) + '+' + str(
                         x.output_length) for x in reqs]
                     sizes = ','.join(sizes)
-                    slot_stat = f'slots:{Batch.slot_check(slots)}' if self.debug else ''
+                    slot_stat = f'{Batch.slot_check(slots)}' if self.debug else ''
                     print(
                         f'******** No slots available! task:{task_id} pid:{os.getpid()} dbs:{dbs} ' \
                         f'ips:{input_queue.qsize()} counts:{counts.value} state:{state.value} ' \

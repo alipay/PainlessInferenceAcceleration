@@ -245,7 +245,7 @@ class Batch:
             q_lengths.append(used_k)
             k_lengths.append(used_k)
 
-        k_offsets.append(cache_indices[-1])
+        k_offsets.append(cache_indices[-1]+1) 
         token_count = sum(qls)
         kls = q_lengths
 

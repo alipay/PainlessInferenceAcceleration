@@ -334,20 +334,21 @@ def bench_seg_attn(max_seg=1, mode='prefill', even=True, causal=True):
 
     print(f'\nseg:{max_seg} mode:{mode} causal:{causal} bs:{len(qls)} q:{qls[0]} k:{kls[0]} qo_head:{qo_head} kv_head:{kv_head} dim:{dim}')
     n_repeat = 1000
-    org_time = benchmark_func(flash_attn, q, k, v, flash_attn_meta,
-                            causal=causal, ref_flops=flops,
-                            n_repeat=n_repeat)
+    # org_time = benchmark_func(flash_attn, q, k, v, flash_attn_meta,
+    #                         causal=causal, ref_flops=flops,
+    #                         n_repeat=n_repeat)
+    org_time = None
     benchmark_func(seg_attn, q, k, v, seg_attn_meta, causal=causal,
                 n_repeat=n_repeat, ref_time=org_time, ref_flops=flops)
 
 
 if __name__ == '__main__':
-    for max_seg in [1,2,4]:
-        for mode in ['prefill', 'decode', 'mix']:
-            for even in [True, False]:
-                bench_seg_attn(max_seg=max_seg, mode=mode, even=even, causal=True)
+    # for max_seg in [1,2,4]:
+    #     for mode in ['prefill', 'decode', 'mix']:
+    #         for even in [True, False]:
+    #             bench_seg_attn(max_seg=max_seg, mode=mode, even=even, causal=True)
     # for max_seg in [1, 2, 4]:
     #     for even in [True, False]:
     #         bench_seg_attn(max_seg=max_seg, mode='spec', even=even, causal=True)
-    # bench_seg_attn(max_seg=1, mode='prefill', even=True, causal=True)
+    bench_seg_attn(max_seg=1, mode='decode', even=True, causal=False)
     # bench_seg_attn(max_seg=2, mode='spec', even=True, causal=True)
