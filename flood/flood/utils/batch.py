@@ -65,6 +65,7 @@ class Batch:
                  mask=None,
                  cache_indices=None,
                  logit_indices=None,
+                 logit_counts=None,
                  embeddings=None,
                  emb_idx_list=None,
                  reqs=None,
@@ -91,6 +92,7 @@ class Batch:
         self.max_seg = max_seg
         self.cache_indices = cache_indices  # used for cache update
         self.logit_indices = logit_indices  # used for cutoff logits
+        self.logit_counts = logit_counts  # used for sampling
         self.embeddings = embeddings
         self.emb_idx_list = emb_idx_list
         self.reqs = reqs  # used for multi-node mode
@@ -216,6 +218,7 @@ class Batch:
         q_lengths = []
         k_lengths = []
         logit_indices = []
+        logit_counts = []
         for i, req in enumerate(reqs):
             targeted = req.done >= req.input_length
             ql = qls[i]
@@ -229,11 +232,15 @@ class Batch:
                 pos = req.iterate_target()[1]
                 cache_indices.extend(range(cache_offset + req.input_length + pos, cache_offset + req.input_length + pos + ql))
                 logit_indices.extend(range(accum-ql, accum))
+                logit_counts.append(ql)
             else:
                 # chunked 
                 cache_indices.extend(range(cache_offset + req.done, cache_offset + req.done + ql))
                 if req.done + ql == req.input_length:  
                     logit_indices.append(accum-1)
+                    logit_counts.append(1)
+                else:
+                    logit_counts.append(0)
             used_k = pids[i] + ql
             q_lengths.append(used_k)
             k_lengths.append(used_k)
@@ -272,6 +279,7 @@ class Batch:
                      k_lengths=k_lengths,
                      cache_indices=cache_indices,
                      logit_indices=logit_indices,
+                     logit_counts=logit_counts,
                      samplings=samplings,
                      embeddings=embeddings,
                      emb_idx_list=emb_idx_list,

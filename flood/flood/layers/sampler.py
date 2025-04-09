@@ -14,12 +14,17 @@ class Sampler(torch.nn.Module):
 
     def __call__(self, logits, batch_meta_info):
         reqs = batch_meta_info.reqs
+        logit_counts = batch_meta_info.logit_counts
 
         # no sampling & no lookhead & no targeting
         if batch_meta_info.samplings is None and batch_meta_info.mode != 2:
             next_ids = logits.argmax(dim=-1).tolist()
+            index = 0
             for i, req in enumerate(reqs):
-                req.output_ids.append(next_ids[i])
+                if logit_counts is not None and logit_counts[i] == 0:
+                    continue
+                req.output_ids.append(next_ids[index])
+                index += 1
             return 
 
         # lookahead
@@ -87,7 +92,8 @@ class Sampler(torch.nn.Module):
 
                 if sampling is None or sampling.target_ids is None:
                     req.output_ids.append(argmax_ids[index])
-                    index += 1
+                    if logit_counts is None or logit_counts[i] > 0:
+                        index += 1
                     continue
                 batch_indices.append(i)
 
