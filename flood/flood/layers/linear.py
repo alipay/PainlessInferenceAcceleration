@@ -7,14 +7,10 @@ import torch
 import torch.nn.functional as F
 from torch.nn import Parameter
 
-from flood.ops.quantization import scaled_fp8_quant
+from flood.ops.quantization import scaled_fp8_quant, static_int8_quant, dynamic_int8_quant
 from flood.ops.quantization import tile_quant
-from flood.ops.gemm import fp8_tb_gemm
+from flood.ops.gemm import  dynamic_int8_gemm_nt,static_int8_gemm_nt,fp8_tb_gemm
 
-try:
-    from vllm import _custom_ops as ops
-except:
-    print('vllm.ops is not installed! W8A8INT8 is not supported!')
 
 
 class AutoLinear():
@@ -312,8 +308,7 @@ class DynamicW8A8Fp8Linear(torch.nn.Module):
 
         qinput, x_scale = scaled_fp8_quant(
             m,
-            scale=None,
-            use_per_token_if_dynamic=True)
+            scale=None)
         # TODO:  use vllm.cutlass_scaled_mm on sm89 for beffer performance
         output = torch._scaled_mm(qinput,
                                   self.weight,
@@ -578,17 +573,16 @@ class DynamicW8A8Int8Linear(torch.nn.Module):
         self.weight_scale = weight_scale
 
     def forward(self, x):
-        x_q, x_scale, _ = ops.scaled_int8_quant(x,
-                                                None,
-                                                None,
-                                                symmetric=True)
+        x_q, x_scale = dynamic_int8_quant(x)
 
-        return ops.cutlass_scaled_mm(x_q,
+        output = dynamic_int8_gemm_nt(x_q,
                                      self.weight,
-                                     scale_a=x_scale,
-                                     scale_b=self.weight_scale,
-                                     out_dtype=x.dtype,
-                                     bias=self.bias)
+                                     x_scale,
+                                     self.weight_scale,
+                                     x.dtype)
+        if self.bias is not None:
+            output += self.bias
+        return output
 
     @staticmethod
     def merge(linears):
@@ -696,17 +690,16 @@ class StaticW8A8Int8Linear(torch.nn.Module):
         self.input_scale = input_scale
 
     def forward(self, x):
-        x_q, x_scale, _ = ops.scaled_int8_quant(x,
-                                                self.input_scale,
-                                                None,
-                                                symmetric=True)
+        x_q, x_scale, _ = static_int8_quant(x, self.input_scale)
 
-        return ops.cutlass_scaled_mm(x_q,
+        output = static_int8_gemm_nt(x_q,
                                      self.weight,
-                                     scale_a=x_scale,
-                                     scale_b=self.weight_scale,
-                                     out_dtype=x.dtype,
-                                     bias=self.bias)
+                                     x_scale,
+                                     self.weight_scale,
+                                     x.dtype)
+        if self.bias is not None:
+            output += self.bias 
+        return output 
 
     @staticmethod
     def merge(linears):

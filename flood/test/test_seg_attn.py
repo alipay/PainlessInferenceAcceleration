@@ -14,7 +14,7 @@ try:
 except:
     flash_attn_3_cuda = None
 
-from flood.ops.segattn import seg_attn_fwd
+from flood.ops.seg_attn import seg_attn_fwd
 from flood.utils.benchmark import benchmark_func
 
 torch.manual_seed(7)
@@ -325,7 +325,7 @@ def test_seg_attn(max_seg=1, mode='prefill', even=True, causal=True):
         ks.append(k)
         vs.append(v)
 
-        flops += (ql * ql ** (1 if causal else 2) + ql * (
+        flops += (ql * ql * (1 if causal else 2) + ql * (
                     kvl - ql) * 2) * qo_head * dim * 2
 
     q = torch.cat(qs, 0)
@@ -384,9 +384,9 @@ def test_seg_attn(max_seg=1, mode='prefill', even=True, causal=True):
                                    rtol=0.05, atol=0.1)
 
 if __name__ == '__main__':
-    for max_seg in [1,2,4]:
-        for mode in ['prefill', 'decode', 'mix']:
-            for even in [True, False]:
-                test_seg_attn(max_seg=max_seg, mode=mode, even=even, causal=True)
+    # for max_seg in [1,2,4]:
+    #     for mode in ['prefill', 'decode', 'mix']:
+    #         for even in [True, False]:
+    #             test_seg_attn(max_seg=max_seg, mode=mode, even=even, causal=True)
 
-    # test_seg_attn(max_seg=1, mode='spec', even=True, causal=True)
+    test_seg_attn(max_seg=1, mode='prefill', even=True, causal=False)

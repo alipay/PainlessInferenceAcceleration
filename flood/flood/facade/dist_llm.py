@@ -16,25 +16,23 @@ from flood.common.llm import LLM
 from flood.layers.linear import NativeLinear
 from flood.utils.batch import Batch
 from flood.utils.cache import SegmentCache
+from flood.models import model_class_map, model_attr_map
 
 
 class DistLLM(LLM):
     def __init__(self, *args, **kwargs):
-        self.rank = int(os.environ["RANK"])
-        self.world_size = int(os.environ["WORLD_SIZE"])
-        self.master = os.environ['MASTER']
-        self.port = int(os.environ['PORT'])
+        # rename RANK with prefix FLOOD to run within dist docker
+        self.rank = int(os.environ["FLOOD_RANK"])
+        self.world_size = int(os.environ["FLOOD_WORLD_SIZE"])
+        self.master = os.environ['FLOOD_MASTER']
+        self.port = int(os.environ['FLOOD_PORT'])
         super().__init__(*args, **kwargs)
 
     def load_model(self, model_path, device_list, n_stage):
         ts = time.time()
         device_map = self.get_device_map(device_list, n_stage)
         from accelerate.hooks import remove_hook_from_module
-        if self.model_type == 'bailing':
-            from flood.models.modeling_bailing_dist import BailingForCausalLM
-            Model = BailingForCausalLM
-        else:
-            raise ValueError(f'unknown model_type:{self.model_type}')
+        Model = model_class_map[self.model_type]
         torch_dtype = self.torch_dtype if self.model_dtype == torch.float8_e4m3fn else self.model_dtype
         model = Model.from_pretrained(model_path,
                                       torch_dtype=torch_dtype,

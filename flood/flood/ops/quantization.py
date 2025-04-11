@@ -10,7 +10,6 @@ import triton
 import triton.language as tl
 
 import flood_cuda
-from flood.utils.benchmark import benchmark_func
 
 @triton.jit
 def deprecated_static_int8_quant_kernel(x_ptr, y_ptr, static_scale, M, N, BLOCK_SIZE: tl.constexpr):
@@ -141,20 +140,8 @@ def dynamic_int8_quant(x: torch.Tensor, block_size: int = 1024) -> torch.Tensor:
 
 
 
-# from enum import IntEnum
-# from typing import Tuple
-
-# import torch
-# import triton
-# import triton.language as tl
-# from triton import Config
-
-
-
 # Some triton kernels for tilewise and blockwise quantization are from the link below with modification:
 # https://github.com/deepseek-ai/DeepSeek-V3/blob/main/inference/kernel.py
-
-
 @triton.jit
 def block_quant_kernel(x_ptr, y_ptr, s_ptr, M, N, BLOCK_SIZE: tl.constexpr):
     pid_m = tl.program_id(axis=0)
@@ -182,8 +169,6 @@ def block_quant(x: torch.Tensor, dtype=torch.float8_e4m3fn, block_size: int = 12
                              num_stages=6,
                              num_warps=8)
     return y, s
-
-
 
 
 
@@ -228,8 +213,7 @@ def tile_quant(
 def scaled_fp8_quant(
         input: torch.Tensor,
         scale: Optional[torch.Tensor] = None,
-        scale_ub: Optional[torch.Tensor] = None,
-        use_per_token_if_dynamic: bool = False,
+        scale_ub: Optional[torch.Tensor] = None
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """
     Quantize input tensor to FP8 and return quantized tensor and scale.
@@ -245,8 +229,6 @@ def scaled_fp8_quant(
         scale: Optional scaling factor for the FP8 quantization
         scale_ub: Optional upper bound for scaling factor in dynamic
             per token case
-        use_per_token_if_dynamic: Whether to do per_tensor or per_token
-            in the dynamic quantization case.
 
     Returns:
         Tuple[torch.Tensor, torch.Tensor]: The output tensor in FP8 and
@@ -258,15 +240,11 @@ def scaled_fp8_quant(
     output = torch.empty(shape, device=input.device, dtype=out_dtype)
 
     if scale is None:
-        if use_per_token_if_dynamic:
-            scale = torch.empty((shape[0], 1),
-                                device=input.device,
-                                dtype=torch.float32)
-            flood_cuda.dynamic_per_token_scaled_fp8_quant(output, input, scale,
-                                                          scale_ub)
-        else:
-            raise ValueError(
-                "NOT implement for use_per_token_if_dynamic=False!")
+        scale = torch.empty((shape[0], 1),
+                            device=input.device,
+                            dtype=torch.float32)
+        flood_cuda.dynamic_per_token_scaled_fp8_quant(output, input, scale,
+                                                        scale_ub)
     else:
         assert scale.numel() == 1
         flood_cuda.static_scaled_fp8_quant(output, input, scale)
@@ -275,32 +253,3 @@ def scaled_fp8_quant(
 
 
 
-
-
-
-if __name__ == '__main__':
-
-    mode = 'dynamic'
-    if mode == 'static':
-        x = torch.randn((4096,8192),dtype=torch.bfloat16,device='cuda:0')
-        static_scale = 0.05
-        y = static_int8_quant(x, static_scale=static_scale,  block_size=1024)
-        ref_y = torch.clamp((x/static_scale).to(torch.int32), -127, 127)
-        error = (ref_y - y).abs().float().mean().item()
-        print(f'error:{error:.3f}')
-
-        benchmark_func(static_int8_quant,x,static_scale=static_scale,  block_size=1024)
-        benchmark_func(deprecated_static_int8_quant,x,static_scale=static_scale,  block_size=1024)
-
-    elif mode == 'dynamic':
-        x = torch.randn((4096,8192),dtype=torch.bfloat16,device='cuda:0')
-        y, scales = dynamic_int8_quant(x, block_size=1024)
-        ref_scales = x.abs().amax(-1,keepdim=True)/127
-        ref_y = torch.clamp((x/ref_scales).to(torch.int32), -127, 127)
-        error = (ref_y - y).abs().float().mean().item()
-        # print(ref_y)
-        # print(y)
-        print(f'error:{error:.3f}')
-
-        benchmark_func(dynamic_int8_quant,x,block_size=1024)
-        benchmark_func(deprecated_dynamic_int8_quant,x,block_size=1024)

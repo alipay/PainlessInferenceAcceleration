@@ -15,4 +15,5 @@ void dynamic_per_token_scaled_fp8_quant(
 void quant_to_fp8_and_update_cache(torch::Tensor& q_out, torch::Tensor& k_out,  torch::Tensor& v_out, 
                                         torch::Tensor& query_states, torch::Tensor& key_states, torch::Tensor& value_states,  
                                         torch::Tensor& indices, 
-                                        int tok, int group, int kv_dim, int q_stride, int kv_stride);
+                                        int tok, int group, int kv_dim, int q_stride, 
+                                        int kv_input_stride, int kv_output_stride);

@@ -34,6 +34,10 @@ from flood.models import model_class_map, model_attr_map
 random.seed(7)
 os.environ['TOKENIZERS_PARALLELISM'] = 'false'
 
+# rename RANK with prefix FLOOD to run within dist docker
+os.environ['FLOOD_WORLD_SIZE'] = '1'
+os.environ['FLOOD_RANK'] = '0'
+
 
 class OutputQueue:
     def __init__(self, queue, index=0, idle=True):
@@ -378,10 +382,16 @@ class LLM():
         for i in range(self.n_layer):
             layer = layers[i]
             device = next(layer.parameters()).device
+            # for j, indices in enumerate(self.device_list):
+            #     if i in indices:
+            #         devices.append(torch.device(j))
+            #         break
             devices.append(device)
         dims = [self.model.config.kv_lora_rank+self.model.config.qk_rope_head_dim] if self.model_type =='DeepseekV3ForCausalLM' else [self.kv_heads*self.head_dim]*2
         cache = SegmentCache(max_token,
                              num_layers=self.n_layer,
+                            # num_key_value_heads=self.kv_heads,
+                            # head_dim=self.head_dim,
                              dims=dims,
                              dtype=cache_dtype,
                              devices=devices)

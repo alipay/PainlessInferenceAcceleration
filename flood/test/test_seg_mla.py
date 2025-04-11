@@ -6,7 +6,7 @@ Copyright (c) Ant Financial Service Group and its affiliates.
 import math
 import torch
 
-from flood.ops.segmla import seg_mla_fwd
+from flood.ops.seg_mla import seg_mla_fwd
 from flood.utils.benchmark import benchmark_func
 
 torch.manual_seed(7)

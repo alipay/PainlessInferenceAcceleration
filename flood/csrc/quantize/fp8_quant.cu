@@ -152,7 +152,17 @@ void dynamic_per_token_scaled_fp8_quant(
 
 
 
-__global__ void quant_to_fp8_and_update_cache_kernel(uint2* q_out, uint2* k_out,  uint2* v_out, uint4* query_states, uint4* key_states, uint4* value_states,  int* indices,  int group, int q_stride, int kv_stride) {
+__global__ void quant_to_fp8_and_update_cache_kernel(uint2* q_out, 
+                                                     uint2* k_out,  
+                                                     uint2* v_out, 
+                                                     uint4* query_states, 
+                                                     uint4* key_states, 
+                                                     uint4* value_states,  
+                                                     int* indices,  
+                                                     int group, 
+                                                     int q_stride, 
+                                                     int kv_input_stride,
+                                                     int kv_output_stride) {
     
     int token_id = blockIdx.x;
     int tidx = threadIdx.x;
@@ -160,7 +170,7 @@ __global__ void quant_to_fp8_and_update_cache_kernel(uint2* q_out, uint2* k_out,
 
     int slot_id =  indices[token_id];
 
-    int kv_offset = token_id * kv_stride + tidx;
+    int kv_offset = token_id * kv_input_stride + tidx;
 
     __nv_fp8x4_e4m3 d[2];
 
@@ -172,7 +182,7 @@ __global__ void quant_to_fp8_and_update_cache_kernel(uint2* q_out, uint2* k_out,
 
     uint2* e = reinterpret_cast<uint2*>(&d);
 
-    k_out[slot_id * dim + tidx] = e[0];
+    k_out[slot_id * kv_output_stride + tidx] = e[0];
 
     uint4 tmp2 = value_states[kv_offset];
 
@@ -180,7 +190,7 @@ __global__ void quant_to_fp8_and_update_cache_kernel(uint2* q_out, uint2* k_out,
     d[0] = __nv_fp8x4_e4m3(b[0], b[1]); 
     d[1] = __nv_fp8x4_e4m3(b[2], b[3]);
 
-    v_out[slot_id * dim + tidx] = e[0];
+    v_out[slot_id * kv_output_stride + tidx] = e[0];
 
     int q_offset = token_id * q_stride + tidx*group;
     // #progma unroll
@@ -201,7 +211,8 @@ void quant_to_fp8_and_update_cache(torch::Tensor& q_out,
                   torch::Tensor& key_states, 
                   torch::Tensor& value_states,  
                   torch::Tensor& indices, 
-                  int tok, int group, int kv_dim, int q_stride, int kv_stride) 
+                  int tok, int group, int kv_dim, int q_stride, 
+                  int kv_input_stride, int kv_output_stride) 
 {
 
     dim3 blocks(tok);
@@ -220,5 +231,7 @@ void quant_to_fp8_and_update_cache(torch::Tensor& q_out,
         static_cast<uint4*>(key_states.data_ptr()), 
         static_cast<uint4*>(value_states.data_ptr()), 
         static_cast<int32_t*>(indices.data_ptr()), 
-        group, q_stride, kv_stride);
+        group, q_stride, 
+        kv_input_stride,
+        kv_output_stride);
 }
