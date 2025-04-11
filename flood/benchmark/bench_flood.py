@@ -21,7 +21,7 @@ if __name__ == '__main__':
     model_path = '/mntnlp/common_base_model/Llama-3.1-8B-Instruct'
     # reqs = Reader.read_fix_dataset(model_path, max_count=1, output_length=100)
 
-    reqs = Reader.read_dummy_dataset(max_count=10000, input_length=128,
+    reqs = Reader.read_dummy_dataset(max_count=1000, input_length=128,
                                      output_length=128, flunc=0.1)
 
     # data_path = 'your/path/ShareGPT_V3_unfiltered_cleaned_split.json'

@@ -77,6 +77,7 @@ def single_seg_full_attn_kernel(
                     mask=(mid * TOKEN * H + offs_m)[:, None] < max_m_off,
                     other=0.0)
 
+
     for n in range(0, seqlen_k, BLOCK_N):
         n = tl.multiple_of(n, BLOCK_N)
 
@@ -99,7 +100,7 @@ def single_seg_full_attn_kernel(
             v = tl.load(v_ptrs + n * stride_k,
                         mask=(n + offs_n)[:, None] < seqlen_k, other=0.0)
         p = p.to(v.dtype)
-        acc_o += tl.dot(p, v)
+        acc_o = tl.dot(p, v, acc_o)
 
     acc_o = acc_o / lse[:, None]
 
@@ -119,6 +120,125 @@ def single_seg_full_attn_kernel(
     else:
         tl.store(out_ptrs, acc_o,
                  mask=(mid * TOKEN * H + offs_m)[:, None] < max_m_off)
+
+
+
+@triton.jit
+def safe_single_seg_full_attn_kernel(
+        Q,
+        K,
+        V,
+        Out,
+        softmax_scale,
+        stride_q,
+        stride_k,
+        stride_o,
+        q_offsets,
+        k_offsets,
+        q_lengths,
+        k_lengths,
+        HEADDIM: tl.constexpr,
+        GROUP: tl.constexpr,
+        HEAD: tl.constexpr,
+        EVEN_M: tl.constexpr,
+        EVEN_N: tl.constexpr,
+        BLOCK_M: tl.constexpr,
+        BLOCK_N: tl.constexpr,
+):
+    bid = tl.program_id(0)
+    hid = tl.program_id(1)
+    mid = tl.program_id(2)
+    seqlen_q = tl.load(q_lengths + bid)
+    TOKEN = BLOCK_M // GROUP
+    if mid * TOKEN >= seqlen_q:
+        return
+    offs_m = tl.arange(0, BLOCK_M)
+    offs_n = tl.arange(0, BLOCK_N)
+    offs_d = tl.arange(0, HEADDIM)
+    q_offset = tl.load(q_offsets + bid)
+    k_offset = tl.load(k_offsets + bid)
+    seqlen_k = tl.load(k_lengths + bid)
+
+    H = stride_q // HEADDIM
+    offs_m = offs_m % GROUP + offs_m // GROUP * H
+    max_m_idx = min(seqlen_q, (mid + 1) * TOKEN) * H
+    q_ptrs = (
+            Q + q_offset * stride_q + mid * TOKEN * stride_q + hid * HEADDIM * GROUP + (
+                offs_m[:, None] * HEADDIM + offs_d[None, :])
+    )
+    k_ptrs = (
+            K + k_offset * stride_k + hid * HEADDIM + (
+                offs_n[:, None] * stride_k + offs_d[None, :])
+    )
+    v_ptrs = (
+            V + k_offset * stride_k + hid * HEADDIM + (
+                offs_n[:, None] * stride_k + offs_d[None, :])
+    )
+
+    lse = tl.zeros([BLOCK_M], dtype=tl.float32)
+    acc = tl.zeros([BLOCK_M, HEADDIM], dtype=tl.float32)
+    maxs = tl.zeros([BLOCK_M], dtype=tl.float32) - float("inf")
+
+    if EVEN_M:
+        q = tl.load(q_ptrs)
+    else:
+        q = tl.load(q_ptrs,
+                    mask=(mid * TOKEN * H + offs_m)[:, None] < max_m_idx,
+                    other=0.0)
+
+    for n in range(0, seqlen_k, BLOCK_N):
+        n = tl.multiple_of(n, BLOCK_N)
+
+        if EVEN_N:
+            k = tl.load(k_ptrs + n * stride_k)
+        else:
+            k = tl.load(k_ptrs + n * stride_k,
+                        mask=(n + offs_n)[:, None] < seqlen_k, 
+                        other=0.0)
+        qk = tl.dot(q, tl.trans(k))
+        if not EVEN_N:
+            qk += tl.where((n + offs_n)[None, :] < seqlen_k, 0, float("-inf"))
+
+        qk *= softmax_scale
+        # m_i = tl.maximum(maxs, tl.max(qk, 1) * softmax_scale)
+        # qk = qk * softmax_scale - m_i[:, None]
+        m_i = tl.maximum(maxs, tl.max(qk, 1))
+        qk -= m_i[:, None]
+        p = tl.exp(qk)
+        
+        l_i = tl.sum(p, 1)
+        alpha = tl.exp(maxs - m_i)
+        lse = lse * alpha + l_i
+        acc = acc * alpha[:, None]
+        maxs = m_i
+
+        if EVEN_N:
+            v = tl.load(v_ptrs + n * stride_k)
+        else:
+            v = tl.load(v_ptrs + n * stride_k,
+                        mask=(n + offs_n)[:, None] < seqlen_k, 
+                        other=0.0)
+        p = p.to(v.dtype)
+        acc = tl.dot(p, v, acc)
+
+    acc = acc / lse[:, None]
+
+    H = stride_o // HEADDIM
+    offs_m = tl.arange(0, BLOCK_M)
+    offs_m = offs_m % GROUP + offs_m // GROUP * H
+    max_m_idx = min(seqlen_q, (mid + 1) * TOKEN) * H
+
+    out_ptrs = (
+            Out
+            + q_offset * stride_o + mid * TOKEN * stride_o + hid * HEADDIM * GROUP + (
+                        offs_m[:, None] * HEADDIM + offs_d[None, :])
+    )
+
+    if EVEN_M:
+        tl.store(out_ptrs, acc)
+    else:
+        tl.store(out_ptrs, acc,
+                 mask=(mid * TOKEN * H + offs_m)[:, None] < max_m_idx)
 
 
 @triton.jit
@@ -1121,7 +1241,7 @@ def seg_attn_fwd(q, k, v, meta, causal=False):
                 )
                 return o
         else:
-            single_seg_full_attn_kernel[grid](
+            safe_single_seg_full_attn_kernel[grid](
                 q,
                 k,
                 v,

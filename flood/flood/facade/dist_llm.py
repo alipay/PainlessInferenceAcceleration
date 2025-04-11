@@ -21,10 +21,11 @@ from flood.models import model_class_map
 
 class DistLLM(LLM):
     def __init__(self, *args, **kwargs):
-        self.rank = int(os.environ["RANK"])
-        self.world_size = int(os.environ["WORLD_SIZE"])
-        self.master = os.environ['MASTER']
-        self.port = int(os.environ['PORT'])
+        # rename RANK with prefix FLOOD to run within dist docker
+        self.rank = int(os.environ["FLOOD_RANK"])
+        self.world_size = int(os.environ["FLOOD_WORLD_SIZE"])
+        self.master = os.environ['FLOOD_MASTER']
+        self.port = int(os.environ['FLOOD_PORT'])
         super().__init__(*args, **kwargs)
 
     def load_model(self, model_path, device_list, n_stage):

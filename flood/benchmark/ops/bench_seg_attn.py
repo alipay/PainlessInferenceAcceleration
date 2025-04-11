@@ -14,7 +14,7 @@ try:
 except:
     flash_attn_3_cuda = None
 
-from flood.ops.segattn import seg_attn_fwd
+from flood.ops.seg_attn import seg_attn_fwd
 from flood.utils.benchmark import benchmark_func
 
 torch.manual_seed(7)
@@ -295,10 +295,10 @@ def bench_seg_attn(max_seg=1, mode='prefill', even=True, causal=True):
         raise ValueError(f'unknown mode:{mode}')
 
     klss = split(kls, max_seg)
-    flops = 0
 
-    flash_attn = flash_attn_3 if torch.cuda.get_device_properties(
-            0).major >= 9 else flash_attn_2
+    # flash_attn = flash_attn_3 if torch.cuda.get_device_properties(
+    #         0).major >= 9 else flash_attn_2
+    flash_attn = flash_attn_2
 
     if mask:
         attn_mask = torch.zeros((mask_size, mask_size), dtype=torch.uint8,
@@ -321,7 +321,7 @@ def bench_seg_attn(max_seg=1, mode='prefill', even=True, causal=True):
         ks.append(k)
         vs.append(v)
 
-        flops += (ql * ql ** (1 if causal else 2) + ql * (
+        flops += (ql * ql * (1 if causal else 2) + ql * (
                     kvl - ql) * 2) * qo_head * dim * 2
 
     q = torch.cat(qs, 0)
@@ -334,9 +334,9 @@ def bench_seg_attn(max_seg=1, mode='prefill', even=True, causal=True):
 
     print(f'\nseg:{max_seg} mode:{mode} causal:{causal} bs:{len(qls)} q:{qls[0]} k:{kls[0]} qo_head:{qo_head} kv_head:{kv_head} dim:{dim}')
     n_repeat = 1000
-    # org_time = benchmark_func(flash_attn, q, k, v, flash_attn_meta,
-    #                         causal=causal, ref_flops=flops,
-    #                         n_repeat=n_repeat)
+    org_time = benchmark_func(flash_attn, q, k, v, flash_attn_meta,
+                            causal=causal, ref_flops=flops,
+                            n_repeat=n_repeat)
     org_time = None
     benchmark_func(seg_attn, q, k, v, seg_attn_meta, causal=causal,
                 n_repeat=n_repeat, ref_time=org_time, ref_flops=flops)
@@ -350,5 +350,5 @@ if __name__ == '__main__':
     # for max_seg in [1, 2, 4]:
     #     for even in [True, False]:
     #         bench_seg_attn(max_seg=max_seg, mode='spec', even=even, causal=True)
-    bench_seg_attn(max_seg=1, mode='decode', even=True, causal=False)
+    bench_seg_attn(max_seg=1, mode='prefill', even=True, causal=False)
     # bench_seg_attn(max_seg=2, mode='spec', even=True, causal=True)

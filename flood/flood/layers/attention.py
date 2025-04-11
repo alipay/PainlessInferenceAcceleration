@@ -5,8 +5,8 @@ Copyright (c) Ant Financial Service Group and its affiliates.
 
 import torch
 
-from flood.ops.segattn import seg_attn_fwd
-from flood.ops.segmla import seg_mla_fwd
+from flood.ops.seg_attn import seg_attn_fwd
+from flood.ops.seg_mla import seg_mla_fwd
 
 
 try:

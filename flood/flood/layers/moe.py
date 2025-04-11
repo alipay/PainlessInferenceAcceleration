@@ -7,12 +7,12 @@
 import functools
 from typing import Any, Callable, Dict, Optional, Tuple
 
-import flood_cuda
 import torch
 import triton
 import triton.language as tl
-from vllm import _custom_ops as ops
 
+import flood_cuda
+from flood.ops.quantization import scaled_fp8_quant
 
 @triton.jit
 def fused_moe_kernel(
@@ -246,7 +246,7 @@ def invoke_fused_moe_kernel(A: torch.Tensor, B: torch.Tensor, C: torch.Tensor,
     assert sorted_token_ids.stride(0) == 1
 
     if use_fp8_w8a8:
-        A, A_scale = ops.scaled_fp8_quant(A, A_scale)
+        A, A_scale = scaled_fp8_quant(A, scale=A_scale)
         assert B_scale is not None
     elif use_int8_w8a16:
         assert B_scale is not None

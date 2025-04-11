@@ -6,7 +6,7 @@ Copyright (c) Ant Financial Service Group and its affiliates.
 import os
 
 os.environ['TOKENIZERS_PARALLELISM'] = 'false'
-os.environ['CUDA_LAUNCH_BLOCKING']='1'
+# os.environ['CUDA_LAUNCH_BLOCKING']='1'
 
 
 import random
@@ -24,10 +24,11 @@ random.seed(7)
 if __name__ == '__main__':
     mp.set_start_method('spawn', force=True)
 
-    model_path = '/mntnlp/common_base_model/Llama-3.1-8B-Instruct'
-    # model_path = '/mntnlp/common_base_model/Qwen__Qwen2.5-7B-Instruct'
+    # model_path = '/mntnlp/common_base_model/Llama-3.1-8B-Instruct'
+    model_path = '/mntnlp/common_base_model/Qwen__Qwen2.5-7B-Instruct'
     # model_path = '/mntnlp/nanxiao/model'
     # model_path = '/mntnlp/nanxiao/deepseekv3'
+    # model_path = '/home/admin/Qwen2.5-7B-Instruct'
 
     # without template
     # reqs = [

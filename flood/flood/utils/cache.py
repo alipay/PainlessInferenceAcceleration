@@ -63,9 +63,10 @@ class SegmentCache(Cache):
         Return:
             A tuple containing the updated key and value states.
         """
-        cache = self.caches[layer_idx]
         head_dim = key_states.size(-1)
-        key_cache, value_cache = cache.split(self.dims, dim=-1)
+        n_head = self.dims[0]//head_dim
+        cache = self.caches[layer_idx].view(self.max_token, n_head*2, head_dim)
+        key_cache, value_cache = cache.split([n_head,n_head], dim=1)
 
         indices = batch_meta_info.cache_indices
         update_cache(key_cache,
@@ -74,7 +75,7 @@ class SegmentCache(Cache):
                      value_states,
                      indices)
 
-        return key_cache.view(-1,self.dims[0]//head_dim, head_dim), value_cache.view(-1,self.dims[1]//head_dim, head_dim)
+        return key_cache, value_cache
 
     def update_fusion_cache(
             self,

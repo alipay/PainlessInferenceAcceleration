@@ -27,10 +27,10 @@ RANK = args.rank
 WORLD_SIZE = args.world_size
 MASTER = args.master
 PORT = args.port
-os.environ['RANK'] = str(RANK)
-os.environ['WORLD_SIZE'] = str(WORLD_SIZE)
-os.environ['MASTER'] = MASTER
-os.environ['PORT'] = PORT
+os.environ['FLOOD_RANK'] = str(RANK)
+os.environ['FLOOD_WORLD_SIZE'] = str(WORLD_SIZE)
+os.environ['FLOOD_MASTER'] = MASTER
+os.environ['FLOOD_PORT'] = PORT
 
 # print(f'{RANK=} {WORLD_SIZE=} {MASTER_ADDR=} {MASTER_PORT=}')
 
@@ -55,10 +55,10 @@ if __name__ == '__main__':
     mp.set_start_method('spawn', force=True)
     model_path = '/mntnlp/common_base_model/Llama-3.1-8B-Instruct'
 
-    WORLD_SIZE = int(os.environ['WORLD_SIZE'])
-    RANK = int(os.environ['RANK'])
-    MASTER = os.environ['MASTER']
-    PORT = int(os.environ['PORT'])
+    WORLD_SIZE = int(os.environ['FLOOD_WORLD_SIZE'])
+    RANK = int(os.environ['FLOOD_RANK'])
+    MASTER = os.environ['FLOOD_MASTER']
+    PORT = int(os.environ['FLOOD_PORT'])
     print(f'{MASTER=} {PORT=} {WORLD_SIZE=} {RANK=}')
 
     pred_path = 'tmp.jsonl'

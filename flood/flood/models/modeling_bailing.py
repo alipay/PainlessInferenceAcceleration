@@ -230,8 +230,8 @@ class BailingModel(PreTrainedModel):
         self.padding_idx = config.pad_token_id
         self.vocab_size = config.vocab_size
 
-        self.rank = int(os.environ.get('RANK', '0'))
-        self.world_size = int(os.environ.get('WORLD_SIZE', '1'))
+        self.rank = int(os.environ.get('FLOOD_RANK', '0'))
+        self.world_size = int(os.environ.get('FLOOD_WORLD_SIZE', '1'))
 
         if self.rank == 0:
             self.word_embeddings = AutoEmbedding.from_pretrained(config, 
@@ -268,8 +268,8 @@ class BailingForCausalLM(PreTrainedModel):
         self.model = BailingModel(config)
         self.vocab_size = config.vocab_size
 
-        self.rank = int(os.environ.get('RANK', '0'))
-        self.world_size = int(os.environ.get('WORLD_SIZE', '1'))
+        self.rank = int(os.environ.get('FLOOD_RANK', '0'))
+        self.world_size = int(os.environ.get('FLOOD_WORLD_SIZE', '1'))
         if self.rank == self.world_size - 1:
             self.lm_head = AutoLinear.from_pretrained(config.hidden_size, 
                                                     config.vocab_size, 
