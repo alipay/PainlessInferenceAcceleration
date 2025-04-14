@@ -18,14 +18,15 @@ random.seed(7)
 if __name__ == '__main__':
     mp.set_start_method('spawn', force=True)
 
-    model_path = '/mntnlp/common_base_model/Llama-3.1-8B-Instruct'
+    # model_path = '/mntnlp/common_base_model/Llama-3.1-8B-Instruct'
+    model_path = '/mntnlp/common_base_model/Qwen__Qwen2.5-7B-Instruct'  #Qwen__Qwen2.5-7B-Instruct Qwen2.5-32B-Instruct Qwen2.5-72B-Instruct
     # reqs = Reader.read_fix_dataset(model_path, max_count=1, output_length=100)
 
-    reqs = Reader.read_dummy_dataset(max_count=1000, input_length=128,
-                                     output_length=128, flunc=0.1)
+    # reqs = Reader.read_dummy_dataset(max_count=1000, input_length=128,
+    #                                  output_length=128, flunc=0.1)
 
-    # data_path = 'your/path/ShareGPT_V3_unfiltered_cleaned_split.json'
-    # reqs = Reader.read_sharegpt_dataset(data_path, model_path, max_count=10000)
+    data_path = 'your/path/ShareGPT_V3_unfiltered_cleaned_split.json'
+    reqs = Reader.read_sharegpt_dataset(data_path, model_path, max_count=10000)
 
     # load model
     n_stage = 1
