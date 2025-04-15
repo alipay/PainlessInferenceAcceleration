@@ -41,7 +41,8 @@ class DistLLM(LLM):
         remove_hook_from_module(model, recurse=True)
         # TODO: interleave_value should be false if use fa3
         patch_kwargs = {"cache_dtype": self.cache_dtype,
-                        "interleave_value": self.cache_dtype == torch.float8_e4m3fn}  
+                        "interleave_value": self.cache_dtype == torch.float8_e4m3fn,
+                        "kernels": self.kernels}
         for name, module in model.named_modules():
             if hasattr(module, 'flood_patch_func'):
                 module.flood_patch_func(patch_kwargs)
@@ -130,8 +131,8 @@ class DistLLM(LLM):
             devices.append(device)
         cache = SegmentCache(max_token,
                              num_layers=self.n_layer,
-                             num_key_value_heads=self.kv_heads,
-                             head_dim=self.head_dim,
+                            #  num_key_value_heads=self.kv_heads,
+                            #  head_dim=self.head_dim,
                              dtype=cache_dtype,
                              devices=devices)
         return cache
@@ -140,7 +141,7 @@ class DistLLM(LLM):
                           output_queues, tasks, slots, counts, state, allocate_fail_count, fail_sample_count,
                           gbs, task_id):
         print(
-            f"schedule:separate rank:{self.rank} task:{task_id} pid:{os.getpid()} ts:{time.time() % 1000:.3f}")
+            f"schedule:pingpong rank:{self.rank} task:{task_id} pid:{os.getpid()} ts:{time.time() % 1000:.3f}")
 
         http = f'tcp://{self.master}:{self.port + task_id}'
         dist.init_process_group(backend='nccl', init_method=http,

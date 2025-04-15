@@ -70,12 +70,13 @@ if __name__ == '__main__':
 
     print('start init LLM')
     worker = DistLLM(model_path,
-                     cache_dtype=torch.bfloat16,
+                    #  cache_dtype=torch.bfloat16,
                      n_stage=1,  # gpu count
-                     n_proc=3,  # process count
+                     n_proc=1,  # process count
                      cache_size=0.9,
                     #  eos_token_id=(),
                      debug=True,
+                     kernels=('mla',),
                      batch_size_round_frac=0.0,  # 0.585
                      min_decode_rate=0.8,  # 0.8
                      output_file_name=pred_path,
