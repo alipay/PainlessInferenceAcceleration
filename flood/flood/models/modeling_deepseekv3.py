@@ -158,7 +158,7 @@ class MoEGate(torch.nn.Module):
         init.kaiming_uniform_(self.weight, a=math.sqrt(5))
 
     def forward(self, hidden_states):
-        bsz, seq_len, h = hidden_states.shape
+        num_tokens, h = hidden_states.shape
         ### compute gating score
         hidden_states = hidden_states.view(-1, h)
         logits = F.linear(
@@ -168,9 +168,9 @@ class MoEGate(torch.nn.Module):
 
 
     ### select top-k experts
-        scores_for_choice = scores.view(bsz * seq_len, -1) + self.e_score_correction_bias.unsqueeze(0)
+        scores_for_choice = scores.view(num_tokens, -1) + self.e_score_correction_bias.unsqueeze(0)
         group_scores = (
-            scores_for_choice.view(bsz * seq_len, self.n_group, -1).topk(2, dim=-1)[0].sum(dim = -1)
+            scores_for_choice.view(num_tokens, self.n_group, -1).topk(2, dim=-1)[0].sum(dim = -1)
         )  # [n, n_group]
         group_idx = torch.topk(
             group_scores, k=self.topk_group, dim=-1, sorted=False
@@ -182,9 +182,9 @@ class MoEGate(torch.nn.Module):
         score_mask = (
             group_mask.unsqueeze(-1)
             .expand(
-                bsz * seq_len, self.n_group, self.n_routed_experts // self.n_group
+                num_tokens, self.n_group, self.n_routed_experts // self.n_group
             )
-            .reshape(bsz * seq_len, -1)
+            .reshape(num_tokens, -1)
         )  # [n, e]
         tmp_scores = scores_for_choice.masked_fill(~score_mask.bool(), float("-inf"))  # [n, e]
         _, topk_idx = torch.topk(
@@ -499,9 +499,9 @@ class DeepseekV3ForCausalLM(PreTrainedModel):
         self.model = DeepseekV3Model(config)
         self.vocab_size = config.vocab_size
 
-        rank = int(os.environ.get('RANK', '0'))
-        world_size = int(os.environ.get('WORLD_SIZE', '1'))
-        if rank == world_size - 1:
+        self.rank = int(os.environ.get('FLOOD_RANK', '0'))
+        self.world_size = int(os.environ.get('FLOOD_WORLD_SIZE', '1'))
+        if self.rank == self.world_size - 1:
             self.lm_head = AutoLinear.from_pretrained(config.hidden_size, 
                                                     config.vocab_size, 
                                                     bias=False, 
@@ -552,12 +552,10 @@ class DeepseekV3ForCausalLM(PreTrainedModel):
 
         n_devices = len(device_list)
         n_layers = len(self.model.layers)
-        rank = int(os.environ.get('RANK', '0'))
-        world_size = int(os.environ.get('WORLD_SIZE', '1'))
         for i, indices in enumerate(device_list):
             stream = streams[i]
             with torch.cuda.stream(stream):
-                if i == 0 and rank == 0:
+                if i == 0 and self.rank == 0:
                     batch_meta_info.to(torch.device(0), non_blocking=True)
                     hidden_states = self.model.embed_tokens(batch_meta_info.input_ids)
                     embeddings = batch_meta_info.embeddings
@@ -578,20 +576,18 @@ class DeepseekV3ForCausalLM(PreTrainedModel):
                         past_key_value=past_key_values,
                         batch_meta_info=batch_meta_info,
                     )
-
                 if i < n_devices-1:
                     device = torch.device(i + 1)
                     hidden_states = hidden_states.to(device, non_blocking=True)
                     batch_meta_info.to(device, non_blocking=True)
                 else:
-                    if rank == world_size - 1 and hidden_states is not None:
+                    if self.rank == self.world_size - 1 and hidden_states is not None:
                         hidden_states = self.model.norm(hidden_states)
                         logits = self.lm_head(hidden_states)
                         outputs = self.sampler(logits, batch_meta_info=batch_meta_info)
                     else:
                         outputs = hidden_states
                 stream.synchronize()
-
         sync_layers[-1]()
 
         return outputs

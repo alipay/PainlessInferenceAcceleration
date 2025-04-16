@@ -12,11 +12,11 @@ import torch
 import torch.distributed as dist
 from safetensors import safe_open
 
-from flood.common.llm import LLM
+from flood.facade.llm import LLM
 from flood.layers.linear import NativeLinear
 from flood.utils.batch import Batch
 from flood.utils.cache import SegmentCache
-from flood.models import model_class_map, model_attr_map
+from flood.models import model_class_map
 
 
 class DistLLM(LLM):
@@ -38,11 +38,11 @@ class DistLLM(LLM):
                                       torch_dtype=torch_dtype,
                                       low_cpu_mem_usage=True,
                                       device_map=device_map)
-
         remove_hook_from_module(model, recurse=True)
         # TODO: interleave_value should be false if use fa3
         patch_kwargs = {"cache_dtype": self.cache_dtype,
-                        "interleave_value": self.cache_dtype == torch.float8_e4m3fn}  
+                        "interleave_value": self.cache_dtype == torch.float8_e4m3fn,
+                        "kernels": self.kernels}
         for name, module in model.named_modules():
             if hasattr(module, 'flood_patch_func'):
                 module.flood_patch_func(patch_kwargs)
@@ -131,17 +131,17 @@ class DistLLM(LLM):
             devices.append(device)
         cache = SegmentCache(max_token,
                              num_layers=self.n_layer,
-                             num_key_value_heads=self.kv_heads,
-                             head_dim=self.head_dim,
+                            #  num_key_value_heads=self.kv_heads,
+                            #  head_dim=self.head_dim,
                              dtype=cache_dtype,
                              devices=devices)
         return cache
 
-    def separate_schedule(self, input_queue, chunk_quene, working_queue,
+    def pingpong_schedule(self, input_queue, chunk_quene, working_queue,
                           output_queues, tasks, slots, counts, state, allocate_fail_count, fail_sample_count,
                           gbs, task_id):
         print(
-            f"schedule:separate rank:{self.rank} task:{task_id} pid:{os.getpid()} ts:{time.time() % 1000:.3f}")
+            f"schedule:pingpong rank:{self.rank} task:{task_id} pid:{os.getpid()} ts:{time.time() % 1000:.3f}")
 
         http = f'tcp://{self.master}:{self.port + task_id}'
         dist.init_process_group(backend='nccl', init_method=http,
@@ -152,7 +152,7 @@ class DistLLM(LLM):
         device_list = self.device_list
         streams = [torch.cuda.Stream(device=idx) for idx in range(self.n_stage)]
         queue_timeout = self.queue_timeout
-        max_prefill_token = self.max_prefill_token
+        chunk_size = self.chunk_size
         output_queue = output_queues[0].queue
 
         fe = None
@@ -235,12 +235,12 @@ class DistLLM(LLM):
                     update_chunks = []
                     for req in chunks:
                         n_token = req.input_length - req.done
-                        if n_tokens < max_prefill_token:
-                            if n_tokens + n_token <= max_prefill_token:
+                        if n_tokens < chunk_size:
+                            if n_tokens + n_token <= chunk_size:
                                 n_tokens += n_token
                                 req.todo = n_token
                             else:
-                                todo = max_prefill_token - n_tokens
+                                todo = chunk_size - n_tokens
                                 n_tokens += todo
                                 req.todo = todo
                             reqs.append(req)
@@ -249,17 +249,17 @@ class DistLLM(LLM):
                             update_chunks.append(req)
                     chunks = update_chunks
 
-                if n_tokens < max_prefill_token and len(fails) > 0:
+                if n_tokens < chunk_size and len(fails) > 0:
                     update_fails = []
                     for req in fails:
                         assert req.done == 0
                         n_token = req.input_length
-                        if n_tokens < max_prefill_token:
-                            if n_tokens + n_token <= max_prefill_token:
+                        if n_tokens < chunk_size:
+                            if n_tokens + n_token <= chunk_size:
                                 n_tokens += n_token
                                 req.todo = 0
                             else:
-                                todo = max_prefill_token - n_tokens
+                                todo = chunk_size - n_tokens
                                 n_tokens += todo
                                 req.todo = todo
                             reqs.append(req)
@@ -268,7 +268,7 @@ class DistLLM(LLM):
                             update_fails.append(req)
                     fails = update_fails
 
-                if n_tokens < max_prefill_token:
+                if n_tokens < chunk_size:
                     while True:
                         try:
                             req = input_queue.get(block=True,
@@ -277,15 +277,15 @@ class DistLLM(LLM):
                             break
                         # assert req.done == 0
                         n_token = req.input_length
-                        if n_tokens + n_token <= max_prefill_token:
+                        if n_tokens + n_token <= chunk_size:
                             n_tokens += n_token
                             req.todo = 0
                             reqs.append(req)
                             embs.append(self.get_emb(req, fe))
-                            if n_tokens == max_prefill_token:
+                            if n_tokens == chunk_size:
                                 break
                         else:
-                            todo = max_prefill_token - n_tokens
+                            todo = chunk_size - n_tokens
                             n_tokens += todo
                             req.todo = todo
                             reqs.append(req)
@@ -399,7 +399,6 @@ class DistLLM(LLM):
             te = time.time()
             forward_time = te - ts
             ts = time.time()
-
             if self.rank < self.world_size - 1:
                 batch.send(hidden_states, dst=self.rank + 1, group=group)
 
@@ -411,23 +410,21 @@ class DistLLM(LLM):
                 mode = objects[0]
                 reqs = objects[1]
                 for i, req in enumerate(reqs):
-                    req = reqs[i]
                     if req.todo > 0 and req.done + req.todo < req.input_length:
                         req.done += req.todo
                         req.todo = 0
                         chunks.append(req)
                     else:
-                        req.output_ids.append(next_token_id)
-                        # reduce pickle cost
-                        if mode == 0:
+                         # reduce pickle cost
+                        if task_type == 'prefill':
                             req.input_id = []
 
-                        if len(req.output_ids) >= req.output_length or next_token_id in self.eos_token_id:
+                        if len(req.output_ids) >= req.output_length or req.output_ids[-1] in self.eos_token_id:
                             output_queue.put(req)
                             Batch.recycle(slots, req.segs)
                             counts.value -= 1
-                        elif req.input_length + len(req.output_ids) >= req.segs[
-                            1] - req.segs[0]:
+                        elif req.input_length + len(
+                                req.output_ids) >= req.size_of_segs():
                             print(
                                 f'{req.input_length=} {len(req.output_ids)=} {req.output_length=} {req.segs=}')
                             waits.append(req)
