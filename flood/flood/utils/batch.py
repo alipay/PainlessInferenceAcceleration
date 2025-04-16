@@ -619,6 +619,8 @@ class Batch:
         self.q_lengths = self.q_lengths.to(device, non_blocking=non_blocking)
         self.k_lengths = self.k_lengths.to(device, non_blocking=non_blocking)
         self.cache_indices = self.cache_indices.to(device, non_blocking=non_blocking)
+        if isinstance(self.k_segs, torch.Tensor):
+            self.k_segs = self.k_segs.to(device, non_blocking=non_blocking)    
         if isinstance(self.logit_indices, torch.Tensor):
             self.logit_indices = self.logit_indices.to(device, non_blocking=non_blocking)
         if isinstance(self.mask, torch.Tensor) and self.mask.device != device:
@@ -632,9 +634,9 @@ class Batch:
         device = hidden_states.device
         comm_device = None
         objects = [
-            [self.batch_size, self.token_count, self.mode, self.cache_slots,
-             self.samplings, self.max_seqlen_q, self.max_seqlen_k, dtype, dim,
-             self.reqs]]
+            [self.batch_size, self.token_count, self.mode, self.cache_indices,
+             self.samplings, self.max_q_length, self.max_k_length, dtype, dim,
+             self.reqs, self.qls, self.kls, self.max_seg, self.k_segs, self.logit_indices]]
         if log:
             print(f'start send objects:{objects}')
         dist.send_object_list(objects, dst=dst, group=group, device=comm_device)
@@ -651,9 +653,9 @@ class Batch:
         dist.send(self.pids, dst, group=group)
         dist.send(self.q_offsets, dst, group=group)
         dist.send(self.k_offsets, dst, group=group)
+        dist.send(self.q_lengths, dst, group=group)
         dist.send(self.k_lengths, dst, group=group)
         dist.send(self.cache_indices, dst, group=group)
-        dist.send(self.logit_indices, dst, group=group)
 
         if log:
             print(f'start send hidden_states:{hidden_states[0, :3]}')
@@ -669,13 +671,18 @@ class Batch:
         self.batch_size = objects[0]
         self.token_count = objects[1]
         self.mode = objects[2]
-        self.cache_slots = objects[3]
+        self.cache_indices = objects[3]
         self.samplings = objects[4]
-        self.max_seqlen_q = objects[5]
-        self.max_seqlen_k = objects[6]
+        self.max_q_length = objects[5]
+        self.max_k_length = objects[6]
         dtype = torch.float16 if objects[7] == 0 else torch.bfloat16
         dim = objects[8]
         self.reqs = objects[9]
+        self.qls = objects[10]
+        self.kls = objects[11]
+        self.max_seg = objects[12]
+        self.k_segs = objects[13]
+        self.logit_indices = objects[14]
         if log:
             print(f'finish recv objects:{objects}')
 
@@ -694,11 +701,11 @@ class Batch:
                                      dtype=torch.int32)
         self.k_offsets = torch.empty([batch_size + 1], device=device,
                                      dtype=torch.int32)
+        self.q_lengths = torch.empty([batch_size], device=device,
+                                     dtype=torch.int32)
         self.k_lengths = torch.empty([batch_size], device=device,
                                      dtype=torch.int32)
         self.cache_indices = torch.empty([token_count], device=device,
-                                         dtype=torch.int32)
-        self.logit_indices = torch.empty([batch_size], device=device,
                                          dtype=torch.int32)
         hidden_states = torch.empty([token_count, dim], device=device,
                                     dtype=dtype)
@@ -712,9 +719,9 @@ class Batch:
         dist.recv(self.pids, src=src, group=group)
         dist.recv(self.q_offsets, src=src, group=group)
         dist.recv(self.k_offsets, src=src, group=group)
+        dist.recv(self.q_lengths, src=src, group=group)
         dist.recv(self.k_lengths, src=src, group=group)
         dist.recv(self.cache_indices, src=src, group=group)
-        dist.recv(self.logit_indices, src=src, group=group)
 
         # meta_tensor = torch.empty([token_count*3+batch_size*4+2], device=device, dtype=torch.int32)
 
