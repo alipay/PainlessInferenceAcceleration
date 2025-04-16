@@ -108,9 +108,8 @@ class Batch:
                          slots,
                          device=torch.device(0),
                          cache_size=None,
-                         buffer=0,
+                         buffer_size=0,
                          min_rate=0.95,
-                         allocate_rate=1.0,
                          fully_alloc_under=None,
                          embeddings=None):
         assert len(reqs) > 0
@@ -134,14 +133,15 @@ class Batch:
                     ql = req.todo
                 else:
                     ql = req.input_length
-                output_alloc_length = req.output_length if req.output_length <= fully_alloc_under else max(
-                    int(allocate_rate * req.output_length), fully_alloc_under)
+                output_alloc_length = min(req.output_length, fully_alloc_under)
                 alloc_length = ((req.input_length + int(
-                    output_alloc_length) - 1 + buffer) // 16 + 1) * 16
-                reserve = ((
-                                       req.input_length + req.output_length - 1 + buffer) // 16 + 1) * 16
+                    output_alloc_length) - 1 + buffer_size) // 16 + 1) * 16
+                if output_alloc_length == req.output_length:
+                    reserve = buffer_size 
+                else:
+                    reserve =  ((req.input_length + req.output_length - 1 + buffer_size) // 16 + 1) * 16
                 cache_offset, slot_index = Batch.allocate(slots, 
-                                                            alloc_length,
+                                                          alloc_length,
                                                           reserve=reserve,
                                                           cache_size=cache_size,
                                                           min_rate=min_rate)

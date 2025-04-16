@@ -15,22 +15,27 @@ from flood.utils.reader import Reader
 
 random.seed(7)
 
+
+
 if __name__ == '__main__':
     mp.set_start_method('spawn', force=True)
 
     # model_path = '/mntnlp/common_base_model/Llama-3.1-8B-Instruct'
-    model_path = '/mntnlp/common_base_model/Qwen__Qwen2.5-7B-Instruct'  #Qwen__Qwen2.5-7B-Instruct Qwen2.5-32B-Instruct Qwen2.5-72B-Instruct
+    # model_path = '/mntnlp/common_base_model/Qwen__Qwen2.5-7B-Instruct'
+    model_path = '/mnt/prev_nas/chatgpt/pretrained_models/Qwen2.5-72B-Instruct'
     # reqs = Reader.read_fix_dataset(model_path, max_count=1, output_length=100)
 
-    # reqs = Reader.read_dummy_dataset(max_count=1000, input_length=128,
-    #                                  output_length=128, flunc=0.1)
+    # reqs = Reader.read_dummy_dataset(max_count=20000, input_length=100,
+    #                                  output_length=300, flunc=0.1)
 
-    data_path = 'your/path/ShareGPT_V3_unfiltered_cleaned_split.json'
-    reqs = Reader.read_sharegpt_dataset(data_path, model_path, max_count=10000)
+    data_path = '/mntnlp/nanxiao/dataset/sharegpt/ShareGPT_V3_unfiltered_cleaned_split.json'
+    reqs = Reader.read_sharegpt_dataset(data_path, model_path, max_count=20000)
+
+
 
     # load model
-    n_stage = 1
-    n_proc = 2
+    n_stage = 8
+    n_proc = 9
     eos_token_id = ()  # set eos_token_id = () to make it ignore eos
     worker = LLM(model_path,
                  model_dtype=torch.bfloat16,
@@ -52,9 +57,10 @@ if __name__ == '__main__':
                  min_batch_size=16,
                  max_batch_size=512,
                  batch_size_step=None,
-                 batch_size_round_frac=0.0,  # 0.585
-                 min_decode_rate=1.0,  # 0.8
+                 batch_size_round_frac=0.585,  # 0.585
+                 min_decode_rate=0.8,  # 0.8
                  eos_token_id=eos_token_id,
+                 kernels=('sa',),
                  output_file_name='tmp.jsonl',
                  output_file_mode='w+',
                  logger='benchmark.log',

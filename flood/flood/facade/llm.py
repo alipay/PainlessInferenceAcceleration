@@ -70,8 +70,8 @@ class LLM():
                  queue_timeout: float = 0.001,
                  max_slot_alloc_fail_count: int = 1,
                  alloc_early_exit_rate: float = 0.95,
-                 slot_first_alloc_rate: float = 1.0,
                  slot_fully_alloc_under: Optional[int] = None,
+                 tune_alloc_size: bool = False,
                  batch_size_step: Optional[int] = None,
                  min_batch_size: int = 16,
                  max_batch_size: int = 512,
@@ -126,10 +126,9 @@ class LLM():
         :param alloc_early_exit_rate: rate of allocation size and segment size.
                     will return a segment without traversing all the segments
                      if the rate exceed this value.
-        :param slot_first_alloc_rate: the segment size for output tokens
-                    in the first allocation.
         :param slot_fully_alloc_under: output length under this value will be
                     fully allocated.
+        :param tune_alloc_size: auto tune alloc size
         :param batch_size_step: batch size rounding for decoding.
                     None: round to power of 2
                     Int: round to multiple of this value.
@@ -178,8 +177,8 @@ class LLM():
         self.sync_wait_time = sync_wait_time
         self.queue_timeout = queue_timeout
         self.max_slot_alloc_fail_count = max_slot_alloc_fail_count
-        self.slot_first_alloc_rate = slot_first_alloc_rate
-        self.slot_fully_alloc_under = slot_fully_alloc_under or 2 ** 16
+        self.slot_fully_alloc_under = slot_fully_alloc_under
+        self.tune_alloc_size = tune_alloc_size
         self.alloc_early_exit_rate = alloc_early_exit_rate
         self.batch_size_step = batch_size_step
         self.min_batch_size = min_batch_size
@@ -477,7 +476,9 @@ class LLM():
         queue_timeout = self.queue_timeout
         chunk_size = self.chunk_size
         output_queue = output_queues[0].queue
+        fully_alloc_under = self.slot_fully_alloc_under
 
+        true_output_lengths = []
         fails = []
         chunks = []
         waits = []
@@ -619,13 +620,15 @@ class LLM():
                     time.sleep(0.001)
                     continue
 
+                if len(true_output_lengths) >= 1024 and self.tune_alloc_size:
+                    fully_alloc_under = sorted(true_output_lengths)[int(0.9*len(true_output_lengths))]
+
                 batch = Batch.prefill_batching(reqs, slots,
                                                device=input_device,
                                                min_rate=self.alloc_early_exit_rate,
-                                               allocate_rate=self.slot_first_alloc_rate,
-                                               fully_alloc_under=self.slot_fully_alloc_under,
+                                               fully_alloc_under=fully_alloc_under,
                                                cache_size=self.cache_size,
-                                               buffer=self.spec_buf,
+                                               buffer_size=self.spec_buf,
                                                embeddings=embs)
 
                 if batch.batch_size > 0:
@@ -676,6 +679,8 @@ class LLM():
                 # working is full, do decoding 
                 reqs = []
                 update_waits = []
+                n_suc = 0
+                n_fail = 0
                 for req in waits:
                     if len(reqs) < dbs:
                         assert req.input_length + len(
@@ -688,14 +693,18 @@ class LLM():
                         segs = Batch.extend_slot(slots, req.segs, extend_length,
                                                  contiguous='sa' not in self.kernels)
                         if segs is not None:
-                            print(f'extend success! from {old_segs} to {segs}')
+                            n_suc += 1
+                            # print(f'extend {old_segs} to {segs} success!')
                             req.segs = segs
                             reqs.append(req)
                         else:
-                            print(f'extend failed! stay with {req.segs}')
+                            # print(f'extend {req.segs} failed!')
+                            n_fail += 1
                             update_waits.append(req)
                     else:
                         update_waits.insert(0, req)
+                if len(waits) > 0:
+                    print(f'extend slot: suc:{n_suc} fail:{n_fail}')
                 waits = update_waits
 
                 while True:
@@ -761,6 +770,7 @@ class LLM():
                                         req.output_ids = output_ids[:j+1]
                                         break
                             output_queue.put(req)
+                            true_output_lengths.append(len(req.output_ids))
                             if self.spec_algo == 'lookahead':
                                 self.spec.update_state(req.output_ids)
                             Batch.recycle(slots, req.segs)
@@ -807,7 +817,7 @@ class LLM():
                 print(
                     f'task:{task_id} pid:{os.getpid():<6} step:{step:<4} '
                     f'task_type:{task_type:<7} ' \
-                    f'bs:{bs_str:<7} ' \
+                    f'bs:{bs_str:<7} fully_alloc_under:{fully_alloc_under} ' \
                     f'counts:{counts.value:<4} state:{state.value:<2} ' \
                     f'ips:{ips} fail:{fail_str}/{len(fails):<2} '
                     f'chunk:{len(chunks):<2} wks:{wks:<4} ' \
@@ -943,7 +953,6 @@ class LLM():
 
                 batch = Batch.prefill_batching(reqs, slots, device=input_device,
                                                min_rate=self.alloc_early_exit_rate,
-                                               allocate_rate=self.slot_first_alloc_rate,
                                                fully_alloc_under=self.slot_fully_alloc_under,
                                                cache_size=self.cache_size)
 
@@ -1101,7 +1110,6 @@ class LLM():
         streams = [torch.cuda.Stream(device=idx) for idx in range(self.n_stage)]
         queue_timeout = self.queue_timeout
         chunk_size = self.chunk_size
-        assert self.slot_first_alloc_rate == 1.0
 
         output_queue = output_queues[0].queue
         state.value = 4096
@@ -1355,9 +1363,7 @@ class LLM():
                 'input_ids']
             req.input_ids = input_ids
             req.input_length = len(input_ids)
-            output_slot_size = req.output_length \
-                if req.output_length <= self.slot_fully_alloc_under \
-                else self.slot_first_alloc_rate * req.output_length
+            output_slot_size = req.output_length
             slot_size = ((req.input_length + int(
                 output_slot_size) - 1) // 16 + 1) * 16
             r = Req(req.rid, input_ids=input_ids, input_length=req.input_length,
@@ -1413,7 +1419,7 @@ class LLM():
                 fmt_output_text = output_text.replace('\n', ' ')
                 print(
                     f"\n------------ {output_sample_count}  -------------")
-                print(f"**** prompt ****:{request.input_text[-100:]}")
+                print(f"**** prompt ****:{request.input_text}")
                 # print((f"**** input_ids ****:{request.input_ids}")
                 print(f"**** answer ****:{fmt_output_text}")
                 # print(f"**** output_ids ****:{request.output_ids}\n")
@@ -1540,7 +1546,6 @@ class LLM():
                  f'batch_size_step:{self.batch_size_step} '\
                  f'min_batch_size:{self.min_batch_size} ' \
                  f'max_batch_size:{self.max_batch_size} '\
-                 f'slot_first_alloc_rate:{self.slot_first_alloc_rate} ' \
                  f'slot_fully_alloc_under:{self.slot_fully_alloc_under} ' \
                  f'batch_size_round_frac:{self.batch_size_round_frac} ' \
                  f'alloc_early_exit_rate:{self.alloc_early_exit_rate} ' \
