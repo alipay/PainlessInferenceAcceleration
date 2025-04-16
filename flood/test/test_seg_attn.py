@@ -22,7 +22,6 @@ torch.manual_seed(7)
 # torch.backends.cudnn.deterministic = True
 # torch.backends.cudnn.benchmark = False
 
-SAFE_SEG_ATTN = True
 
 def torch_attn(q, k, v, causal=True, mask=None):
     bs, q_len, q_head, head_dim = q.shape
@@ -51,9 +50,9 @@ def torch_attn(q, k, v, causal=True, mask=None):
     return att
 
 
-def flash_attn_2(q, k, v, meta, causal=True):
+def flash_attn_2(q, k, v, meta):
     softmax_scale = q.size(-1) ** (-0.5)
-
+    causal = True
     outputs = flash_attn_2_cuda.varlen_fwd(
         q,
         k,
@@ -81,10 +80,9 @@ def flash_attn_2(q, k, v, meta, causal=True):
     return outputs[0]
 
 
-def flash_attn_3(q, k, v, meta, causal=True):
+def flash_attn_3(q, k, v, meta):
     softmax_scale = q.size(-1) ** (-0.5)
-
-
+    causal = True
     # outputs = flashattn_hopper_cuda.varlen_fwd(
     #     q,
     #     k,
@@ -139,14 +137,15 @@ def flash_attn_3(q, k, v, meta, causal=True):
     return out
 
 
-def seg_attn(q, k, v, meta, causal=True, ONLINE_SCALE=SAFE_SEG_ATTN):
+def seg_attn(q, k, v, meta, online_scale=False):
+    causal = True
     outputs = seg_attn_fwd(
         q,
         k,
         v,
         meta,
         causal=causal,
-        ONLINE_SCALE=ONLINE_SCALE
+        ONLINE_SCALE=online_scale
     )
 
     return outputs
@@ -247,7 +246,7 @@ def get_flash_attn_meta(qls, kls, mask=None):
     return meta
 
 
-def test_seg_attn(max_seg=1, mode='prefill', even=True, causal=True):
+def test_seg_attn(max_seg=1, mode='prefill', even=True, online_scale=False):
     device = torch.device('cuda:0')
     dtype = torch.bfloat16
     qo_head = 32
@@ -327,7 +326,7 @@ def test_seg_attn(max_seg=1, mode='prefill', even=True, causal=True):
         ks.append(k)
         vs.append(v)
 
-        flops += (ql * ql * (1 if causal else 2) + ql * (
+        flops += (ql * ql + ql * (
                     kvl - ql) * 2) * qo_head * dim * 2
 
     q = torch.cat(qs, 0)
@@ -350,10 +349,10 @@ def test_seg_attn(max_seg=1, mode='prefill', even=True, causal=True):
         org_output = \
         torch_attn(q[None], k[None], v[None], causal=True, mask=torch_mask)[0]
     else:
-        org_output = flash_attn(q, k, v, flash_attn_meta, causal=causal)
+        org_output = flash_attn(q, k, v, flash_attn_meta)
     torch.cuda.synchronize()
 
-    opt_output = seg_attn(q, k, v, seg_attn_meta, causal=causal)
+    opt_output = seg_attn(q, k, v, seg_attn_meta, online_scale=online_scale)
     torch.cuda.synchronize()
 
     # print("org",org_output.dtype,org_output.shape)
@@ -363,7 +362,7 @@ def test_seg_attn(max_seg=1, mode='prefill', even=True, causal=True):
     amp = org_output.float().abs().mean().item()
     rate = err / amp
 
-    desc = f'seg:{max_seg} mode:{mode}/{causal} bs:{len(qls)} q:{qls[0]} k:{kls[0]} qo_head:{qo_head} kv_head:{kv_head} dim:{dim}'
+    desc = f'seg:{max_seg} mode:{mode} bs:{len(qls)} q:{qls[0]} k:{kls[0]} qo_head:{qo_head} kv_head:{kv_head} dim:{dim}'
 
     print(f"\n{desc} err:{err:.4f} rate:{rate:.3f}")
     if math.isnan(rate) or rate > 0.02:
@@ -389,6 +388,6 @@ if __name__ == '__main__':
     # for max_seg in [1,2,4]:
     #     for mode in ['prefill', 'decode', 'mix']:
     #         for even in [True, False]:
-    #             test_seg_attn(max_seg=max_seg, mode=mode, even=even, causal=True)
+    #             test_seg_attn(max_seg=max_seg, mode=mode, even=even)
 
-    test_seg_attn(max_seg=1, mode='prefill', even=True, causal=False)
+    test_seg_attn(max_seg=1, mode='mix', even=True, online_scale=True)
