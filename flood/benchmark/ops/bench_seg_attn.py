@@ -22,6 +22,7 @@ torch.manual_seed(7)
 # torch.backends.cudnn.deterministic = True
 # torch.backends.cudnn.benchmark = False
 
+SAFE_SEG_ATTN = True
 
 def torch_attn(q, k, v, causal=True, mask=None):
     bs, q_len, q_head, head_dim = q.shape
@@ -138,13 +139,14 @@ def flash_attn_3(q, k, v, meta, causal=True):
     return out
 
 
-def seg_attn(q, k, v, meta, causal=True):
+def seg_attn(q, k, v, meta, causal=True, ONLINE_SCALE=SAFE_SEG_ATTN):
     outputs = seg_attn_fwd(
         q,
         k,
         v,
         meta,
-        causal=causal
+        causal=causal,
+        ONLINE_SCALE=ONLINE_SCALE
     )
 
     return outputs
@@ -344,9 +346,9 @@ def bench_seg_attn(max_seg=1, mode='prefill', even=True, causal=True):
 
 if __name__ == '__main__':
     # for max_seg in [1,2,4]:
-    #     for mode in ['prefill', 'decode', 'mix']:
-    #         for even in [True, False]:
-    #             bench_seg_attn(max_seg=max_seg, mode=mode, even=even, causal=True)
+    #   for mode in ['prefill', 'decode', 'mix']:
+    #       for even in [True, False]:
+    #             bench_seg_attn(max_seg=max_seg, mode=mode, even=even, causal=False)
     # for max_seg in [1, 2, 4]:
     #     for even in [True, False]:
     #         bench_seg_attn(max_seg=max_seg, mode='spec', even=even, causal=True)
