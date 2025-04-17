@@ -32,7 +32,7 @@ if __name__ == '__main__':
 
     # without template
     reqs = [
-            Request(0, input_text='<|im_start|>system\nYou are Qwen, created by Alibaba Cloud. You are a helpful assistant.<|im_end|>\n<|im_start|>user\n**Lily\'s Flower Garden** Lily has a small flower garden where she plants tulips and daisies. One day, she decides to count the flowers. She finds that she has 24 tulips and 18 daisies. She wants to plant them in her garden in rows, with each row containing the same number of flowers and with no flowers left over. What is the greatest number of flowers she can plant in each row without mixing tulips and daisies in the same row?<|im_end|>\n<|im_start|>assistant\n', output_length=4096),
+            Request(0, input_text='<|im_start|>system\nYou are Qwen, created by Alibaba Cloud. You are a helpful assistant.<|im_end|>\n<|im_start|>user\nConsider a sequence of real numbers \\( a_1, a_2, a_3, \\ldots \\) defined as follows:- \\( a_1 = 1 \\)- For \\( n \\geq 1 \\), \\( a_{n+1} = \\frac{a_n + 2}{a_n + 1} \\).Determine the value of \\( a_{2024} \\).<|im_end|>\n<|im_start|>assistant\n', output_length=4096),
             Request(1, input_text='<|im_start|>system\nYou are Qwen, created by Alibaba Cloud. You are a helpful assistant.<|im_end|>\n<|im_start|>user\nConsider the polynomial \( P(x, y) = x^4 + y^4 - 2x^2y^2 \). Let \( S \) be the set of points \( (x, y) \) where \( x \) and \( y \) are integers in the range \( -10 \leq x, y \leq 10 \) such that \( P(x, y) = 0 \). Determine the number of elements in the set \( S \).<|im_end|>\n<|im_start|>assistant\n', output_length=4096)
             ]
     # with template
@@ -48,7 +48,7 @@ if __name__ == '__main__':
                  tune_alloc_size=True,
                  eos_token_id=None,
                  debug=True,
-                 kernels=('sa',),
+                 kernels=('fa2',),
                 #  spec_algo = 'lookahead',
                  logger='example.log')
 

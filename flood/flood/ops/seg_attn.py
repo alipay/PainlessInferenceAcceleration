@@ -272,7 +272,7 @@ def multi_seg_attn_kernel(
     offs_d = tl.arange(0, HEADDIM)
     q_offset = tl.load(q_offsets + bid)
     n_seg = tl.load(k_segs + bid)
-    seqlen_total_k = tl.load(k_lengths + bid * (max_seg + 1) + n_seg)
+    seqlen_total_k = tl.load(k_lengths + bid * (max_seg + 1) + max_seg)
 
     H = stride_q // HEADDIM
     offs_m = offs_m % GROUP + offs_m // GROUP * H
@@ -294,9 +294,7 @@ def multi_seg_attn_kernel(
     if MASK_TYPE == 0:
         for i_seg in range(n_seg):
             k_offset = tl.load(k_offsets + bid * max_seg + i_seg).to(tl.int64)
-            seqlen_k = tl.load(
-                    k_lengths + bid * (max_seg + 1) + i_seg + 1) - tl.load(
-                    k_lengths + bid * (max_seg + 1) + i_seg)
+            seqlen_k = tl.load(k_lengths + bid * (max_seg + 1) + i_seg)
 
             k_ptrs = (
                     K + k_offset * stride_k + hid * HEADDIM + (
@@ -309,7 +307,6 @@ def multi_seg_attn_kernel(
 
             for n in range(0, seqlen_k, BLOCK_N):
                 n = tl.multiple_of(n, BLOCK_N)
-
                 k = tl.load(k_ptrs + n * stride_k, mask=(n + offs_n)[:, None] < seqlen_k, other=0.0)
                 qk = tl.dot(q, tl.trans(k))
                 if not EVEN_N:
@@ -326,11 +323,8 @@ def multi_seg_attn_kernel(
                 acc_o += tl.dot(p, v)
     else:
         for i_seg in range(n_seg - 1):
-            seqlen_k_accum = tl.load(k_lengths + bid * (max_seg + 1) + i_seg)
-            seqlen_k_accum_next = tl.load(
-                    k_lengths + bid * (max_seg + 1) + i_seg + 1)
             k_offset = tl.load(k_offsets + bid * max_seg + i_seg).to(tl.int64)
-            seqlen_k_seg = seqlen_k_accum_next - seqlen_k_accum
+            seqlen_k_seg = tl.load(k_lengths + bid * (max_seg + 1) + i_seg)
 
             k_ptrs = (
                     (K + k_offset * stride_k + hid * HEADDIM) + (
@@ -369,10 +363,11 @@ def multi_seg_attn_kernel(
                 p = p.to(v.dtype)
                 acc_o += tl.dot(p, v)
 
-        seqlen_k_accum = tl.load(k_lengths + bid * (max_seg + 1) + n_seg - 1)
-        seqlen_k_accum_next = tl.load(k_lengths + bid * (max_seg + 1) + n_seg)
+        # seqlen_k_accum = tl.load(k_lengths + bid * (max_seg + 1) + n_seg - 1)
+        # seqlen_k_accum_next = tl.load(k_lengths + bid * (max_seg + 1) + n_seg)
         k_offset = tl.load(k_offsets + bid * max_seg + n_seg - 1).to(tl.int64)
-        seqlen_k_seg = seqlen_k_accum_next - seqlen_k_accum
+        seqlen_k_seg = tl.load(k_lengths + bid * (max_seg + 1) + n_seg - 1)
+        seqlen_k_accum = seqlen_total_k - seqlen_k_seg
 
         k_ptrs = (
                 (K + k_offset * stride_k + hid * HEADDIM) + (

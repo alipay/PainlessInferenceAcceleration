@@ -5,6 +5,7 @@ Copyright (c) Ant Financial Service Group and its affiliates.
 
 import itertools
 import math
+import copy
 from ctypes import Structure, c_int
 
 import numpy as np
@@ -108,11 +109,11 @@ class Batch:
                 shape of [bs]
                 example: [1024,1024,1024,...]
             MULTIPLE SEG: at least one of the kvcaches of reqs are multi-segment
-                shape of [bs, max_seg+1], it is accum lengths of each seg
+                shape of [bs, max_seg+1], the last one is total length
                 example:
-                    first req's segments: [512, 512]
+                    first req's segments: [1024, 512]
                     second req's segments: [512]
-                    k_lengths = [[0,512,1024],[0,512,0]]
+                    k_lengths = [[1024,512,1536],[512,0,512]]
         :param mask: attention mask
         :param cache_indices: kv cache indices, used for cache updating,
             it maps kvcache of current req to cache memory
@@ -292,9 +293,8 @@ class Batch:
                     logit_counts.append(1)
                 else:
                     logit_counts.append(0)
-            used_k = position_ids[i] + ql
             q_lengths.append(ql)
-            k_lengths.append(used_k)
+            k_lengths.append(position_ids[i] + ql)
 
         k_offsets.append(cache_indices[-1]+1) 
         token_count = sum(qls)
@@ -310,7 +310,7 @@ class Batch:
         q_lengths = torch.tensor(q_lengths, dtype=torch.int32, device=device)
         cache_indices = torch.tensor(cache_indices,
                                               dtype=torch.int32, device=device)
-        # may be empty
+        # NOTE: may be empty
         logit_indices = torch.tensor(logit_indices, dtype=torch.int32,
                                      device=device)
 
@@ -344,45 +344,50 @@ class Batch:
 
         bs = len(reqs)
         max_seg = max([len(x.segs) for x in reqs])
-        qls = [1] * bs
         input_ids = [x.output_ids[-1] for x in reqs]
 
-        input_ids = torch.tensor(input_ids, dtype=torch.int32, device=device)
-        position_ids = [x.input_length + len(x.output_ids) - 1 for x in reqs]
+        position_ids = []
+        cache_indices = []
+        k_offsets = []
+        k_lengths = []
+        k_segs = []
+        for i in range(bs):
+            req = reqs[i]
+            segs = req.segs
+            n_seg = len(segs)
+            k_segs.append(n_seg)
+            kl = req.input_length + len(req.output_ids)
+            position_id = kl - 1
+            position_ids.append(position_id)
+            if max_seg == 1:
+                k_offset = segs[0][0]
+                cache_index = k_offset + position_id
+                k_length = kl
+            else:
+                k_offset = [x[0] for x in segs] + [0] * (max_seg - n_seg)
+                pre_offset = sum([x[1]-x[0] for x in segs[:-1]])
+                cache_index = segs[-1][0] + (position_id - pre_offset)
+                k_length = [x[1] - x[0] for x in segs[:-1]] + [0] * (max_seg + 1 - n_seg) + [kl]
+
+            k_offsets.append(k_offset)
+            if i == bs - 1 and max_seg == 1:  # for flash-attn
+                k_offsets.append(k_offset + kl)
+            cache_indices.append(cache_index)
+            k_lengths.append(k_length)
+
+
+
         max_q_length = 1
         max_k_length = max(position_ids) + 1 
-        if max_seg == 1:
-            k_offsets = [x.segs[0][0] for x in reqs] + [reqs[-1].segs[0][0]+position_ids[-1]]
-        else:
-            k_offsets = sum(
-                [[y[0] for y in x.segs] + [0] * (max_seg - len(x.segs)) for x in
-                 reqs], [])
 
-        cache_indices = [k_offsets[i] + x for i, x in
-                                  enumerate(position_ids)]
-
-        q_lengths = [1] * bs
-        k_segs = []
-        if max_seg == 1:
-            k_lengths = [x + 1 for x in position_ids]
-        else:
-            # accum lengths
-            k_lengths = []
-            for i in range(bs):
-                segs = reqs[i].segs
-                k_length = [0] + [x[1] - x[0] for x in segs[:-1]] + [0] * (max_seg + 1 - len(segs))  # NOTE: CHANGED
-                k_length = list(
-                    itertools.accumulate(k_length, lambda x, y: x + y))
-                k_length[len(segs)] = position_ids[i] + 1
-                k_lengths.append(k_length)
-                k_segs.append(len(segs))
-
+        qls = [1] * bs
         kls = k_lengths
+        input_ids = torch.tensor(input_ids, dtype=torch.int32, device=device)
         position_ids = torch.tensor(position_ids, dtype=torch.int32,
                                     device=device)
         q_offsets = torch.arange(bs + 1, dtype=torch.int32, device=device)
         k_offsets = torch.tensor(k_offsets, dtype=torch.int32, device=device)
-        q_lengths = torch.tensor(q_lengths, dtype=torch.int32, device=device)
+        q_lengths = torch.tensor(qls, dtype=torch.int32, device=device)
         k_lengths = torch.tensor(k_lengths, dtype=torch.int32, device=device)
         k_segs = torch.tensor(k_segs, dtype=torch.int32, device=device)
         cache_indices = torch.tensor(cache_indices,
@@ -860,6 +865,7 @@ class Batch:
     @staticmethod
     def extend_slot(slots, old_segs, length, contiguous=False):
         # contiguous: use single-seg if True else use multi-seg
+        old_segs = copy.deepcopy(old_segs)
         if contiguous:
             """
             state=0: undefined

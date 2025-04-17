@@ -481,7 +481,9 @@ class LLM():
         output_queue = output_queues[0].queue
         fully_alloc_under = self.slot_fully_alloc_under
 
-        true_output_lengths = []
+
+        input_lengths = []  # finished reqs
+        output_lengths = []  # finished reqs
         fails = []
         chunks = []
         waits = []
@@ -511,7 +513,6 @@ class LLM():
                 time.sleep(0.01)
                 continue
 
-            step += 1
             dbs = gbs.value
 
             if  (counts.value < state.value or counts.value == 0
@@ -613,8 +614,9 @@ class LLM():
                     time.sleep(0.001)
                     continue
 
-                if len(true_output_lengths) >= 512 and self.tune_alloc_size:
-                    fully_alloc_under = sorted(true_output_lengths)[int(0.9*len(true_output_lengths))]
+                if len(output_lengths) >= 512 and self.tune_alloc_size:
+                    fully_alloc_under = sorted(output_lengths)[int(0.9*len(output_lengths))]
+                    fully_alloc_under = ((fully_alloc_under-1)//128+1)*128
 
                 batch = Batch.prefill_batching(reqs, slots,
                                                device=input_device,
@@ -666,14 +668,16 @@ class LLM():
                 n_fail = 0
                 for req in waits:
                     if len(reqs) < dbs:
+                        size_of_segs = req.size_of_segs()
                         assert req.input_length + len(
-                            req.output_ids) >= req.size_of_segs()
-                        slot_size = ((req.input_length +
-                                      req.output_length - 1  + self.spec_buf) // 16 + 1) * 16
-                        extend_length = slot_size - (
-                                req.segs[-1][1] - req.segs[-1][0])
+                            req.output_ids) >= size_of_segs
+                        slot_size = req.input_length + req.output_length + self.spec_buf
+                        slot_size = ((slot_size - 1) // 128 + 1) * 128
+                        extend_length = min(slot_size - size_of_segs, 512)
                         old_segs = copy.deepcopy(req.segs)
-                        segs = Batch.extend_slot(slots, req.segs, extend_length,
+                        segs = Batch.extend_slot(slots, 
+                                                 req.segs, 
+                                                 extend_length,
                                                  contiguous='sa' not in self.kernels)
                         if segs is not None:
                             n_suc += 1
@@ -718,6 +722,7 @@ class LLM():
 
             te = time.time()
             batching_time = te - ts
+            step += 1
 
             ts = te
             self.model.forward(input_ids=batch.input_ids,
@@ -753,7 +758,11 @@ class LLM():
                                         req.output_ids = output_ids[:j+1]
                                         break
                             output_queue.put(req)
-                            true_output_lengths.append(len(req.output_ids))
+                            input_lengths.append(req.input_length)
+                            output_lengths.append(len(req.output_ids))
+                            if len(input_lengths) > 1024:
+                                input_lengths = input_lengths[-1024:]
+                                output_lengths = output_lengths[-1024:]
                             if self.spec_algo == 'lookahead':
                                 self.spec.update_state(req.output_ids)
                             Batch.recycle(slots, req.segs)
@@ -797,14 +806,19 @@ class LLM():
                 bs_str = f'{batch.batch_size}/{tokens}'
                 times = (f'{batching_time * 1000:.1f}/'
                          f'{forward_time * 1000:.1f}/{recycle_time * 1000:.1f}')
+                mean_input_length = sum(input_lengths)/max(len(input_lengths),1)
+                mean_output_length = sum(output_lengths)/max(len(output_lengths),1)
                 print(
                     f'task:{task_id} pid:{os.getpid():<6} step:{step:<4} '
                     f'task_type:{task_type:<7} ' \
-                    f'bs:{bs_str:<7} alloc:{fully_alloc_under} ' \
+                    f'bs:{bs_str:<7} ' \
                     f'counts:{counts.value:<4} state:{state.value:<2} ' \
                     f'ips:{ips} fail:{fail_str}/{len(fails):<2} '
                     f'chunk:{len(chunks):<2} wks:{wks:<4} ' \
-                    f'waits:{len(waits):<4} time:{times:<13}')
+                    f'waits:{len(waits):<4} ' \
+                    f'alloc:{fully_alloc_under} ' \
+                    f'length:{mean_input_length:.0f}/{mean_output_length:.0f} ' \
+                    f'time:{times:<13}')
 
 
     def mix_schedule(self, input_queue, chunk_quene, working_queue,
