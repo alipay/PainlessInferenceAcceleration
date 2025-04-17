@@ -71,6 +71,7 @@ class LLM():
                  max_slot_alloc_fail_count: int = 1,
                  alloc_early_exit_rate: float = 0.95,
                  slot_fully_alloc_under: Optional[int] = None,
+                 max_extend_size: int = 512,
                  tune_alloc_size: bool = False,
                  batch_size_step: int = 64,
                  min_batch_size: int = 16,
@@ -171,6 +172,7 @@ class LLM():
         self.queue_timeout = queue_timeout
         self.max_slot_alloc_fail_count = max_slot_alloc_fail_count
         self.slot_fully_alloc_under = slot_fully_alloc_under
+        self.max_extend_size = max_extend_size
         self.tune_alloc_size = tune_alloc_size
         self.alloc_early_exit_rate = alloc_early_exit_rate
         self.batch_size_step = batch_size_step
@@ -515,8 +517,8 @@ class LLM():
 
             dbs = gbs.value
 
-            if  (counts.value < state.value or counts.value == 0
-                    and not input_empty):
+            if  (counts.value < state.value or 
+                    counts.value == 0 and not input_empty):
                 state.value = 0
             elif input_empty:
                 state.value = self.n_proc * dbs
@@ -616,7 +618,6 @@ class LLM():
 
                 if len(output_lengths) >= 512 and self.tune_alloc_size:
                     fully_alloc_under = sorted(output_lengths)[int(0.9*len(output_lengths))]
-                    fully_alloc_under = ((fully_alloc_under-1)//128+1)*128
 
                 batch = Batch.prefill_batching(reqs, slots,
                                                device=input_device,
@@ -646,18 +647,21 @@ class LLM():
                         if req.done == 0:
                             fails.append(req)
                         else:
-                            chunks.append(req)
+                            chunks.append(req)  # chunk may be mixed with fresh reqs
                     allocate_fail_count.value += 1
 
-                    LLM.update_digit(fail_sample_count, task_id + 1,
+                    LLM.update_digit(fail_sample_count, 
+                                     task_id + 1,
                                      len(fails) + len(chunks))
 
                     if allocate_fail_count.value >= self.max_slot_alloc_fail_count:
-                        gbs_value = self.opt_batch_size(counts.value, self.n_proc)
-                        state.value = min(
-                            int(self.min_decode_rate * counts.value),
-                            gbs_value * self.n_proc)
-                        gbs.value = gbs_value
+                        gbs.value = self.opt_batch_size(counts.value, self.n_proc)
+                        if input_queue.qsize() < 16:
+                            state.value -= 32
+                        else:
+                            state.value = min(
+                                int(self.min_decode_rate * counts.value),
+                                gbs.value * self.n_proc)
                         allocate_fail_count.value = 0
                     continue
             else:
@@ -670,22 +674,30 @@ class LLM():
                     if len(reqs) < dbs:
                         size_of_segs = req.size_of_segs()
                         assert req.input_length + len(
-                            req.output_ids) >= size_of_segs
+                            req.output_ids) == size_of_segs + 1
                         slot_size = req.input_length + req.output_length + self.spec_buf
-                        slot_size = ((slot_size - 1) // 128 + 1) * 128
-                        extend_length = min(slot_size - size_of_segs, 512)
-                        old_segs = copy.deepcopy(req.segs)
+                        extend_length = min(slot_size - size_of_segs, self.max_extend_size)
+                        slot_size = ((extend_length - 1) // 128 + 1) * 128
                         segs = Batch.extend_slot(slots, 
                                                  req.segs, 
                                                  extend_length,
                                                  contiguous='sa' not in self.kernels)
                         if segs is not None:
                             n_suc += 1
-                            # print(f'extend {old_segs} to {segs} success!')
+                            # print(f'extend {req.segs} to {segs} success!')
                             req.segs = segs
                             reqs.append(req)
                         else:
                             # print(f'extend {req.segs} failed!')
+                            if 'sa' in self.kernels:  # no segment avaible
+                                allocate_fail_count.value += 1
+
+                                if allocate_fail_count.value >= self.max_slot_alloc_fail_count:
+                                    gbs.value = self.opt_batch_size(counts.value//2, self.n_proc)
+                                    state.value = min(
+                                        int(self.min_decode_rate * counts.value),
+                                        gbs.value * self.n_proc)
+                                    allocate_fail_count.value = 0
                             n_fail += 1
                             update_waits.append(req)
                     else:
@@ -705,7 +717,7 @@ class LLM():
                         break
 
                 if len(reqs) == 0:
-                    time.sleep(0.001)
+                    # time.sleep(0.001)
                     continue
 
                 if any([len(x.segs) > 1 for x in reqs]):
@@ -748,19 +760,49 @@ class LLM():
                         req.input_ids = []
 
                     if req.target_ids is None:
-                        if len(req.output_ids) >= req.output_length or \
-                              self.spec_algo is None and req.output_ids[-1] in self.eos_token_id or \
-                              self.spec_algo is not None and any([x in self.eos_token_id for x in req.output_ids[-self.branch_length-1:]]):
-                            if self.spec_algo is not None:
-                                output_ids = req.output_ids
-                                for j in range(max(-self.branch_length-1,-len(output_ids)),-1):
-                                    if output_ids[j] in self.eos_token_id:
-                                        req.output_ids = output_ids[:j+1]
-                                        break
+                        # if len(req.output_ids) >= req.output_length or \
+                        #       self.spec_algo is None and req.output_ids[-1] in self.eos_token_id or \
+                        #       self.spec_algo is not None and any([x in self.eos_token_id for x in req.output_ids[-self.branch_length-1:]]):
+                        #     if self.spec_algo is not None:
+                        #         output_ids = req.output_ids
+                        #         for j in range(max(-self.branch_length-1,-len(output_ids)),-1):
+                        #             if output_ids[j] in self.eos_token_id:
+                        #                 req.output_ids = output_ids[:j+1]
+                        #                 break
+                        #     output_queue.put(req)
+                        #     input_lengths.append(req.input_length)
+                        #     output_lengths.append(len(req.output_ids))
+                        #     if len(input_lengths) >= 2048:
+                        #         input_lengths = input_lengths[-1024:]
+                        #         output_lengths = output_lengths[-1024:]
+                        #     if self.spec_algo == 'lookahead':
+                        #         self.spec.update_state(req.output_ids)
+                        #     Batch.recycle(slots, req.segs)
+                        #     counts.value -= 1
+
+                        if self.spec_algo is None and (len(req.output_ids) >= req.output_length or \
+                               req.output_ids[-1] in self.eos_token_id):
+                            # no spec decode is finished
                             output_queue.put(req)
                             input_lengths.append(req.input_length)
                             output_lengths.append(len(req.output_ids))
-                            if len(input_lengths) > 1024:
+                            if len(input_lengths) >= 2048:
+                                input_lengths = input_lengths[-1024:]
+                                output_lengths = output_lengths[-1024:]
+                            Batch.recycle(slots, req.segs)
+                            counts.value -= 1
+                        elif self.spec_algo is not None and (len(req.output_ids) >= req.output_length or
+                            any([x in self.eos_token_id for x in req.output_ids[-self.branch_length-1:]])):
+                            # spec decode is finished
+                            output_ids = req.output_ids
+                            for j in range(max(-self.branch_length-1,-len(output_ids)),-1):
+                                if output_ids[j] in self.eos_token_id:
+                                    req.output_ids = output_ids[:j+1]
+                                    break
+                            output_queue.put(req)
+                            input_lengths.append(req.input_length)
+                            output_lengths.append(len(req.output_ids))
+                            if len(input_lengths) >= 2048:
                                 input_lengths = input_lengths[-1024:]
                                 output_lengths = output_lengths[-1024:]
                             if self.spec_algo == 'lookahead':
@@ -768,7 +810,7 @@ class LLM():
                             Batch.recycle(slots, req.segs)
                             counts.value -= 1
                         elif req.input_length + len(
-                                req.output_ids) >= req.size_of_segs():
+                                req.output_ids) > req.size_of_segs():
                             waits.append(req)
                         else:
                             working_queue.put(req)
@@ -809,15 +851,14 @@ class LLM():
                 mean_input_length = sum(input_lengths)/max(len(input_lengths),1)
                 mean_output_length = sum(output_lengths)/max(len(output_lengths),1)
                 print(
-                    f'task:{task_id} pid:{os.getpid():<6} step:{step:<4} '
+                    f'task:{task_id} step:{step:<4} '
                     f'task_type:{task_type:<7} ' \
                     f'bs:{bs_str:<7} ' \
                     f'counts:{counts.value:<4} state:{state.value:<2} ' \
                     f'ips:{ips} fail:{fail_str}/{len(fails):<2} '
                     f'chunk:{len(chunks):<2} wks:{wks:<4} ' \
                     f'waits:{len(waits):<4} ' \
-                    f'alloc:{fully_alloc_under} ' \
-                    f'length:{mean_input_length:.0f}/{mean_output_length:.0f} ' \
+                    f'length:{mean_input_length:.0f}/{mean_output_length:.0f}/{fully_alloc_under} ' \
                     f'time:{times:<13}')
 
 

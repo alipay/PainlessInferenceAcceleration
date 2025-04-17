@@ -3,10 +3,10 @@
 Copyright (c) Ant Financial Service Group and its affiliates.
 """
 
-import itertools
 import math
 import copy
 from ctypes import Structure, c_int
+import itertools
 
 import numpy as np
 import torch
@@ -174,60 +174,85 @@ class Batch:
 
         input_ids = []
         position_ids = []
-        qls = []
-        cache_offsets = []
-        # pids = []
-        rs = []
+        cache_indices = []
+        q_offsets = [0]
+        k_offsets = []
+        q_lengths = []
+        k_lengths = []
+        logit_indices = []
+        logit_counts = []
+        allocated = [] # allocated samples should be recycle if failed in a batch
         samplings = []
         emb_idx_list = []
-        for _, req in enumerate(reqs):
+        for i, req in enumerate(reqs):
 
-            if req.done == 0:  # no trunk or first chunk, should allocate slot
+            if req.done == 0:  # new req or first chunk, should allocate slot
                 if req.todo > 0:  # trunked
                     ql = req.todo
                 else:
                     ql = req.input_length
                 output_alloc_length = min(req.output_length, fully_alloc_under)
-                alloc_length = ((req.input_length + int(
-                    output_alloc_length) - 1 + buffer_size) // 16 + 1) * 16
-                if output_alloc_length == req.output_length:
-                    reserve = buffer_size 
+                total_alloc_length = Batch.cdiv(req.input_length + output_alloc_length + buffer_size, 16)
+                if output_alloc_length < req.output_length:
+                    reserve = Batch.cdiv(req.output_length - output_alloc_length, 16)
                 else:
-                    reserve =  ((req.input_length + req.output_length - 1 + buffer_size) // 16 + 1) * 16
+                    reserve = buffer_size
                 cache_offset, slot_index = Batch.allocate(slots, 
-                                                          alloc_length,
+                                                          total_alloc_length,
                                                           reserve=reserve,
                                                           cache_size=cache_size,
                                                           min_rate=min_rate)
-                if cache_offset == -1:
-                    for r in rs:
+                if cache_offset == -1:  # failed
+                    for r in allocated:
                         Batch.recycle(slots, r.segs)
                         r.todo = 0
                         r.done = 0
                     return Batch(batch_size=0)
                 req.segs = [
-                    (cache_offset, cache_offset + alloc_length, slot_index)]
-                rs.append(
-                    req)  # samples without allocating here should not be recycle
-            else:  # done > 0, second or next trunks
+                    (cache_offset, cache_offset + total_alloc_length, slot_index)]
+                allocated.append(req)  
+            else:  # done > 0, second trunk
                 ql = req.todo
                 cache_offset = req.segs[0][0]
 
-            qls.append(ql)
-            cache_offsets.append(cache_offset)
+            q_lengths.append(ql)
+            sum_ql = sum(q_lengths)
+            q_offsets.append(sum_ql)  # next q_offset
+            k_offsets.append(cache_offset)
+
+            targeted = req.done >= req.input_length
+            # a chunk that not contains the last \
+            # token of a prompt does not need to calculate logits
+            if targeted:
+                pos = req.iterate_target()[1]
+                cache_indices.extend(range(cache_offset + req.input_length + pos, cache_offset + req.input_length + pos + ql))
+                logit_indices.extend(range(sum_ql-ql, sum_ql))
+                logit_counts.append(ql)
+            else:
+                # chunked 
+                cache_indices.extend(range(cache_offset + req.done, cache_offset + req.done + ql))
+                if req.done + ql == req.input_length:  
+                    logit_indices.append(sum_ql-1)
+                    logit_counts.append(1)
+                else:
+                    logit_counts.append(0)
+
             if req.todo > 0:  # chunked or targeted
                 if req.done < req.input_length:  # chunked
                     ids = req.input_ids[req.done:req.done + req.todo]
-                    position_ids.append(req.done)
+                    position_id = req.done
                 else:  # targeted
                     _, pos, ids = req.iterate_target()
                     ids = ids[:req.todo]
-                    position_ids.append(req.input_length + pos)
+                    position_ids = req.input_length + pos
                 input_ids.extend(ids)
-            else:
+            else:  # complelte req
                 assert req.done == 0
                 input_ids.extend(req.input_ids)
-                position_ids.append(0)
+                position_id = 0
+            position_ids.append(position_id)
+            k_lengths.append(position_id + ql)
+
             if req.target_ids or req.temperature or req.top_k or req.top_p or req.min_p:
                 samplings.append(Sampling(target_ids=req.target_ids,
                                           temperature=req.temperature,
@@ -238,7 +263,7 @@ class Batch:
                 samplings.append(None)
 
             emb_idx = None
-            start = sum(qls) - ql
+            start = sum(q_lengths) - ql
             if embeddings is not None:
                 if req.todo == 0:
                     ss = 0
@@ -262,59 +287,26 @@ class Batch:
         if all([x is None for x in emb_idx_list]):
             emb_idx_list = None
 
-        accum = 0
-        eo = 0
-        cache_indices = []
-        q_offsets = [0]
-        k_offsets = []
-        q_lengths = []
-        k_lengths = []
-        logit_indices = []
-        logit_counts = []
-        for i, req in enumerate(reqs):
-            targeted = req.done >= req.input_length
-            ql = qls[i]
-            cache_offset = cache_offsets[i]
-            accum += ql
-            q_offsets.append(accum)
-            k_offsets.append(cache_offset)
-            # a chunk that not contains the last \
-            # token of a prompt does not need to calculate logits
-            if targeted:
-                pos = req.iterate_target()[1]
-                cache_indices.extend(range(cache_offset + req.input_length + pos, cache_offset + req.input_length + pos + ql))
-                logit_indices.extend(range(accum-ql, accum))
-                logit_counts.append(ql)
-            else:
-                # chunked 
-                cache_indices.extend(range(cache_offset + req.done, cache_offset + req.done + ql))
-                if req.done + ql == req.input_length:  
-                    logit_indices.append(accum-1)
-                    logit_counts.append(1)
-                else:
-                    logit_counts.append(0)
-            q_lengths.append(ql)
-            k_lengths.append(position_ids[i] + ql)
-
-        k_offsets.append(cache_indices[-1]+1) 
-        token_count = sum(qls)
-        kls = q_lengths
+        k_offsets.append(cache_indices[-1]+q_lengths[-1])
+        token_count = sum(q_lengths)
+        kls = k_lengths
+        qls = q_lengths
 
         input_ids = torch.tensor(input_ids, dtype=torch.int32, device=device)
         position_ids = torch.tensor(position_ids, device=device, dtype=torch.int32)
-        max_q_length = max(qls)
+        max_q_length = max(q_lengths)
         max_k_length = max(k_lengths)
         q_offsets = torch.tensor(q_offsets, dtype=torch.int32, device=device)
         k_offsets = torch.tensor(k_offsets, dtype=torch.int32, device=device)
-        k_lengths = torch.tensor(k_lengths, dtype=torch.int32, device=device)
         q_lengths = torch.tensor(q_lengths, dtype=torch.int32, device=device)
+        k_lengths = torch.tensor(k_lengths, dtype=torch.int32, device=device)
         cache_indices = torch.tensor(cache_indices,
                                               dtype=torch.int32, device=device)
         # NOTE: may be empty
         logit_indices = torch.tensor(logit_indices, dtype=torch.int32,
                                      device=device)
 
-        return Batch(batch_size=len(qls),
+        return Batch(batch_size=len(q_lengths),
                      token_count=token_count,
                      mode=0,
                      input_ids=input_ids,
@@ -365,17 +357,16 @@ class Batch:
                 k_length = kl
             else:
                 k_offset = [x[0] for x in segs] + [0] * (max_seg - n_seg)
-                pre_offset = sum([x[1]-x[0] for x in segs[:-1]])
-                cache_index = segs[-1][0] + (position_id - pre_offset)
-                k_length = [x[1] - x[0] for x in segs[:-1]] + [0] * (max_seg + 1 - n_seg) + [kl]
+                pre_length = sum([x[1]-x[0] for x in segs[:-1]])
+                cur_length = kl - pre_length 
+                cache_index = segs[-1][0] + cur_length - 1
+                k_length = [x[1] - x[0] for x in segs[:-1]] + [cur_length] + [0] * (max_seg - n_seg) + [kl]
 
             k_offsets.append(k_offset)
             if i == bs - 1 and max_seg == 1:  # for flash-attn
                 k_offsets.append(k_offset + kl)
             cache_indices.append(cache_index)
             k_lengths.append(k_length)
-
-
 
         max_q_length = 1
         max_k_length = max(position_ids) + 1 
@@ -963,3 +954,7 @@ class Batch:
             counts[slot.state] += 1
             sizes[slot.state] += slot.e - slot.s
         return {"counts": counts, "sizes": sizes}
+
+    @staticmethod 
+    def cdiv(x, b):
+        return ((x-1)//b+1)*b
