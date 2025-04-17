@@ -175,7 +175,7 @@ class Qwen2Attention(torch.nn.Module):
         self.rope(query_states, 
                   key_states, 
                   batch_meta_info.q_offsets if batch_meta_info.draft_offsets is None else batch_meta_info.draft_offsets, 
-                  batch_meta_info.pids)
+                  batch_meta_info.position_ids)
 
         attn_output = self.attention(query_states, key_states, value_states, 
                                      batch_meta_info, past_key_value)
@@ -290,6 +290,7 @@ class Qwen2ForCausalLM(PreTrainedModel):
         super().__init__(config)
         self.model = Qwen2Model(config)
         self.vocab_size = config.vocab_size
+        self.hidden_size = config.hidden_size
 
         self.rank = int(os.environ.get('FLOOD_RANK', '0'))
         self.world_size = int(os.environ.get('FLOOD_WORLD_SIZE', '1'))

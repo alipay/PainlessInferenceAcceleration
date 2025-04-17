@@ -63,7 +63,7 @@ class LLM():
                  n_stage: Optional[int] = None,
                  n_proc: Optional[int] = None,
                  cache_size: Optional[Union[int, float]] = None,
-                 slot_size: int = 8192,
+                 slot_count: int = 8192,
                  schedule_mode: str = 'pingpong',
                  chunk_size: int = 1024,
                  sync_wait_time: Tuple = (4, 4),
@@ -72,7 +72,7 @@ class LLM():
                  alloc_early_exit_rate: float = 0.95,
                  slot_fully_alloc_under: Optional[int] = None,
                  tune_alloc_size: bool = False,
-                 batch_size_step: Optional[int] = None,
+                 batch_size_step: int = 64,
                  min_batch_size: int = 16,
                  max_batch_size: int = 512,
                  batch_size_round_frac: float = 0.0,
@@ -81,9 +81,6 @@ class LLM():
                  embedding_dir: Optional[str] = None,
                  spec_algo: Optional[str] = None,
                  kernels: Tuple = ('sa',),
-                 output_file_name: str = 'tmp.jsonl',
-                 output_file_mode: str = 'w+',
-                 output_field_names: Optional[Tuple] = None,
                  logger: str = 'tmp.log',
                  debug: bool = False):
         """
@@ -142,15 +139,11 @@ class LLM():
         :param embedding_dir: embedding path for image embeddings.
         :param spec_algo: speculative decoding algo.
         :param kernels: kernels for attention and MLP.
-        :param output_file_name: output file name for results.
-        :param output_file_mode: file mode for output file.
-        :param output_field_names: output fields.
         :param logger: logger file.
         :param debug: debug or Not.
         """
 
         assert schedule_mode in ('pingpong', 'mix', 'timely')
-        assert output_file_mode in ('w', 'w+', 'a', 'a+')
 
         assert min_decode_rate > 0.0
         assert max_slot_alloc_fail_count > 0
@@ -171,7 +164,7 @@ class LLM():
         self.cache_dtype = cache_dtype or self.torch_dtype
         self.n_stage = n_stage
         self.n_proc = n_proc if n_proc else self.n_stage + 1
-        self.slot_size = slot_size
+        self.slot_count = slot_count
         self.schedule_mode = schedule_mode
         self.chunk_size = chunk_size
         self.sync_wait_time = sync_wait_time
@@ -187,9 +180,6 @@ class LLM():
         self.min_decode_rate = min_decode_rate
         self.embedding_dir = embedding_dir
         self.spec_algo = spec_algo
-        self.output_file_name = output_file_name
-        self.output_file_mode = output_file_mode
-        self.output_field_names = output_field_names
         self.logger = logger
         self.debug = debug
         self.kernels = kernels
@@ -229,8 +219,10 @@ class LLM():
         if cache_size < 1:
             token_size = (2 * self.n_layer * self.kv_heads *
                           self.head_dim * self.cache_dtype.itemsize)
-            self.cache_size = self.get_cache_size(self.n_stage, cache_size,
-                                                  token_size)
+            self.cache_size = self.get_cache_size(self.n_stage, 
+                                                  cache_size,
+                                                  token_size,
+                                                  self.device_list)
             print(
                 f'cache_size:{self.cache_size}/{cache_size:.3f} '
                 f'per_proc:{self.cache_size // self.n_proc} '
@@ -307,8 +299,12 @@ class LLM():
 
     def get_device_list(self, n_layer, n_stage, counts=None):
         if counts is None:
-            if n_layer // n_stage * n_stage == n_layer:
-                counts = [n_layer // n_stage] * n_stage 
+            if n_layer % n_stage == 0:
+                if n_stage == -1:
+                    m = n_layer // n_stage
+                    counts = [m - 2, m + 1, m + 1, m]  # set n_proc = n_stage
+                else:
+                    counts = [n_layer // n_stage] * n_stage 
             else:
                 c = (n_layer-1)//n_stage+1
                 gap = c*n_stage-n_layer 
@@ -339,20 +335,27 @@ class LLM():
                 device_map[f"{self.model_attr.layer_name}.{i}"] = idx
         return device_map
 
-    def get_cache_size(self, n_stage, max_rate, token_size):
+    def get_cache_size(self, n_stage, max_rate, token_size, device_list):
         frees = []
         totals = []
         usages = []
+        cache_sizes = []
+        total_layers = sum([len(x) for x in device_list])
+        info = []
         for i in range(n_stage):
             free_memory, total_memory = torch.cuda.mem_get_info(torch.device(i))
+            used_memory = total_memory - free_memory
+            usages.append(used_memory)
             frees.append(free_memory)
             totals.append(total_memory)
-            usages.append(total_memory - free_memory)
-        use_str = ' '.join([str(round(x / 2 ** 30, 1)) for x in usages])
-        free_str = ' '.join([str(round(x / 2 ** 30, 1)) for x in frees])
-        print(f'mem.use:{use_str} \nmem.free:{free_str}')
-        cache_size = int((min(totals) * max_rate - max(
-            usages)) / token_size * n_stage / 16) * 16
+            alloc_memory = max_rate * total_memory - used_memory
+            n_layer = len(device_list[i])
+            cache_size = alloc_memory / (token_size*n_layer/total_layers)
+            cache_sizes.append(cache_size)
+            info.append(f'{total_memory/2**30:.1f}/{used_memory/2**30:.1f}/{free_memory/2**30:.1f}')
+        info = ' '.join(info)
+        print(f'total/used/free:{info}')
+        cache_size = int(min(cache_sizes)/32) * 32
         return cache_size
 
     def get_module_by_name(self, model, name):
@@ -430,8 +433,8 @@ class LLM():
         fail_sample_count = mp.Value('l', 10 ** self.n_proc)
 
         slots = Array(Slot,
-                      [(0, self.cache_size, 1, 0)] + [(0, 0, 0, 0) for i in
-                                                      range(self.slot_size)])
+                      [(0, self.cache_size - 128, 1, 0)] + [(0, 0, 0, 0) for i in
+                                                      range(self.slot_count)])
 
         for i in range(self.n_proc):
             process = mp.Process(target=self.schedule,
@@ -492,33 +495,23 @@ class LLM():
 
             # both empty, wait
             input_empty = input_queue.empty() and fail_sample_count.value == 10 ** self.n_proc and len(chunks) == 0 and len(options) == 0
-            working_empty = working_queue.empty() and len(waits) == 0
-            if input_empty and working_empty and task_id > 0:
-                time.sleep(0.001)
+            working_empty = working_queue.empty() and len(waits) == 0 and counts.value == 0  # TODO: CHECK counts.value
+            if input_empty and working_empty:
+                time.sleep(0.01)
                 continue
 
             task_type = None
             ts = time.time()
-            step += 1
 
-            if task_id == 0 and input_empty:
-                if self.batch_size_step is None:
-                    gbs.value = min(max(2 ** int(
-                        math.log2(max(counts.value, 0) / self.n_proc + 1) + 1),
-                                        self.min_batch_size),
-                                    self.max_batch_size)
-                else:
-                    gbs.value = min(max(int(max(counts.value,0) / self.n_proc
-                                            / self.batch_size_step + 1)
-                                        * self.batch_size_step,
-                                        self.min_batch_size),
-                                    self.max_batch_size)
+            if task_id == 0:
+                gbs.value = self.opt_batch_size(counts.value, self.n_proc)
 
             if (task_id != 0 and input_empty and
                     counts.value <= self.min_batch_size):
-                time.sleep(1.0)
+                time.sleep(0.01)
                 continue
 
+            step += 1
             dbs = gbs.value
 
             if  (counts.value < state.value or counts.value == 0
@@ -620,7 +613,7 @@ class LLM():
                     time.sleep(0.001)
                     continue
 
-                if len(true_output_lengths) >= 1024 and self.tune_alloc_size:
+                if len(true_output_lengths) >= 512 and self.tune_alloc_size:
                     fully_alloc_under = sorted(true_output_lengths)[int(0.9*len(true_output_lengths))]
 
                 batch = Batch.prefill_batching(reqs, slots,
@@ -658,17 +651,7 @@ class LLM():
                                      len(fails) + len(chunks))
 
                     if allocate_fail_count.value >= self.max_slot_alloc_fail_count:
-                        if self.batch_size_step is None:
-                            gbs_value = min(max(2 ** int(math.log2(
-                                counts.value / self.n_proc) + self.batch_size_round_frac),
-                                                self.min_batch_size),
-                                            self.max_batch_size)
-                        else:
-                            gbs_value = min(max(int(
-                                counts.value / self.n_proc / self.batch_size_step +
-                                self.batch_size_round_frac) * self.batch_size_step,
-                                                self.min_batch_size),
-                                            self.max_batch_size)
+                        gbs_value = self.opt_batch_size(counts.value, self.n_proc)
                         state.value = min(
                             int(self.min_decode_rate * counts.value),
                             gbs_value * self.n_proc)
@@ -738,7 +721,7 @@ class LLM():
 
             ts = te
             self.model.forward(input_ids=batch.input_ids,
-                                                    position_ids=batch.position_ids,
+                                                    position_ids=None,
                                                     past_key_values=self.cache,
                                                     batch_meta_info=batch,
                                                     device_list=device_list,
@@ -757,7 +740,7 @@ class LLM():
                 else:
                     # reduce pickle cost
                     if task_type == 'prefill':
-                        req.input_id = []
+                        req.input_ids = []
 
                     if req.target_ids is None:
                         if len(req.output_ids) >= req.output_length or \
@@ -817,11 +800,223 @@ class LLM():
                 print(
                     f'task:{task_id} pid:{os.getpid():<6} step:{step:<4} '
                     f'task_type:{task_type:<7} ' \
-                    f'bs:{bs_str:<7} fully_alloc_under:{fully_alloc_under} ' \
+                    f'bs:{bs_str:<7} alloc:{fully_alloc_under} ' \
                     f'counts:{counts.value:<4} state:{state.value:<2} ' \
                     f'ips:{ips} fail:{fail_str}/{len(fails):<2} '
                     f'chunk:{len(chunks):<2} wks:{wks:<4} ' \
                     f'waits:{len(waits):<4} time:{times:<13}')
+
+
+    def mix_schedule(self, input_queue, chunk_quene, working_queue,
+                     output_queues, tasks, slots, counts, state,
+                     allocate_fail_count, fail_sample_count, gbs,
+                     task_id):
+        print(
+            f"mix_schedule task:{task_id} pid:{os.getpid()} ts:{time.time() % 1000:.3f}")
+        sync_layers = self.get_sync_layers(tasks, self.device_list)
+        device_list = self.device_list
+        streams = [torch.cuda.Stream(device=idx) for idx in range(self.n_stage)]
+        queue_timeout = self.queue_timeout
+        chunk_size = self.chunk_size
+
+        output_queue = output_queues[0].queue
+        state.value = 4096
+
+        fails = []
+        chunks = []
+        step = 0
+        input_device = torch.device('cpu')
+        while True:
+
+            # both empty, wait
+            input_empty = (input_queue.empty() and
+                           fail_sample_count.value == 10 ** self.n_proc)
+            if input_empty and working_queue.empty():
+                time.sleep(0.1)
+                continue
+
+            task_type = None
+            ts = time.time()
+            step += 1
+
+            if counts.value < self.min_decode_rate * state.value:
+                # gbs.value = 2*min(max(2 ** int(math.log2(counts.value / self.n_proc) + 1),
+                #                         self.min_batch_size), self.max_batch_size)
+                gbs.value = chunk_size
+                state.value = 4096
+
+            dbs = gbs.value
+
+            # fill with decoding reqs, if not full, fill with prefill reqs
+            reqs = []
+            n_tokens = 0
+
+            while True:
+                try:
+                    req = working_queue.get(block=True, timeout=queue_timeout)
+                except:
+                    break
+                req.task_type = 1
+                reqs.append(req)
+                n_tokens += 1
+                if n_tokens >= dbs:
+                    break
+
+            if n_tokens < dbs and counts.value < 0.98 * state.value:
+
+                if len(chunks) > 0:
+                    update_chunks = []
+                    for req in chunks:
+                        n_token = req.input_length - req.done
+                        if n_tokens < dbs:
+                            if n_tokens + n_token <= dbs:
+                                n_tokens += n_token
+                                req.todo = n_token
+                            else:
+                                todo = dbs - n_tokens
+                                n_tokens += todo
+                                req.todo = todo
+                            req.task_type = 0
+                            reqs.append(req)
+                        else:
+                            update_chunks.append(req)
+                    chunks = update_chunks
+
+                if n_tokens < dbs and len(fails) > 0:
+                    update_fails = []
+                    for req in fails:
+                        assert req.done == 0
+                        n_token = req.input_length
+                        if n_tokens < dbs:
+                            if n_tokens + n_token <= dbs:
+                                n_tokens += n_token
+                                req.todo = 0
+                            else:
+                                todo = dbs - n_tokens
+                                n_tokens += todo
+                                req.todo = todo
+                            req.task_type = 0
+                            reqs.append(req)
+                        else:
+                            update_fails.append(req)
+                    fails = update_fails
+
+                if n_tokens < dbs:
+                    while True:
+                        try:
+                            req = input_queue.get(block=False)
+                        except:
+                            break
+                        assert req.done == 0
+                        n_token = req.input_length
+                        if n_tokens + n_token <= dbs:
+                            n_tokens += n_token
+                            req.todo = 0
+                            req.task_type = 0
+                            reqs.append(req)
+                            if n_tokens == dbs:
+                                break
+                        else:
+                            todo = dbs - n_tokens
+                            n_tokens += todo
+                            req.todo = todo
+                            req.task_type = 0
+                            reqs.append(req)
+                            break
+
+            if len(reqs) == 0:
+                time.sleep(0.001)
+                continue
+
+            batch = Batch.mix_batching(reqs, slots, device=input_device,
+                                       min_rate=self.alloc_early_exit_rate)
+
+            if batch.batch_size > 0:
+                counts.value += sum(
+                    [x.task_type == 0 and x.done == 0 for x in reqs])
+                LLM.update_digit(fail_sample_count, task_id + 1,
+                                 len(fails) + len(chunks))
+            else:
+                # fail to allocate slot, should cache the reqs into fails
+                sizes = [str(x.input_length) + '+' + str(x.output_length) for x
+                         in reqs if x.task_type == 0 and x.done == 0]
+                sizes = ','.join(sizes)
+                print(f'No slots available! task:{task_id} pid:{os.getpid()} '
+                      f'ips:{input_queue.qsize()} counts:{counts.value} state:{state.value} '
+                      f'size:{sizes}')
+                for req in reqs:
+                    if req.task_type == 1:
+                        working_queue.put(req)
+                    elif req.done == 0:
+                        fails.append(req)
+                    else:
+                        chunks.append(req)
+                allocate_fail_count.value += 1
+
+                LLM.update_digit(fail_sample_count, task_id + 1,
+                                 len(fails) + len(chunks))
+
+                if allocate_fail_count.value >= self.max_slot_alloc_fail_count:
+                    dbs_value = self.opt_batch_size(counts.value, self.n_proc)
+                    gbs.value = dbs_value
+                    # state.value = dbs_value * self.n_proc
+                    state.value = counts.value
+                    allocate_fail_count.value = 0
+                continue
+
+            te = time.time()
+            batching_time = te - ts
+
+            ts = te
+            next_token_id_list = self.model.forward(input_ids=batch.input_ids,
+                                                    position_ids=None,
+                                                    past_key_values=self.cache,
+                                                    batch_meta_info=batch,
+                                                    device_list=device_list,
+                                                    sync_layers=sync_layers,
+                                                    streams=streams)
+
+            for i, next_token_id in enumerate(next_token_id_list):
+                req = reqs[i]
+                # TODO: allocate case may cause bug
+                if (req.task_type == 0 and req.todo > 0
+                        and req.done + req.todo < req.input_length):
+                    req.done += req.todo
+                    req.todo = 0
+                    chunks.append(req)
+                else:
+                    req.output_ids.append(next_token_id)
+                    # reduce pickle cost
+                    if req.task_type == 1:
+                        req.input_ids.clear()
+
+                    if (len(req.output_ids) >= req.output_length
+                            or next_token_id in self.eos_token_id):
+                        output_queue.put(req)
+                        Batch.recycle(slots, req.segs)
+                        counts.value -= 1
+                    else:
+                        working_queue.put(req)
+
+            # slot is not enough, recomputing samples are put into fails
+            LLM.update_digit(fail_sample_count, task_id + 1,
+                             len(fails) + len(chunks))
+
+            if self.debug:
+                ips = input_queue.qsize()
+                wks = working_queue.qsize()
+                fail_str = f'{str(fail_sample_count.value)[1:]}'
+                decode_tokens = sum([x.task_type for x in reqs])
+                prefill_tokens = n_tokens - decode_tokens
+                bs_str = f'{n_tokens}/{prefill_tokens}/{decode_tokens}'
+
+                print(f'pid:{os.getpid()} step:{step:<4} ' \
+                      f'bs:{bs_str:<11} ' \
+                      f'counts:{counts.value:<4} state:{state.value:<2} ' \
+                      f'ips:{ips} fail:{fail_str}/{len(fails):<2} wks:{wks:<4} ' \
+                      f'batch:{batching_time * 1000:<4.1f}ms '
+                      f'forward:{(time.time() - ts) * 1000:<5.1f}ms')
+
 
     def timely_schedule(self, input_queue, chunk_quene, working_queue,
                         output_queues, tasks, slots, counts, state,
@@ -1039,7 +1234,7 @@ class LLM():
 
             ts = te
             next_token_id_list = self.model.forward(input_ids=batch.input_ids,
-                                                    position_ids=batch.position_ids,
+                                                    position_ids=None,
                                                     past_key_values=self.cache,
                                                     batch_meta_info=batch,
                                                     device_list=device_list,
@@ -1099,234 +1294,6 @@ class LLM():
                     f'ips:{ips} fail:{fail_str}/{len(fails):<2} chunk:{len(chunks):<2} wks:{wks:<4} ' \
                     f'waits:{len(waits):<4} time:{times:<13}')
 
-    def mix_schedule(self, input_queue, chunk_quene, working_queue,
-                     output_queues, tasks, slots, counts, state,
-                     allocate_fail_count, fail_sample_count, gbs,
-                     task_id):
-        print(
-            f"mix_schedule task:{task_id} pid:{os.getpid()} ts:{time.time() % 1000:.3f}")
-        sync_layers = self.get_sync_layers(tasks, self.device_list)
-        device_list = self.device_list
-        streams = [torch.cuda.Stream(device=idx) for idx in range(self.n_stage)]
-        queue_timeout = self.queue_timeout
-        chunk_size = self.chunk_size
-
-        output_queue = output_queues[0].queue
-        state.value = 4096
-
-        fails = []
-        chunks = []
-        step = 0
-        input_device = torch.device('cpu')
-        while True:
-
-            # both empty, wait
-            input_empty = (input_queue.empty() and
-                           fail_sample_count.value == 10 ** self.n_proc)
-            if input_empty and working_queue.empty():
-                time.sleep(0.1)
-                continue
-
-            task_type = None
-            ts = time.time()
-            step += 1
-
-            # if task_id == 0 and input_empty:
-            #     if self.batch_size_step is None:
-            #         gbs.value = min(max(2 ** int(math.log2(counts.value / self.n_proc) + 1),
-            #                             self.min_batch_size), self.max_batch_size)
-            #     else:
-            #         gbs.value = min(max(int(counts.value / self.n_proc / bss + 1) * bss,
-            #                             self.min_batch_size), self.max_batch_size)
-
-            if counts.value < self.min_decode_rate * state.value:
-                # gbs.value = 2*min(max(2 ** int(math.log2(counts.value / self.n_proc) + 1),
-                #                         self.min_batch_size), self.max_batch_size)
-                gbs.value = chunk_size
-                state.value = 4096
-
-            dbs = gbs.value
-
-            # fill with decoding reqs, if not full, fill with prefill reqs
-            reqs = []
-            n_tokens = 0
-
-            while True:
-                try:
-                    req = working_queue.get(block=True, timeout=queue_timeout)
-                except:
-                    break
-                req.task_type = 1
-                reqs.append(req)
-                n_tokens += 1
-                if n_tokens >= dbs:
-                    break
-
-            if n_tokens < dbs and counts.value < 0.98 * state.value:
-
-                if len(chunks) > 0:
-                    update_chunks = []
-                    for req in chunks:
-                        n_token = req.input_length - req.done
-                        if n_tokens < dbs:
-                            if n_tokens + n_token <= dbs:
-                                n_tokens += n_token
-                                req.todo = n_token
-                            else:
-                                todo = dbs - n_tokens
-                                n_tokens += todo
-                                req.todo = todo
-                            req.task_type = 0
-                            reqs.append(req)
-                        else:
-                            update_chunks.append(req)
-                    chunks = update_chunks
-
-                if n_tokens < dbs and len(fails) > 0:
-                    update_fails = []
-                    for req in fails:
-                        assert req.done == 0
-                        n_token = req.input_length
-                        if n_tokens < dbs:
-                            if n_tokens + n_token <= dbs:
-                                n_tokens += n_token
-                                req.todo = 0
-                            else:
-                                todo = dbs - n_tokens
-                                n_tokens += todo
-                                req.todo = todo
-                            req.task_type = 0
-                            reqs.append(req)
-                        else:
-                            update_fails.append(req)
-                    fails = update_fails
-
-                if n_tokens < dbs:
-                    while True:
-                        try:
-                            req = input_queue.get(block=False)
-                        except:
-                            break
-                        assert req.done == 0
-                        n_token = req.input_length
-                        if n_tokens + n_token <= dbs:
-                            n_tokens += n_token
-                            req.todo = 0
-                            req.task_type = 0
-                            reqs.append(req)
-                            if n_tokens == dbs:
-                                break
-                        else:
-                            todo = dbs - n_tokens
-                            n_tokens += todo
-                            req.todo = todo
-                            req.task_type = 0
-                            reqs.append(req)
-                            break
-
-            if len(reqs) == 0:
-                time.sleep(0.001)
-                continue
-
-            batch = Batch.mix_batching(reqs, slots, device=input_device,
-                                       min_rate=self.alloc_early_exit_rate)
-
-            if batch.batch_size > 0:
-                counts.value += sum(
-                    [x.task_type == 0 and x.done == 0 for x in reqs])
-                LLM.update_digit(fail_sample_count, task_id + 1,
-                                 len(fails) + len(chunks))
-            else:
-                # fail to allocate slot, should cache the reqs into fails
-                sizes = [str(x.input_length) + '+' + str(x.output_length) for x
-                         in reqs if x.task_type == 0 and x.done == 0]
-                sizes = ','.join(sizes)
-                print(f'No slots available! task:{task_id} pid:{os.getpid()} '
-                      f'ips:{input_queue.qsize()} counts:{counts.value} state:{state.value} '
-                      f'size:{sizes}')
-                for req in reqs:
-                    if req.task_type == 1:
-                        working_queue.put(req)
-                    elif req.done == 0:
-                        fails.append(req)
-                    else:
-                        chunks.append(req)
-                allocate_fail_count.value += 1
-
-                LLM.update_digit(fail_sample_count, task_id + 1,
-                                 len(fails) + len(chunks))
-
-                if allocate_fail_count.value >= self.max_slot_alloc_fail_count:
-                    if self.batch_size_step is None:
-                        dbs_value = min(
-                            max(2 ** int(math.log2(
-                                counts.value / self.n_proc) + self.batch_size_round_frac),
-                                self.min_batch_size), self.max_batch_size)
-                    else:
-                        dbs_value = min(
-                            max(int(
-                                counts.value / self.n_proc / self.batch_size_step +
-                                self.batch_size_round_frac) * self.batch_size_step,
-                                self.min_batch_size), self.max_batch_size)
-                    gbs.value = dbs_value
-                    # state.value = dbs_value * self.n_proc
-                    state.value = counts.value
-                    allocate_fail_count.value = 0
-                continue
-
-            te = time.time()
-            batching_time = te - ts
-
-            ts = te
-            next_token_id_list = self.model.forward(input_ids=batch.input_ids,
-                                                    position_ids=batch.position_ids,
-                                                    past_key_values=self.cache,
-                                                    batch_meta_info=batch,
-                                                    device_list=device_list,
-                                                    sync_layers=sync_layers,
-                                                    streams=streams)
-
-            for i, next_token_id in enumerate(next_token_id_list):
-                req = reqs[i]
-                # TODO: allocate case may cause bug
-                if (req.task_type == 0 and req.todo > 0
-                        and req.done + req.todo < req.input_length):
-                    req.done += req.todo
-                    req.todo = 0
-                    chunks.append(req)
-                else:
-                    req.output_ids.append(next_token_id)
-                    # reduce pickle cost
-                    if req.task_type == 1:
-                        req.input_ids.clear()
-
-                    if (len(req.output_ids) >= req.output_length
-                            or next_token_id in self.eos_token_id):
-                        output_queue.put(req)
-                        Batch.recycle(slots, req.segs)
-                        counts.value -= 1
-                    else:
-                        working_queue.put(req)
-
-            # slot is not enough, recomputing samples are put into fails
-            LLM.update_digit(fail_sample_count, task_id + 1,
-                             len(fails) + len(chunks))
-
-            if self.debug:
-                ips = input_queue.qsize()
-                wks = working_queue.qsize()
-                fail_str = f'{str(fail_sample_count.value)[1:]}'
-                decode_tokens = sum([x.task_type for x in reqs])
-                prefill_tokens = n_tokens - decode_tokens
-                bs_str = f'{n_tokens}/{prefill_tokens}/{decode_tokens}'
-
-                print(f'pid:{os.getpid()} step:{step:<4} ' \
-                      f'bs:{bs_str:<11} ' \
-                      f'counts:{counts.value:<4} state:{state.value:<2} ' \
-                      f'ips:{ips} fail:{fail_str}/{len(fails):<2} wks:{wks:<4} ' \
-                      f'batch:{batching_time * 1000:<4.1f}ms '
-                      f'forward:{(time.time() - ts) * 1000:<5.1f}ms')
-
     def generate(self, requests: List, input_queue, output_queues,
                  print_count=0, log_info=''):
         responses = []
@@ -1347,7 +1314,6 @@ class LLM():
 
         tokenizer = self.tokenizer
 
-        handler = self.before_process()
         output_queue = output_queues[0].queue
 
         n_sample = len(requests)
@@ -1411,7 +1377,6 @@ class LLM():
             request.output_ids = output_ids
             responses.append(request)
             output_sample_count += 1
-            self.process_requests(handler, [request])
 
             yield request
 
@@ -1420,9 +1385,9 @@ class LLM():
                 print(
                     f"\n------------ {output_sample_count}  -------------")
                 print(f"**** prompt ****:{request.input_text}")
-                # print((f"**** input_ids ****:{request.input_ids}")
+                print(f"**** input_ids ****:{request.input_ids}")
                 print(f"**** answer ****:{fmt_output_text}")
-                # print(f"**** output_ids ****:{request.output_ids}\n")
+                print(f"**** output_ids ****:{request.output_ids}\n")
 
             if output_sample_count % 100 == 0:
                 steps.append(time.time())
@@ -1445,7 +1410,6 @@ class LLM():
                     f'slide:{slide_speed:.2f}token/s '
                     f'accum:{accum_speed:.2f}token/s')
 
-        self.after_process(handler)
         te = time.time()
         elapse = te - ts
         mean_input_length = total_input_tokens / output_sample_count
@@ -1457,11 +1421,20 @@ class LLM():
             f'throughput:{total_output_tokens / elapse:.2f}token/s\n')
         logger.close()
 
+    def opt_batch_size(self, value, n_proc):
+        bs = value / self.n_proc
+        if bs >= self.batch_size_step * (1 + self.batch_size_round_frac):
+            bs = int(value / n_proc / self.batch_size_step + self.batch_size_round_frac) * self.batch_size_step
+        else:
+            bs = 2 ** int(math.log2( max(value/ n_proc, 1)) + 0.999)
+
+        bs = min(max(bs, self.min_batch_size), self.max_batch_size)
+        return bs
+
     def tokenize(self, requests, input_queue, qps=None):
 
         ts = time.time()
         for req in requests:
-            receive_ts = time.time()
             input_ids = self.tokenizer(req.input_text)['input_ids']
             req.input_ids = input_ids
             req.input_length = len(input_ids)
@@ -1537,7 +1510,7 @@ class LLM():
                  f'n_stage:{self.n_stage} ' \
                  f'n_proc:{self.n_proc} ' \
                  f'cache_size:{self.cache_size} ' \
-                 f'slot_size:{self.slot_size} ' \
+                 f'slot_count:{self.slot_count} ' \
                  f'schedule_mode:{self.schedule_mode} ' \
                  f'chunk_size:{self.chunk_size} ' \
                  f'sync_wait_time:{self.sync_wait_time} ' \
@@ -1568,31 +1541,6 @@ class LLM():
                 req.done + req.todo <= req.emb_idx):
             return None
         return fe.get_tensor(req.rid)
-
-    def before_process(self):
-        handler = None
-        if self.output_file_name is not None:
-            handler = open(self.output_file_name, self.output_file_mode)
-        return handler
-
-    def process_requests(self, handler, requests):
-        if handler is None:
-            return
-        for request in requests:
-            kvs = request.__dict__
-            if self.output_field_names is None:
-                handler.write(json.dumps(kvs, ensure_ascii=False) + '\n')
-            else:
-                dumps = {}
-                keys = ('rid',) + self.output_field_names
-                for k, v in kvs.items():
-                    if k in keys:
-                        dumps[k] = v
-                handler.write(json.dumps(dumps, ensure_ascii=False) + '\n')
-
-    def after_process(self, handler):
-        if handler is not None:
-            handler.close()
 
     @staticmethod
     def log_mem():
