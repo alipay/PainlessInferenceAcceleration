@@ -19,7 +19,7 @@ __global__ void update_cache_kernel(uint4* k_out,  uint4* v_out,  uint4* key_sta
     int token_id = blockIdx.x;
     int tid = threadIdx.x;
 
-    int slot_id =  indices[token_id];
+    long slot_id = (long) indices[token_id];
 
     int offset = token_id * input_stride +  tid;
 
@@ -63,7 +63,7 @@ __global__ void update_fusion_cache_kernel(uint4* kv_out,  uint4* kv_states, int
     int tid = threadIdx.x;
     int dim = blockDim.x;
 
-    int slot_id =  indices[token_id];
+    long slot_id = (long) indices[token_id];
 
     int offset = token_id * input_stride +  tid;
 

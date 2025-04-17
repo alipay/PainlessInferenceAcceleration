@@ -57,6 +57,7 @@ class Reader:
         reqs = []
         for i, prompt in enumerate(prompts[:max_count]):
             chat = [{"role": "user", "content": prompt}]
+
             prompt = tokenizer.apply_chat_template(chat, tokenize=False,
                                                    add_generation_prompt=True)
             input_length = len(tokenizer(prompt).input_ids)
