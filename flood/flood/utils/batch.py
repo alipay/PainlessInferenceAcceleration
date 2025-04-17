@@ -100,7 +100,7 @@ class Batch:
                     k_offsets = [[4096,1024],[3072,0]]
         :param max_q_length: the max query length of queries in a batch
             it is used for computing sm
-        :param max_k_length: the max k length, meaningless
+        :param max_k_length: the max k length, used in flash-attn
         :param k_segs: the seg counts of each req, shape of [bs]
         :param max_seg: max seg of reqs
         :param q_lengths: query length of each req, shape of [bs]
