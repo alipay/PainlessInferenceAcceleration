@@ -65,14 +65,14 @@ class Batch:
                  cache_indices=None,
                  logit_indices=None,
                  logit_counts=None,
-                 embeddings=None,
-                 emb_idx_list=None,
                  reqs=None,
                  qls=None,
                  kls=None,
                  spec=None,
                  draft_offsets=None,
-                 retrieve_count=None
+                 retrieve_count=None,
+                 embeddings=None,
+                 emb_idx_list=None
                  ):
         """
         batch meta info for forward
@@ -81,7 +81,9 @@ class Batch:
         :param mode: forwar mode, 0:prefill 1:decode 2:spec 10:mix
         :param samplings: sampling and target params
         :param input_ids: input_id tensor
-        :param position_ids: used for rope, only record the start position id
+        :param position_ids: used for rope, only record the start position id of each req
+            example: a chunked prefill query is start from 1024 to 2048
+            position_ids = [1024]
         :param q_offsets: the first index for query tokens of each req in a batch
             shape of [bs+1], the last one is meaningless, only to be compatible for flash-attention
             decode example: [0,1,2,...,bs]
@@ -112,17 +114,20 @@ class Batch:
                     second req's segments: [512]
                     k_lengths = [[0,512,1024],[0,512,0]]
         :param mask: attention mask
-        :param cache_indices: used for cache update
-        :param logit_indices: used for cutoff logits
-        :param logit_counts: used for mapping logits and reqs in sampling
-        :param embeddings: embeddings of multi-modal models
-        :param emb_idx_list: embedding positions of multi-modal models
-        :param reqs: reqs
+        :param cache_indices: kv cache indices, used for cache updating,
+            it maps kvcache of current req to cache memory
+        :param logit_indices: indices that need to calculate logit,
+            it is used for cutoff hidden_states of the last layer to avoid redundant calculation
+        :param logit_counts: count of calculated logits of each req,
+            it is used to map logits and output ids of a req in sampling process
+        :param reqs: reqs,  `output_ids` of reqs will be updated with next token ids
         :param qls: python list of query lengths
         :param kls: python list of kvcache sizes, it is list of list if multi-segment
         :param spec: spec instance
         :param draft_offsets: act as position ids for each draft
         :param retrieve_count: lookahead retrieve draft count
+        :param embeddings: embeddings of multi-modal models
+        :param emb_idx_list: embedding positions of multi-modal models
         """
         self.batch_size = batch_size
         self.token_count = token_count
@@ -141,8 +146,6 @@ class Batch:
         self.cache_indices = cache_indices
         self.logit_indices = logit_indices
         self.logit_counts = logit_counts
-        self.embeddings = embeddings
-        self.emb_idx_list = emb_idx_list
         self.reqs = reqs
         self.mask = mask
         self.qls = qls
@@ -150,6 +153,8 @@ class Batch:
         self.spec = spec 
         self.draft_offsets = draft_offsets
         self.retrieve_count = retrieve_count
+        self.embeddings = embeddings
+        self.emb_idx_list = emb_idx_list
 
     @staticmethod
     def prefill_batching(reqs,
