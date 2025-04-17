@@ -74,12 +74,62 @@ class Batch:
                  draft_offsets=None,
                  retrieve_count=None
                  ):
+        """
+        batch meta info for forward
+        :param batch_size: req count
+        :param token_count: token count
+        :param mode: forwar mode, 0:prefill 1:decode 2:spec 10:mix
+        :param samplings: sampling and target params
+        :param input_ids: input_id tensor
+        :param position_ids: used for rope, only record the start position id
+        :param q_offsets: the first index for query tokens of each req in a batch
+            shape of [bs+1], the last one is meaningless, only to be compatible for flash-attention
+            decode example: [0,1,2,...,bs]
+            prefill example: [0, q0, q0+q1, q0+q1+q2,...]
+        :param k_offsets: the first key/value indices of each req
+            SINGLE SEG: the kvcaches of reqs are all single-segment
+                shape of [bs+1], the last one is meaningless
+                example: [4096,1024,2048,...,dummy]
+            MULTIPLE SEG: at least one of the kvcaches of reqs are multi-segment
+                shape of [bs, max_seg]
+                example:  
+                    first req has 2 segs with indices [4096,1024] and second req has 1 seg with indices [3073]
+                    k_offsets = [[4096,1024],[3072,0]]
+        :param max_q_length: the max query length of queries in a batch
+            it is used for computing sm
+        :param max_k_length: the max k length, meaningless
+        :param k_segs: the seg counts of each req, shape of [bs]
+        :param max_seg: max seg of reqs
+        :param q_lengths: query length of each req, shape of [bs]
+        :param k_lengths: kvcache size of each req
+            SINGLE SEG: the kvcaches of reqs are all single-segment
+                shape of [bs]
+                example: [1024,1024,1024,...]
+            MULTIPLE SEG: at least one of the kvcaches of reqs are multi-segment
+                shape of [bs, max_seg+1], it is accum lengths of each seg
+                example:
+                    first req's segments: [512, 512]
+                    second req's segments: [512]
+                    k_lengths = [[0,512,1024],[0,512,0]]
+        :param mask: attention mask
+        :param cache_indices: used for cache update
+        :param logit_indices: used for cutoff logits
+        :param logit_counts: used for mapping logits and reqs in sampling
+        :param embeddings: embeddings of multi-modal models
+        :param emb_idx_list: embedding positions of multi-modal models
+        :param reqs: reqs
+        :param qls: python list of query lengths
+        :param kls: python list of kvcache sizes, it is list of list if multi-segment
+        :param spec: spec instance
+        :param draft_offsets: act as position ids for each draft
+        :param retrieve_count: lookahead retrieve draft count
+        """
         self.batch_size = batch_size
         self.token_count = token_count
-        self.mode = mode  # 0:prefill 1:decode 10:mix
+        self.mode = mode  
         self.samplings = samplings
         self.input_ids = input_ids
-        self.position_ids = position_ids # used for rope, only record the start position id
+        self.position_ids = position_ids
         self.q_offsets = q_offsets
         self.k_offsets = k_offsets
         self.q_lengths = q_lengths
@@ -88,12 +138,12 @@ class Batch:
         self.max_q_length = max_q_length
         self.max_k_length = max_k_length
         self.max_seg = max_seg
-        self.cache_indices = cache_indices  # used for cache update
-        self.logit_indices = logit_indices  # used for cutoff logits
-        self.logit_counts = logit_counts  # used for sampling
+        self.cache_indices = cache_indices
+        self.logit_indices = logit_indices
+        self.logit_counts = logit_counts
         self.embeddings = embeddings
         self.emb_idx_list = emb_idx_list
-        self.reqs = reqs  # used for multi-node mode
+        self.reqs = reqs
         self.mask = mask
         self.qls = qls
         self.kls = kls
