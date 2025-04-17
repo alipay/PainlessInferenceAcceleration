@@ -51,7 +51,7 @@ if __name__ == '__main__':
             tokenize=False,
             add_generation_prompt=True,
         )
-        reqs.append(Request(i, input_text=text, output_length=2048))
+        reqs.append(Request(i, input_text=text, output_length=4096))
 
 
     worker = LLM(model_path,
@@ -64,7 +64,7 @@ if __name__ == '__main__':
                  tune_alloc_size=True,
                  eos_token_id=None,
                  debug=True,
-                 kernels=('fa2',),
+                 kernels=('sa',),
                 #  spec_algo = 'lookahead',
                  logger='example.log')
 
