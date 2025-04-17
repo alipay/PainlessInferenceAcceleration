@@ -53,7 +53,6 @@ class Batch:
                  samplings=None,
                  input_ids=None,
                  position_ids=None,
-                 pids=None,
                  q_offsets=None,
                  k_offsets=None,
                  max_q_length=None,
@@ -80,8 +79,7 @@ class Batch:
         self.mode = mode  # 0:prefill 1:decode 10:mix
         self.samplings = samplings
         self.input_ids = input_ids
-        self.position_ids = position_ids
-        self.pids = pids  # used for rope, record the start position id
+        self.position_ids = position_ids # used for rope, only record the start position id
         self.q_offsets = q_offsets
         self.k_offsets = k_offsets
         self.q_lengths = q_lengths
@@ -122,11 +120,11 @@ class Batch:
         position_ids = []
         qls = []
         cache_offsets = []
-        pids = []
+        # pids = []
         rs = []
         samplings = []
         emb_idx_list = []
-        for ir, req in enumerate(reqs):
+        for _, req in enumerate(reqs):
 
             if req.done == 0:  # no trunk or first chunk, should allocate slot
                 if req.todo > 0:  # trunked
@@ -164,18 +162,16 @@ class Batch:
             if req.todo > 0:  # chunked or targeted
                 if req.done < req.input_length:  # chunked
                     ids = req.input_ids[req.done:req.done + req.todo]
-                    # position_ids.extend(range(req.done, req.done + req.todo))
-                    pids.append(req.done)
+                    position_ids.append(req.done)
                 else:  # targeted
                     _, pos, ids = req.iterate_target()
                     ids = ids[:req.todo]
-                    pids.append(req.input_length + pos)
+                    position_ids.append(req.input_length + pos)
                 input_ids.extend(ids)
             else:
                 assert req.done == 0
                 input_ids.extend(req.input_ids)
-                position_ids.extend(range(ql))
-                pids.append(0)
+                position_ids.append(0)
             if req.target_ids or req.temperature or req.top_k or req.top_p or req.min_p:
                 samplings.append(Sampling(target_ids=req.target_ids,
                                           temperature=req.temperature,
@@ -241,8 +237,8 @@ class Batch:
                     logit_counts.append(1)
                 else:
                     logit_counts.append(0)
-            used_k = pids[i] + ql
-            q_lengths.append(used_k)
+            used_k = position_ids[i] + ql
+            q_lengths.append(ql)
             k_lengths.append(used_k)
 
         k_offsets.append(cache_indices[-1]+1) 
@@ -250,9 +246,7 @@ class Batch:
         kls = q_lengths
 
         input_ids = torch.tensor(input_ids, dtype=torch.int32, device=device)
-        position_ids = torch.tensor(position_ids, dtype=torch.int32,
-                                    device=device)
-        pids = torch.tensor(pids, device=device, dtype=torch.int32)
+        position_ids = torch.tensor(position_ids, device=device, dtype=torch.int32)
         max_q_length = max(qls)
         max_k_length = max(k_lengths)
         q_offsets = torch.tensor(q_offsets, dtype=torch.int32, device=device)
@@ -270,7 +264,6 @@ class Batch:
                      mode=0,
                      input_ids=input_ids,
                      position_ids=position_ids,
-                     pids=pids,
                      q_offsets=q_offsets,
                      k_offsets=k_offsets,
                      max_q_length=max_q_length,
@@ -302,9 +295,9 @@ class Batch:
         input_ids = torch.tensor(input_ids, dtype=torch.int32, device=device)
         position_ids = [x.input_length + len(x.output_ids) - 1 for x in reqs]
         max_q_length = 1
-        max_k_length = max(position_ids) + 1
+        max_k_length = max(position_ids) + 1 
         if max_seg == 1:
-            k_offsets = [x.segs[0][0] for x in reqs] + [reqs[-1].segs[0][0]]
+            k_offsets = [x.segs[0][0] for x in reqs] + [reqs[-1].segs[0][0]+position_ids[-1]]
         else:
             k_offsets = sum(
                 [[y[0] for y in x.segs] + [0] * (max_seg - len(x.segs)) for x in
@@ -322,11 +315,10 @@ class Batch:
             k_lengths = []
             for i in range(bs):
                 segs = reqs[i].segs
-                k_length = [0] + [x[1] - x[0] for x in segs[:-1]] + [
-                    position_ids[i] + 1]
-                k_length = k_length + [0] * (max_seg - len(segs))
+                k_length = [0] + [x[1] - x[0] for x in segs[:-1]] + [0] * (max_seg + 1 - len(segs))  # NOTE: CHANGED
                 k_length = list(
                     itertools.accumulate(k_length, lambda x, y: x + y))
+                k_length[len(segs)] = position_ids[i] + 1
                 k_lengths.append(k_length)
                 k_segs.append(len(segs))
 
@@ -360,7 +352,6 @@ class Batch:
                      mode=1,
                      input_ids=input_ids,
                      position_ids=position_ids,
-                     pids=position_ids,
                      q_offsets=q_offsets,
                      k_offsets=k_offsets,
                      max_q_length=max_q_length,
@@ -406,7 +397,6 @@ class Batch:
 
         max_seg = max([len(x.segs) for x in reqs])
         position_ids = []
-        pids = []
         draft_offsets = [0]  # used for rope
         cache_indices = []
         k_lengths = []
@@ -415,13 +405,11 @@ class Batch:
             s = req.input_length + len(req.output_ids)
             n_seg = len(req.segs)
             offset = req.segs[-1][0]
-            position_ids.extend(
-                [s - 1 + j for j in range(l)])
-            pids.extend([s] + [s+1]*(retrieve_count-1))
+            position_ids.extend([s] + [s+1]*(retrieve_count-1))
             draft_offsets.extend([i*l+(j+1)*spec.branch_length+(0 if j==retrieve_count-1 else 1) for j in range(retrieve_count)])
             if max_seg == 1:
                 k_offsets.append(offset)
-                k_lengths.append(position_ids[-1] + 1)
+                k_lengths.append(s + l - 1)
                 cache_indices.extend([s - 1 + j + offset for j in
                                                range(
                                                    l)])
@@ -431,20 +419,18 @@ class Batch:
                     [s - 1 + j + offset[n_seg - 1] for j in
                      range(l)])
                 k_length = [0] + [x[1] - x[0] for x in req.segs[:-1]] + [
-                    position_ids[-1] + 1]
+                    s + l - 1]
                 k_length = k_length + [0] * (max_seg - len(req.segs))
                 k_length = itertools.accumulate(k_length)
                 k_lengths.extend(k_length)
         k_offsets.append(reqs[-1].segs[-1][0]+reqs[-1].input_length + len(reqs[-1].output_ids)+l-1)
 
         max_q_length = l
-        max_k_length = max(position_ids) + 1
+        max_k_length = max(k_lengths)  # NOTE: CHANGED AND NOT VERIFY 
 
-        position_ids = torch.tensor(position_ids, dtype=torch.int32,
-                                    device=device)
         draft_offsets = torch.tensor(draft_offsets, dtype=torch.int32,
                                     device=device)
-        pids = torch.tensor(pids, dtype=torch.int32,
+        position_ids = torch.tensor(position_ids, dtype=torch.int32,
                                     device=device)
 
         kls = k_lengths
@@ -474,7 +460,6 @@ class Batch:
                      mode=2,
                      input_ids=input_ids,
                      position_ids=position_ids,
-                     pids=pids,
                      q_offsets=q_offsets,
                      k_offsets=k_offsets,
                      max_q_length=max_q_length,
@@ -503,16 +488,14 @@ class Batch:
         position_ids = []
         qls = []
         cache_offsets = []
-        pids = []
         rs = []  # for recycle
 
         for req in reqs:
             if req.task_type == 1:
                 input_ids.append(req.output_ids[-1])
-                position_ids.append(req.input_length + len(req.output_ids) - 1)
                 qls.append(1)
                 cache_offsets.append(req.segs[0])
-                pids.append(req.input_length + len(req.output_ids) - 1)
+                position_ids.append(req.input_length + len(req.output_ids) - 1)
             else:
 
                 if req.done == 0:  # complete sample or first chunk, should allocate slot
@@ -545,13 +528,11 @@ class Batch:
                 if req.todo > 0:  # chunked
                     ids = req.input_ids[req.done:req.done + req.todo]
                     input_ids.extend(ids)
-                    position_ids.extend(range(req.done, req.done + req.todo))
-                    pids.append(req.done)
+                    position_ids.append(req.done)
                 else:
                     assert req.done == 0
                     input_ids.extend(req.input_ids)
-                    position_ids.extend(range(0, ql))
-                    pids.append(0)
+                    position_ids.append(0)
 
         accum = 0
         eo = 0
@@ -565,18 +546,16 @@ class Batch:
             cache_offset = cache_offsets[i]
             accum += ql
             q_offsets.append(accum)
-            so = cache_offset + pids[i]
+            so = cache_offset + position_ids[i]
             eo = so + ql
             cache_indices.extend(range(so, eo))
             k_offsets.append(cache_offset)
-            k_lengths.append(pids[i] + ql)
+            k_lengths.append(position_ids[i] + ql)
             q_lengths.append(ql)
         k_offsets.append(eo)
 
         input_ids = torch.tensor(input_ids, dtype=torch.int32, device=device)
-        position_ids = torch.tensor(position_ids, dtype=torch.int32,
-                                    device=device)
-        pids = torch.tensor(pids, dtype=torch.int32, device=device)
+        position_ids = torch.tensor(position_ids, dtype=torch.int32, device=device)
         max_q_length = max(qls)
         max_k_length = max(k_lengths)
         kls = k_lengths
@@ -593,7 +572,6 @@ class Batch:
                      mode=10,
                      input_ids=input_ids,
                      position_ids=position_ids,
-                     pids=pids,
                      q_offsets=q_offsets,
                      k_offsets=k_offsets,
                      max_q_length=max_q_length,
@@ -609,11 +587,8 @@ class Batch:
                      )
 
     def to(self, device, non_blocking=False):
-        if self.input_ids.device != device:
-            self.input_ids = self.input_ids.to(device, non_blocking=non_blocking)
         self.input_ids = self.input_ids.to(device, non_blocking=non_blocking)
         self.position_ids = self.position_ids.to(device, non_blocking=non_blocking)
-        self.pids = self.pids.to(device, non_blocking=non_blocking)
         self.q_offsets = self.q_offsets.to(device, non_blocking=non_blocking)
         self.k_offsets = self.k_offsets.to(device, non_blocking=non_blocking)
         self.q_lengths = self.q_lengths.to(device, non_blocking=non_blocking)
@@ -650,7 +625,6 @@ class Batch:
             print(f'start send input_ids:{self.input_ids}')
         dist.send(self.input_ids, dst, group=group)
         dist.send(self.position_ids, dst, group=group)
-        dist.send(self.pids, dst, group=group)
         dist.send(self.q_offsets, dst, group=group)
         dist.send(self.k_offsets, dst, group=group)
         dist.send(self.q_lengths, dst, group=group)
@@ -696,7 +670,6 @@ class Batch:
                                      dtype=torch.int32)
         self.position_ids = torch.empty([token_count], device=device,
                                         dtype=torch.int32)
-        self.pids = torch.empty([batch_size], device=device, dtype=torch.int32)
         self.q_offsets = torch.empty([batch_size + 1], device=device,
                                      dtype=torch.int32)
         self.k_offsets = torch.empty([batch_size + 1], device=device,
@@ -716,7 +689,6 @@ class Batch:
             print(f'finish recv input_ids:{self.input_ids}')
 
         dist.recv(self.position_ids, src=src, group=group)
-        dist.recv(self.pids, src=src, group=group)
         dist.recv(self.q_offsets, src=src, group=group)
         dist.recv(self.k_offsets, src=src, group=group)
         dist.recv(self.q_lengths, src=src, group=group)

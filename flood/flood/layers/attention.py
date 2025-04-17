@@ -112,15 +112,20 @@ class Fp16Attention(torch.nn.Module):
 
 
 class Fp16SegAttention(torch.nn.Module):
-    def __init__(self, layer_idx, softmax_scale=1.0):
+    def __init__(self, layer_idx, softmax_scale=1.0, online_scale=True):
         super().__init__()
         self.layer_idx = layer_idx
         self.softmax_scale = softmax_scale
+        self.online_scale = online_scale
 
     def forward(self, query_states, key_states, value_states, batch_meta_info,
                 cache):
-        key_states, value_states = cache.update_cache(key_states, value_states,
-                                                self.layer_idx, batch_meta_info)
+        # if any([x.done>0 for x in batch_meta_info.reqs]):
+        #     print('debug') 
+        key_states, value_states = cache.update_cache(key_states, 
+                                                      value_states,
+                                                      self.layer_idx, 
+                                                      batch_meta_info)
         # batch_meta_info.max_seg = 1
         # batch_meta_info.mask = None
         output = seg_attn_fwd(
@@ -128,7 +133,7 @@ class Fp16SegAttention(torch.nn.Module):
             key_states,
             value_states,
             batch_meta_info,
-            causal=True
+            online_scale=self.online_scale
         )
 
         return output

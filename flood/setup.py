@@ -15,7 +15,7 @@ from torch.utils import cpp_extension
 from torch.utils.cpp_extension import BuildExtension, CUDAExtension, \
     CUDA_HOME
 
-__version__ = "0.0.5"
+__version__ = "0.0.6"
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
 
