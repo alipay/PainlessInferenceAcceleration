@@ -198,7 +198,7 @@ def retrieve_draft_table(tokens,
                                 dtype=draft_table.dtype)
     output_tokens[:, 0] = tokens[:, 1]
 
-    output_masks = torch.triu(
+    output_masks = torch.tril(
         torch.ones((batch_size, l, l), 
                     device=device, 
                     dtype=torch.int8),
@@ -206,7 +206,7 @@ def retrieve_draft_table(tokens,
     for i in range(batch_size):
         for j in range(1, retrieve_count):
             output_masks[i,j * branch_length + 1:(j + 1) * branch_length + 1,
-            1:j * branch_length + 1] = 1
+            1:j * branch_length + 1] = 0
     output_masks = output_masks.view(batch_size * l, l)
 
     grid = lambda META: (batch_size,)

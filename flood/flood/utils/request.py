@@ -50,7 +50,7 @@ class Request:
                  output_ids=None, input_length=-1, output_length=200, emb_idx=0,
                  emb_size=0, content=None, output_index=0, target_tokens=None,
                  target_ids=None, temperature=None, top_k=None, top_p=None,
-                 min_p=None):
+                 min_p=None, truncated=False):
         # used in samples
         self.rid = rid
         self.input_text = input_text
@@ -69,3 +69,4 @@ class Request:
         self.top_k = top_k
         self.top_p = top_p
         self.min_p = min_p
+        self.truncated = truncated
