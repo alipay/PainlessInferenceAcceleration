@@ -71,7 +71,7 @@ class LLM():
                  max_slot_alloc_fail_count: int = 1,
                  alloc_early_exit_rate: float = 0.95,
                  slot_fully_alloc_under: Optional[int] = None,
-                 max_extend_size: int = 512,
+                 max_extend_size: int = 256,
                  tune_alloc_size: bool = False,
                  batch_size_step: int = 64,
                  min_batch_size: int = 16,
@@ -1420,6 +1420,10 @@ class LLM():
 
             if output_ids[-1] in self.eos_token_id:
                 output_ids = output_ids[:-1]
+                truncated = False 
+            else:
+                truncated = True
+
             if len(output_ids) > 0 and isinstance(output_ids[0], list):
                 target_tokens = request.target_tokens
                 output_text = ' '.join(
@@ -1429,7 +1433,8 @@ class LLM():
                 output_text = tokenizer.decode(output_ids)
 
             request.output_text = output_text
-            request.output_ids = output_ids
+            request.output_ids = output_ids 
+            request.truncated = truncated
             responses.append(request)
             output_sample_count += 1
 

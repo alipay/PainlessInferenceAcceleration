@@ -20,6 +20,15 @@ except:
 
 
 
+
+def seed_everything(seed: int) -> None:
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    torch.backends.cudnn.deterministic = True
+
+
 def benchmark_func(fn, *args, n_warmup=100, n_repeat=1000, ref_time=None,
                    ref_flops=None, desc='', **kwargs):
     func_name = fn.__name__
@@ -46,7 +55,7 @@ def benchmark_func(fn, *args, n_warmup=100, n_repeat=1000, ref_time=None,
 
     average_event_time = times * 1000 / (n_repeat - 2 * clip)
 
-    line = f'{func_name} {desc} time:{average_event_time:.1f} us'
+    line = f'{func_name:<32} {desc} time:{average_event_time:.1f} us'
 
     if ref_flops is not None:
         perf = ref_flops / 1e12 / (
@@ -59,18 +68,6 @@ def benchmark_func(fn, *args, n_warmup=100, n_repeat=1000, ref_time=None,
     
     print(line)
     return average_event_time
-
-
-def seed_everything(seed: int) -> None:
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
-    torch.backends.cudnn.deterministic = True
-
-
-
-
 
 
 def torch_attn(q, k, v, causal=True, mask=None):
@@ -209,11 +206,10 @@ def get_seg_attn_meta(qls, klss, mask=None):
     device = 'cuda:0'
     bs = len(qls)
     max_seg = max([len(x) for x in klss])  # equals
-    q_offsets = [0]  # bs+1
-    k_offsets = [0]  # (bs*max_seg+1), [0,l,2l,] even if single seg
-    q_lengths = []  # bs
-    k_lengths = [
-        0] if max_seg > 1 else []  # (bs*max_seg+bs) if multi seg, (bs+1) if single seg. multi seg format:[0,l,2l.,,,0,l,2l..,0]
+    q_offsets = [0]  # [bs+1]
+    k_offsets = [0]  # [bs+1] if single seg else [bs, max_seg]
+    q_lengths = []  # [bs]
+    k_lengths = []  # [bs] if single seg else [bs, max_seg+1]
     k_segs = []
     max_q_length = max(qls)
     max_k_length = max([sum(x) for x in klss])
@@ -223,9 +219,9 @@ def get_seg_attn_meta(qls, klss, mask=None):
         q_lengths.append(ql)
         for j, kl in enumerate(kls):
             k_offsets.append(k_offsets[-1] + kl)
-            k_lengths.append(k_lengths[-1] + kl if max_seg > 1 else kl)
-        if max_seg > 1 and i < len(qls) - 1:
-            k_lengths.append(0)
+            k_lengths.append(kl)
+        if max_seg > 1:
+            k_lengths.append(sum(kls))
         k_segs.append(max_seg)
 
     q_offsets = torch.tensor(q_offsets, device=device, dtype=torch.int32)
