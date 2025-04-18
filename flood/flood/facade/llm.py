@@ -164,7 +164,7 @@ class LLM():
         self.emb_dtype = emb_dtype or self.torch_dtype
         self.cache_dtype = cache_dtype or self.torch_dtype
         self.n_stage = n_stage
-        self.n_proc = n_proc if n_proc else self.n_stage + 1
+        self.n_proc = n_proc if n_proc else self.n_stage
         self.slot_count = slot_count
         self.schedule_mode = schedule_mode
         self.chunk_size = chunk_size
@@ -656,7 +656,7 @@ class LLM():
 
                     if allocate_fail_count.value >= self.max_slot_alloc_fail_count:
                         gbs.value = self.opt_batch_size(counts.value, self.n_proc)
-                        if input_queue.qsize() < 16:
+                        if input_queue.qsize() < 16 and state.value > 32:
                             state.value -= 32
                         else:
                             state.value = min(

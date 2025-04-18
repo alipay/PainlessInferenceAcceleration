@@ -61,23 +61,23 @@ def single_seg_attn_kernel(
     hid = tl.program_id(1)
     mid = tl.num_programs(2) - tl.program_id(2) - 1
 
-    seqlen_q = tl.load(q_lengths + bid)
+    q_length = tl.load(q_lengths + bid)
 
-    if mid * TOKEN >= seqlen_q:
+    if mid * TOKEN >= q_length:
         return
     offs_m = tl.arange(0, BLOCK_M)
     offs_n = tl.arange(0, BLOCK_N)
     offs_d = tl.arange(0, HEADDIM)
     q_offset = tl.load(q_offsets + bid)
     k_offset = tl.load(k_offsets + bid).to(tl.int64)
-    seqlen_k = tl.load(k_lengths + bid)
+    k_length = tl.load(k_lengths + bid)
 
-    gap = seqlen_k - seqlen_q
+    gap = k_length - q_length
     q_idx = offs_m // GROUP
     H = stride_q // HEADDIM
     offs_m = offs_m % GROUP + offs_m // GROUP * H
     
-    max_m_idx = min(seqlen_q * H, (mid + 1) * TOKEN * H)
+    max_m_idx = min(q_length * H, (mid + 1) * TOKEN * H)
 
     q_ptrs = (
             Q + q_offset * stride_q + mid * TOKEN * stride_q + hid * HEADDIM * GROUP + (
@@ -104,19 +104,19 @@ def single_seg_attn_kernel(
                     other=0.0)
     
     if MASK_TYPE == 0:
-        for n in range(0, seqlen_k, BLOCK_N):
+        for n in range(0, k_length, BLOCK_N):
             n = tl.multiple_of(n, BLOCK_N)
 
             if EVEN_N:
                 k = tl.load(k_ptrs + n * stride_k)
             else:
                 k = tl.load(k_ptrs + n * stride_k,
-                            mask=(n + offs_n)[:, None] < seqlen_k, 
+                            mask=(n + offs_n)[:, None] < k_length, 
                             other=0.0)
             qk = tl.dot(q, tl.trans(k))
             
             if not EVEN_N:
-                qk += tl.where((n + offs_n)[None, :] < seqlen_k, 0, float("-inf"))
+                qk += tl.where((n + offs_n)[None, :] < k_length, 0, float("-inf"))
 
             if ONLINE_SCALE:
                 p, acc_o, lse, maxs = safe_scale(qk, acc_o, lse, maxs, softmax_scale)
@@ -127,7 +127,7 @@ def single_seg_attn_kernel(
                 v = tl.load(v_ptrs + n * stride_k)
             else:
                 v = tl.load(v_ptrs + n * stride_k,
-                            mask=(n + offs_n)[:, None] < seqlen_k, 
+                            mask=(n + offs_n)[:, None] < k_length, 
                             other=0.0)
             p = p.to(v.dtype)
             acc_o = tl.dot(p, v, acc_o)
@@ -165,19 +165,19 @@ def single_seg_attn_kernel(
                         mid * TOKEN * MASK_SIZE - sub_gap + \
                             (tl.arange(0,BLOCK_M)%(GROUP*TOKEN)//GROUP)[:,None] * MASK_SIZE + offs_n[None,:]
 
-        for n in range(mask_free_step * BLOCK_N, min((mid + 1) * TOKEN + gap, seqlen_k), BLOCK_N):
+        for n in range(mask_free_step * BLOCK_N, min((mid + 1) * TOKEN + gap, k_length), BLOCK_N):
             n = tl.multiple_of(n, BLOCK_N)
 
             if EVEN_N:
                 k = tl.load(k_ptrs + n * stride_k)
             else:
                 k = tl.load(k_ptrs + n * stride_k,
-                            mask=(n + offs_n)[:, None] < seqlen_k, 
+                            mask=(n + offs_n)[:, None] < k_length, 
                             other=0.0)
 
             qk = tl.dot(q, tl.trans(k))
             if not EVEN_N:
-                qk += tl.where((n + offs_n)[None, :] < seqlen_k, 0, float("-inf"))
+                qk += tl.where((n + offs_n)[None, :] < k_length, 0, float("-inf"))
             
             qk += tl.where(q_pos >= (n + offs_n)[None, :], 0, float("-inf"))
             
@@ -185,7 +185,7 @@ def single_seg_attn_kernel(
                 qk = tl.reshape(qk, (TOKEN, GROUP, BLOCK_N), can_reorder=False)
                 mask = tl.load(mask_ptrs, mask=(offs_n[None, :] < MASK_SIZE) & (
                         offs_n[None, :] >= sub_gap), other=0.0)
-                mask = -10000 * tl.cast(mask, tl.float32)
+                mask = -10000 * mask.to(tl.float32)
                 qk += mask[:, None, :]
                 qk = tl.reshape(qk, (TOKEN * GROUP, BLOCK_N), can_reorder=False)
             elif MASK_TYPE == 3:
@@ -202,7 +202,7 @@ def single_seg_attn_kernel(
                 v = tl.load(v_ptrs + n * stride_k)
             else:
                 v = tl.load(v_ptrs + n * stride_k,
-                            mask=(n + offs_n)[:, None] < seqlen_k, 
+                            mask=(n + offs_n)[:, None] < k_length, 
                             other=0.0)
 
             p = p.to(v.dtype)
@@ -214,7 +214,7 @@ def single_seg_attn_kernel(
     H = stride_o // HEADDIM
     offs_m = tl.arange(0, BLOCK_M)
     offs_m = offs_m % GROUP + offs_m // GROUP * H
-    max_m_idx = min(seqlen_q, (mid + 1) * TOKEN) * H
+    max_m_idx = min(q_length, (mid + 1) * TOKEN) * H
 
     out_ptrs = (
             Out
@@ -261,10 +261,10 @@ def multi_seg_attn_kernel(
     hid = tl.program_id(1)
     mid = tl.num_programs(2) - tl.program_id(2) - 1
 
-    seqlen_q = tl.load(q_lengths + bid)
+    q_length = tl.load(q_lengths + bid)
     TOKEN = BLOCK_M // GROUP
 
-    if mid * TOKEN >= seqlen_q:
+    if mid * TOKEN >= q_length:
         return
     
     offs_m = tl.arange(0, BLOCK_M)
@@ -276,7 +276,7 @@ def multi_seg_attn_kernel(
 
     H = stride_q // HEADDIM
     offs_m = offs_m % GROUP + offs_m // GROUP * H
-    max_m_off = min(seqlen_q * H, (mid + 1) * TOKEN * H)
+    max_m_off = min(q_length * H, (mid + 1) * TOKEN * H)
     
     q_ptrs = (
             Q + q_offset * stride_q + mid * TOKEN * stride_q + hid * HEADDIM * GROUP + (
@@ -289,12 +289,12 @@ def multi_seg_attn_kernel(
 
     q = tl.load(q_ptrs, mask=(mid * TOKEN * H + offs_m)[:, None] < max_m_off,
             other=0.0)
-    gap = seqlen_total_k - seqlen_q
+    gap = seqlen_total_k - q_length
 
     if MASK_TYPE == 0:
         for i_seg in range(n_seg):
             k_offset = tl.load(k_offsets + bid * max_seg + i_seg).to(tl.int64)
-            seqlen_k = tl.load(k_lengths + bid * (max_seg + 1) + i_seg)
+            k_length = tl.load(k_lengths + bid * (max_seg + 1) + i_seg)
 
             k_ptrs = (
                     K + k_offset * stride_k + hid * HEADDIM + (
@@ -305,12 +305,12 @@ def multi_seg_attn_kernel(
                         offs_n[:, None] * stride_k + offs_d[None, :])
             )
 
-            for n in range(0, seqlen_k, BLOCK_N):
+            for n in range(0, k_length, BLOCK_N):
                 n = tl.multiple_of(n, BLOCK_N)
-                k = tl.load(k_ptrs + n * stride_k, mask=(n + offs_n)[:, None] < seqlen_k, other=0.0)
+                k = tl.load(k_ptrs + n * stride_k, mask=(n + offs_n)[:, None] < k_length, other=0.0)
                 qk = tl.dot(q, tl.trans(k))
                 if not EVEN_N:
-                    qk += tl.where((n + offs_n)[None, :] < seqlen_k, 0,
+                    qk += tl.where((n + offs_n)[None, :] < k_length, 0,
                             float("-inf"))
 
                 if ONLINE_SCALE:
@@ -318,13 +318,13 @@ def multi_seg_attn_kernel(
                 else:
                     p, lse = fast_scale(qk, softmax_scale, lse)
 
-                v = tl.load(v_ptrs + n * stride_k, mask=(n + offs_n)[:, None] < seqlen_k, other=0.0)
+                v = tl.load(v_ptrs + n * stride_k, mask=(n + offs_n)[:, None] < k_length, other=0.0)
                 p = p.to(v.dtype)
                 acc_o += tl.dot(p, v)
     else:
         for i_seg in range(n_seg - 1):
             k_offset = tl.load(k_offsets + bid * max_seg + i_seg).to(tl.int64)
-            seqlen_k_seg = tl.load(k_lengths + bid * (max_seg + 1) + i_seg)
+            k_seg_length = tl.load(k_lengths + bid * (max_seg + 1) + i_seg)
 
             k_ptrs = (
                     (K + k_offset * stride_k + hid * HEADDIM) + (
@@ -335,19 +335,19 @@ def multi_seg_attn_kernel(
                         offs_n[:, None] * stride_k + offs_d[None, :])
             )
 
-            for i in range((seqlen_k_seg - 1) // BLOCK_N + 1):
+            for i in range((k_seg_length - 1) // BLOCK_N + 1):
                 n = i * BLOCK_N
                 n = tl.multiple_of(n, BLOCK_N)
                 if EVEN_N:
                     k = tl.load(k_ptrs + n * stride_k)
                 else:
                     k = tl.load(k_ptrs + n * stride_k,
-                            mask=(n + offs_n)[:, None] < seqlen_k_seg,
+                            mask=(n + offs_n)[:, None] < k_seg_length,
                                 other=0.0)
                 qk = tl.dot(q, tl.trans(k))
 
                 if not EVEN_N:
-                    qk += tl.where((n + offs_n)[None, :] < seqlen_k_seg, 0, float("-inf"))
+                    qk += tl.where((n + offs_n)[None, :] < k_seg_length, 0, float("-inf"))
 
                 if ONLINE_SCALE:
                     p, acc_o, lse, maxs = safe_scale(qk, acc_o, lse, maxs, softmax_scale)
@@ -358,16 +358,16 @@ def multi_seg_attn_kernel(
                     v = tl.load(v_ptrs + n * stride_k)
                 else:
                     v = tl.load(v_ptrs + n * stride_k,
-                                mask=(n + offs_n)[:, None] < seqlen_k_seg,
+                                mask=(n + offs_n)[:, None] < k_seg_length,
                                 other=0.0)
                 p = p.to(v.dtype)
                 acc_o += tl.dot(p, v)
 
-        # seqlen_k_accum = tl.load(k_lengths + bid * (max_seg + 1) + n_seg - 1)
-        # seqlen_k_accum_next = tl.load(k_lengths + bid * (max_seg + 1) + n_seg)
+        # k_length_accum = tl.load(k_lengths + bid * (max_seg + 1) + n_seg - 1)
+        # k_length_accum_next = tl.load(k_lengths + bid * (max_seg + 1) + n_seg)
         k_offset = tl.load(k_offsets + bid * max_seg + n_seg - 1).to(tl.int64)
-        seqlen_k_seg = tl.load(k_lengths + bid * (max_seg + 1) + n_seg - 1)
-        seqlen_k_accum = seqlen_total_k - seqlen_k_seg
+        k_seg_length = tl.load(k_lengths + bid * (max_seg + 1) + n_seg - 1)
+        k_length_accum = seqlen_total_k - k_seg_length
 
         k_ptrs = (
                 (K + k_offset * stride_k + hid * HEADDIM) + (
@@ -378,8 +378,8 @@ def multi_seg_attn_kernel(
                     offs_n[:, None] * stride_k + offs_d[None, :])
         )
 
-        mask_free_step = min(max(mid * TOKEN + gap - seqlen_k_accum, 0),
-                seqlen_k_seg) // BLOCK_N
+        mask_free_step = min(max(mid * TOKEN + gap - k_length_accum, 0),
+                k_seg_length) // BLOCK_N
         
         for i in range(mask_free_step):
             n = i * BLOCK_N
@@ -397,10 +397,10 @@ def multi_seg_attn_kernel(
             acc_o += tl.dot(p, v)
 
         q_pos = ((mid * TOKEN + gap) + tl.arange(0, BLOCK_M) // GROUP)[:, None]
-        max_k_idx = min(mid * TOKEN + TOKEN + gap - seqlen_k_accum, seqlen_k_seg)
+        max_k_idx = min(mid * TOKEN + TOKEN + gap - k_length_accum, k_seg_length)
 
         if MASK_TYPE == 2:
-            sub_gap = gap - seqlen_k_accum - mask_free_step * BLOCK_N
+            sub_gap = gap - k_length_accum - mask_free_step * BLOCK_N
             mask_ptrs = MASK + bid * MASK_SIZE * MASK_SIZE + mid * TOKEN * MASK_SIZE - sub_gap + \
                     (tl.arange(0, TOKEN))[:, None] * MASK_SIZE + offs_n[None, :]
 
@@ -412,20 +412,20 @@ def multi_seg_attn_kernel(
                     k = tl.load(k_ptrs + n * stride_k)
                 else:
                     k = tl.load(k_ptrs + n * stride_k,
-                            mask=(n + offs_n)[:, None] < seqlen_k_seg, other=0.0)
+                            mask=(n + offs_n)[:, None] < k_seg_length, other=0.0)
                 qk = tl.dot(q, tl.trans(k))
                 
                 if not EVEN_N:
-                    qk += tl.where((n + offs_n)[None, :] < seqlen_k_seg, 0,
+                    qk += tl.where((n + offs_n)[None, :] < k_seg_length, 0,
                             float("-inf"))
             else:
                 k = tl.load(k_ptrs + n * stride_k,
-                        mask=(n + offs_n)[:, None] < seqlen_k_seg, other=0.0)
+                        mask=(n + offs_n)[:, None] < k_seg_length, other=0.0)
                 qk = tl.dot(q, tl.trans(k))
-                qk += tl.where((n + offs_n)[None, :] < seqlen_k_seg, 0, float("-inf"))
+                qk += tl.where((n + offs_n)[None, :] < k_seg_length, 0, float("-inf"))
 
 
-            qk += tl.where(q_pos >= (seqlen_k_accum + n + offs_n)[None, :], 0,
+            qk += tl.where(q_pos >= (k_length_accum + n + offs_n)[None, :], 0,
                     float("-inf"))
 
             if MASK_TYPE == 2:
@@ -433,7 +433,7 @@ def multi_seg_attn_kernel(
                 qk = tl.reshape(qk, (TOKEN, GROUP, BLOCK_N), can_reorder=False)
                 mask = tl.load(mask_ptrs, mask=(offs_n[None, :] < MASK_SIZE) & (
                         offs_n[None, :] >= sub_gap), other=0.0)
-                mask = -10000 * tl.cast(mask, tl.float32)
+                mask = -10000 * mask.to(tl.float32)
                 qk += mask[:, None, :]
                 qk = tl.reshape(qk, (TOKEN * GROUP, BLOCK_N), can_reorder=False)
 
@@ -447,10 +447,10 @@ def multi_seg_attn_kernel(
                     v = tl.load(v_ptrs + n * stride_k)
                 else:
                     v = tl.load(v_ptrs + n * stride_k,
-                            mask=(n + offs_n)[:, None] < seqlen_k_seg, other=0.0)
+                            mask=(n + offs_n)[:, None] < k_seg_length, other=0.0)
             else:
                 v = tl.load(v_ptrs + n * stride_k,
-                        mask=(n + offs_n)[:, None] < seqlen_k_seg, other=0.0)
+                        mask=(n + offs_n)[:, None] < k_seg_length, other=0.0)
             
             p = p.to(v.dtype)
             acc_o += tl.dot(p, v)
@@ -461,7 +461,7 @@ def multi_seg_attn_kernel(
     H = stride_o // HEADDIM
     offs_m = tl.arange(0, BLOCK_M)
     offs_m = offs_m % GROUP + offs_m // GROUP * H
-    max_m_off = min(seqlen_q, (mid + 1) * TOKEN) * H
+    max_m_off = min(q_length, (mid + 1) * TOKEN) * H
 
     out_ptrs = (
             Out
@@ -543,8 +543,8 @@ def seg_attn_fwd(q, k, v, meta, online_scale=True):
             meta.k_offsets,
             meta.q_lengths,
             meta.k_lengths,
-            MASK=None if meta.mask is None else meta.mask,
-            MASK_SIZE=None if meta.mask is None else meta.mask.size(-1),
+            MASK=meta.mask,
+            MASK_SIZE=0 if meta.mask is None else meta.mask.size(-1),
             HEADDIM=HEADDIM,
             GROUP=GROUP,
             TOKEN=TOKEN,
@@ -574,8 +574,8 @@ def seg_attn_fwd(q, k, v, meta, online_scale=True):
             meta.k_lengths,
             meta.k_segs,
             meta.max_seg,
-            MASK=None if meta.mask is None else meta.mask,
-            MASK_SIZE=None if meta.mask is None else meta.mask.size(-1),
+            MASK=meta.mask,
+            MASK_SIZE=0 if meta.mask is None else meta.mask.size(-1),
             HEADDIM=HEADDIM,
             GROUP=GROUP,
             TOKEN=None if meta.mask is None else TOKEN,

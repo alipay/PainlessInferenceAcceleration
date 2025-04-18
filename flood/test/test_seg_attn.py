@@ -165,4 +165,4 @@ if __name__ == '__main__':
     #         for even in [True, False]:
     #             test_seg_attn(max_seg=max_seg, mode=mode, even=even)
 
-    test_seg_attn(max_seg=2, mode='decode', even=False, online_scale=True)
+    test_seg_attn(max_seg=1, mode='spec', even=False, online_scale=True)

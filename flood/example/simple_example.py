@@ -25,10 +25,11 @@ if __name__ == '__main__':
     mp.set_start_method('spawn', force=True)
 
     # model_path = '/mntnlp/common_base_model/Llama-3.1-8B-Instruct'
+    model_path = '/mntnlp/common_base_model/Qwen__Qwen2.5-7B-Instruct'
     # model_path = '/mnt/prev_nas/chatgpt/pretrained_models/Qwen2.5-7B-Instruct'
     # model_path = '/mntnlp/nanxiao/model'
     # model_path = '/mntnlp/nanxiao/deepseekv3'
-    model_path = '/agent/nanxiao/models/Qwen2.5-32B-Instruct'
+    # model_path = '/agent/nanxiao/models/Qwen2.5-32B-Instruct'
 
     # do not apply template
     # reqs = [
@@ -60,12 +61,12 @@ if __name__ == '__main__':
                  chunk_size=4096,
                 #  model_dtype=torch.float8_e4m3fn,
                  cache_size=16000,
-                 slot_fully_alloc_under=40960,
-                 tune_alloc_size=True,
+                 slot_fully_alloc_under=1024,
+                 tune_alloc_size=False,
                  eos_token_id=None,
                  debug=True,
                  kernels=('sa',),
-                #  spec_algo = 'lookahead',
+                 spec_algo = 'lookahead',
                  logger='example.log')
 
     # start process
