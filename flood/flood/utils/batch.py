@@ -11,24 +11,10 @@ import itertools
 import numpy as np
 import torch
 import torch.distributed as dist
-from flood.ops.draft import retrieve_draft_table
 
 from flood.utils.sampling import Sampling
 
-"""
-    meta.batch_size = bs
-    meta.q_offsets = q_offsets
-    meta.k_offsets = k_offsets
-    meta.q_lengths = q_lengths
-    meta.k_lengths = k_lengths
-    meta.k_segs = k_segs
-    meta.max_seqlen_q = max_q_length
-    meta.max_seqlen_k = max_k_length
-    meta.max_seg = max_seg
-    meta.mask = mask
-    meta.qls = qls
-    meta.kls = klss
-"""
+
 
 """
 state=0: undefined
@@ -156,6 +142,9 @@ class Batch:
         self.retrieve_count = retrieve_count
         self.embeddings = embeddings
         self.emb_idx_list = emb_idx_list
+
+        self.cache_src_indices = None 
+        self.cache_dst_indices = None
 
     @staticmethod
     def prefill_batching(reqs,
@@ -427,71 +416,71 @@ class Batch:
                            retrieve_count=4):
 
         bs = len(reqs)
+        max_seg = max([len(x.segs) for x in reqs])
+        l = retrieve_count * spec.branch_length
 
         retrieve_key_ids = [x.output_ids[-2:] if len(x.output_ids) >= 2 else [0,
                                                                               x.output_ids[
                                                                                   0]]
                             for x in reqs]
-        input_ids, masks = retrieve_draft_table(retrieve_key_ids,
-                                         spec.freq_table,
-                                         spec.draft_table,
-                                         spec.table_size,
-                                         spec.branch_length,
-                                         spec.branch_count,
-                                         retrieve_count)
+        input_ids, masks = spec.proposal_draft(retrieve_key_ids, retrieve_count=retrieve_count)
         input_ids = input_ids.view(-1)
 
-        l = retrieve_count * spec.branch_length
-        # max_seg = max([len(x.segs) for x in reqs])
         samplings = []
-        qls = [l] * bs
-
-        max_seg = max([len(x.segs) for x in reqs])
-        position_ids = []
-        draft_offsets = [0]  # used for rope
+        qls = [l] * bs 
+        position_ids = []  # a position id for a seg
+        draft_offsets = [0]  # act as q_offsets in rope
         cache_indices = []
         k_lengths = []
         k_offsets = []
+        k_segs = []
         for i, req in enumerate(reqs):
             s = req.input_length + len(req.output_ids)
             n_seg = len(req.segs)
+            k_segs.append(n_seg)
             offset = req.segs[-1][0]
-            position_ids.extend([s] + [s+1]*(retrieve_count-1))
-            draft_offsets.extend([i*l+(j+1)*spec.branch_length+(0 if j==retrieve_count-1 else 1) for j in range(retrieve_count)])
+            position_ids.extend([s-1] + [s]*(retrieve_count-1))
+            for j in range(retrieve_count):
+                if retrieve_count > 1:
+                    if j == 0:
+                        bl = spec.branch_length + 1
+                    elif j == retrieve_count-1:
+                        bl = spec.branch_length - 1
+                    else:
+                        bl = spec.branch_length
+                else:
+                    bl = spec.branch_length
+                draft_offsets.append(draft_offsets[-1] + bl)
+            cache_indices.extend([offset + s - 1 + j for j in range(l)])
             if max_seg == 1:
                 k_offsets.append(offset)
-                k_lengths.append(s + l - 1)
-                cache_indices.extend([s - 1 + j + offset for j in
-                                               range(
-                                                   l)])
+                k_lengths.append(s + l - 1)  # NOTE: spec with additional `l - 1` tokens
+                if i == bs - 1:
+                    k_offsets.append(offset + s + l - 1)
             else:
                 k_offsets.extend([x[0] for x in req.segs]+[0]*(max_seg-n_seg))
-                cache_indices.extend(
-                    [s - 1 + j + offset[n_seg - 1] for j in
-                     range(l)])
-                k_length = [0] + [x[1] - x[0] for x in req.segs[:-1]] + [
-                    s + l - 1]
-                k_length = k_length + [0] * (max_seg - len(req.segs))
-                k_length = itertools.accumulate(k_length)
+                pre_lengths = [x[1] - x[0] for x in req.segs[:-1]]
+                pre_length = sum(pre_lengths)
+                cur_length = s + l - 1 - pre_length
+                k_length = pre_lengths + [cur_length] + \
+                     [0] * (max_seg - len(req.segs)) + [s + l - 1]
                 k_lengths.extend(k_length)
-        k_offsets.append(reqs[-1].segs[-1][0]+reqs[-1].input_length + len(reqs[-1].output_ids)+l-1)
 
         max_q_length = l
         max_k_length = max(k_lengths)  # NOTE: CHANGED AND NOT VERIFY 
 
+        kls = k_lengths
+        q_offsets = l * torch.arange(bs + 1, dtype=torch.int32, device=device)
+        k_offsets = torch.tensor(k_offsets, dtype=torch.int32, device=device)
+        q_lengths = torch.tensor(qls, dtype=torch.int32, device=device)
+        k_lengths = torch.tensor(k_lengths, dtype=torch.int32, device=device)
+        k_segs = torch.tensor(k_segs, dtype=torch.int32, device=device)
+        cache_indices = torch.tensor(cache_indices,
+                                              dtype=torch.int32, device=device)
         draft_offsets = torch.tensor(draft_offsets, dtype=torch.int32,
                                     device=device)
         position_ids = torch.tensor(position_ids, dtype=torch.int32,
                                     device=device)
-
-        kls = k_lengths
-        q_lengths = qls
-        q_offsets = l * torch.arange(bs + 1, dtype=torch.int32, device=device)
-        k_offsets = torch.tensor(k_offsets, dtype=torch.int32, device=device)
-        q_lengths = torch.tensor(q_lengths, dtype=torch.int32, device=device)
-        k_lengths = torch.tensor(k_lengths, dtype=torch.int32, device=device)
-        cache_indices = torch.tensor(cache_indices,
-                                              dtype=torch.int32, device=device)
 
         for _, req in enumerate(reqs):
             if req.target_ids or req.temperature or req.top_k or req.top_p or req.min_p:
@@ -518,9 +507,10 @@ class Batch:
                      q_lengths=q_lengths,
                      k_lengths=k_lengths,
                      cache_indices=cache_indices,
+                     k_segs=k_segs,
+                     max_seg=max_seg,
                      samplings=samplings,
                      reqs=reqs,
-                     max_seg=max_seg,
                      mask=masks,
                      qls=qls,
                      kls=kls,

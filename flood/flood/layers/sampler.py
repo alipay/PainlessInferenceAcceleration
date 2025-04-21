@@ -30,15 +30,21 @@ class Sampler(torch.nn.Module):
         # lookahead
         if batch_meta_info.mode == 2:
             next_ids = logits.argmax(dim=-1)
-            output_ids, cache_src_indices, cache_dst_indices = batch_meta_info.spec.verify_draft(batch_meta_info.input_ids, 
-                                              next_ids,
-                                              batch_meta_info=batch_meta_info)
+            output_ids, cache_src_indices, cache_dst_indices = \
+                batch_meta_info.spec.verify_draft(batch_meta_info.input_ids, 
+                                                  next_ids,
+                                                  batch_meta_info=batch_meta_info)
             output_ids = [[y for y in x if y!=-1] for x in output_ids.tolist()]
-            # accept_counts = [len(x) for x in output_ids]
-            # print(f'{accept_counts=}')
+            
+            if False:
+                accept_counts = [len(x) for x in output_ids]
+                texts = batch_meta_info.spec.tokenizer.batch_decode(output_ids)
+                print(f'{accept_counts=} {output_ids=} {texts=}')
+                if tuple(output_ids[0]) == tuple([4891, 236, 228, 99497]):
+                    print(f'{cache_src_indices=} {cache_dst_indices=}')
+
             for i, req in enumerate(reqs):
                 req.output_ids.extend(output_ids[i])
-            # print(f'{output_ids=} {cache_src_indices=} {cache_dst_indices=}')
             batch_meta_info.cache_src_indices = cache_src_indices
             batch_meta_info.cache_dst_indices = cache_dst_indices
             return 

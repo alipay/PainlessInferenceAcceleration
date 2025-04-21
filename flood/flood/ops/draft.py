@@ -17,6 +17,7 @@ def update_draft_table_kernel(
         draft_table,
         token_count,
         stride,
+        vocab,
         BRANCH_LENGTH: tl.constexpr,
         BRANCH_COUNT: tl.constexpr,
         BLOCK: tl.constexpr,
@@ -28,8 +29,8 @@ def update_draft_table_kernel(
         if bid * BLOCK + i + 4 <= token_count:
             p0 = tl.load(tokens + bid * BLOCK + i, mask = bid * BLOCK + i < token_count, other=0)
             p1 = tl.load(tokens + bid * BLOCK + i + 1, mask = bid * BLOCK + i + 1 < token_count, other=0)
-            uid = p0 * 8191 + p1
-            bucket_idx = uid % SIZE
+            uid = p0.to(tl.int64) * vocab + p1
+            bucket_idx = uid % (SIZE - BRANCH_COUNT)
             branch = tl.load(tokens + bid * BLOCK + 2 + i + indices, 
                              mask=bid * BLOCK + 2 + i + indices < token_count, 
                              other=0)
@@ -88,7 +89,7 @@ def update_draft_table(tokens,
                        table_size=2 ** 16, 
                        branch_length=8,
                        branch_count=8, 
-                       vocab=100000, 
+                       vocab=128256, 
                        eos=0):
     # tokens: list of token_id, 
     # table: [sum(sizes),(1+length)], table_meta: [32(frq),32*length]
@@ -107,6 +108,7 @@ def update_draft_table(tokens,
         draft_table,
         token_count,
         draft_table.stride(0),
+        vocab,
         BRANCH_LENGTH=branch_length,
         BRANCH_COUNT=branch_count,
         BLOCK=block,
@@ -123,6 +125,7 @@ def retrieve_draft_table_kernel(
         freq_table,
         draft_table,
         stride,
+        vocab,
         BRANCH_COUNT: tl.constexpr,
         BRANCH_LENGTH: tl.constexpr,
         RETRIEVE_COUNT: tl.constexpr,
@@ -133,7 +136,7 @@ def retrieve_draft_table_kernel(
 
     p0 = tl.load(tokens + bid * 2)
     p1 = tl.load(tokens + bid * 2 + 1)
-    uid = p0 * 8191 + p1
+    uid = p0.to(tl.int64) * vocab + p1
     bucket_idx = uid % (SIZE - BRANCH_COUNT)
 
     hit = False
@@ -181,6 +184,7 @@ def retrieve_draft_table(tokens,
                          freq_table, 
                          draft_table, 
                          table_size=2 ** 16,
+                         vocab=128256,
                          branch_length=8, 
                          branch_count=8, 
                          retrieve_count=8):
@@ -202,13 +206,14 @@ def retrieve_draft_table(tokens,
         torch.ones((batch_size, l, l), 
                     device=device, 
                     dtype=torch.int8),
-        diagonal=1)
-    for i in range(batch_size):
-        for j in range(1, retrieve_count):
-            output_masks[i,j * branch_length + 1:(j + 1) * branch_length + 1,
+        diagonal=0)
+    for j in range(1, retrieve_count):
+        output_masks[:,j * branch_length + 1:(j + 1) * branch_length + 1,
             1:j * branch_length + 1] = 0
-    output_masks = output_masks.view(batch_size * l, l)
+    # print(output_masks.cpu().numpy()[0,:8,:8])
+    # print(output_masks.cpu().numpy()[0,-8:,-8:])
 
+    # output_masks = output_masks.view(batch_size * l, l)
     grid = lambda META: (batch_size,)
     retrieve_draft_table_kernel[grid](
         output_tokens,
@@ -216,6 +221,7 @@ def retrieve_draft_table(tokens,
         freq_table,
         draft_table,
         draft_table.stride(0),
+        vocab,
         BRANCH_COUNT=branch_count,
         BRANCH_LENGTH=branch_length,
         RETRIEVE_COUNT=retrieve_count,
@@ -304,10 +310,10 @@ def verify_draft(input_ids, next_ids, cache_offsets, masks, batch_size,
     output_ids = -1 * torch.ones((batch_size, branch_length + 1),
                                  device=device, 
                                  dtype=input_ids.dtype)
-    cache_src_indices = -1*torch.ones((batch_size, branch_length),
+    cache_src_indices = -1*torch.ones((batch_size*branch_length,),
                                      device=device,
                                      dtype=input_ids.dtype)
-    cache_dst_indices = -1*torch.ones((batch_size, branch_length),
+    cache_dst_indices = -1*torch.ones((batch_size*branch_length,),
                                      device=device,
                                      dtype=input_ids.dtype)
     batch_input_ids = torch.reshape(input_ids, (batch_size, branch_count, branch_length))
@@ -350,47 +356,35 @@ def verify_draft(input_ids, next_ids, cache_offsets, masks, batch_size,
 
 
 @triton.jit
-def update_draft_cache_kernel(k_cache,
-                              v_cache,
+def update_draft_cache_kernel(cache,
                               src_indices,
                               dst_indices,
                               dim,
-                              token_count,
                               DIM: tl.constexpr
-                              ):
-    bid = tl.program_id(0)
-    sm = tl.num_programs(0)
-    token_per_sm = (token_count - 1) // sm + 1
+                            ):
+    pid = tl.program_id(0)
     indices = tl.arange(0, DIM)
-    for i in range(token_per_sm):
-        if i + token_per_sm * bid < token_count:
-            src_idx = tl.load(src_indices + token_per_sm * bid + i)
-            dst_idx = tl.load(dst_indices + token_per_sm * bid + i)
-            if src_idx >= 0:
-                if dst_idx >= 0:
-                    k_vals = tl.load(k_cache + src_idx * dim + indices,
-                                    mask=indices < dim, other=0.0)
-                    tl.store(k_cache + dst_idx * dim + indices, k_vals,
-                            mask=indices < dim)
-                    v_vals = tl.load(v_cache + src_idx * dim + indices,
-                                    mask=indices < dim, other=0.0)
-                    tl.store(v_cache + dst_idx * dim + indices, v_vals,
-                            mask=indices < dim)
+
+    src_idx = tl.load(src_indices + pid)
+    
+    if src_idx >= 0:
+        dst_idx = tl.load(dst_indices + pid)
+        vals = tl.load(cache + src_idx * dim + indices,
+                        mask=indices < dim, other=0.0)
+        tl.store(cache + dst_idx * dim + indices, vals,
+                mask=indices < dim)
 
 
-def update_draft_cache(k_cache, v_cache, src_indices, dst_indices, sm=78):
-    num_head, head_dim = k_cache.size(1), k_cache.size(2)
+def update_draft_cache(cache, src_indices, dst_indices):
+    dim = cache.size(1)
     token_count = src_indices.size(0)
-    dim = num_head * head_dim
     round_dim = 2 ** (int(math.log2(dim - 1) + 1))
 
-    grid = lambda META: (sm,)
-    update_draft_cache_kernel[grid](k_cache, 
-                              v_cache,
+    grid = lambda META: (token_count,)
+    update_draft_cache_kernel[grid](cache, 
                               src_indices, 
                               dst_indices,
                               dim,
-                              token_count,
                               DIM=round_dim,
                               num_warps=4,
                               num_stages=3
