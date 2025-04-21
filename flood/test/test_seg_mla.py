@@ -38,31 +38,6 @@ def scaled_dot_product_attention_fp32(query, key_value, softmax_scale):
     return output, lse
 
 
-def scaled_dot_product_attention(query, key_value):
-    # query:[bs, q_length, 128, 576]
-    # key_vaue: [bs, k_length, 576]
-    _, q_length, _, q_dim = query.size()
-    k_length = key_value.size(1)
-    query = query.clone()
-    key = key_value.clone()
-    value = key_value[:,:,:512].clone()
-    query = query.permute(0,2,1,3)  # [bs, 128, q_length, 576]
-    key = key.unsqueeze(1).permute(0,1,3,2)  # [bs, 1, 576, k_length]
-    value = value.unsqueeze(1)   # [bs, 1, k_length, 512]
-    attn_weight = query @ key / math.sqrt(q_dim)  # [bs, 128, q_length, k_length]
-    mask = torch.tril(torch.ones(q_length, k_length, dtype=query.dtype, device=query.device), k_length-q_length)
-    # print(mask)
-    attn_weight -= 10000*(1-mask)
-    lse = torch.exp(attn_weight).sum(-1)
-    attn_weight = torch.exp(attn_weight).to(query.dtype)
-    # print(attn_weight[0,0,1,:4])
-    output = attn_weight @ value  # [bs, 128, q_length, 512]
-    output = output/lse[...,None]
-    lse = lse.permute(0,2,1)
-    output = output.permute(0,2,1,3).contiguous()
-    return output, lse
-
-
 class Meta:
     def __init__(self) -> None:
         pass
@@ -234,6 +209,9 @@ def test_seg_mla(max_seg=1, mode='prefill', even=True):
         print("opt_output[0,0,:]", opt_output[0, 0, :])
         torch.testing.assert_close(opt_output.float(), org_output.float(),
                                    rtol=0.05, atol=0.1)
+    else:
+        n_repeat = 100
+        benchmark_func(seg_mla_fwd, q, kv, seg_attn_meta, ref_flops=flops, n_repeat=n_repeat)
 
 if __name__ == '__main__':
     for max_seg in [1,2,4]:
