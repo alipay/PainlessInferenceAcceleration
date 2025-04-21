@@ -13,7 +13,6 @@ try:
     import flash_attn_2_cuda
 except:
     flash_attn_2_cuda = None
-    print("flash_attn_2_cuda not found!")
 
 try:
     import flash_attn_3_cuda
@@ -21,8 +20,7 @@ except:
     flash_attn_3_cuda = None
     print("flash_attn_3_cuda not found!")
 
-from fla.ops.simple_gla.fused_recurrent import fused_recurrent_simple_gla
-from fla.ops.simple_gla.chunk import chunk_simple_gla
+
 
 
 class AutoAttention():

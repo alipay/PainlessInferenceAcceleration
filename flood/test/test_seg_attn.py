@@ -25,13 +25,14 @@ def seg_attn(q, k, v, meta, online_scale=True):
 def test_seg_attn(max_seg=1, mode='prefill', even=True, online_scale=True):
     device = torch.device('cuda:0')
     dtype = torch.bfloat16
-    qo_head = 32
+    qo_head = 64
     kv_head = 8
     dim = 128
     masks = None
     mask_size = 16
     torch_mask = None
     if mode == 'prefill':
+        bs = 1
         if max_seg == 1:
             if even:
                 qls = [1024]
@@ -47,40 +48,43 @@ def test_seg_attn(max_seg=1, mode='prefill', even=True, online_scale=True):
                 qls = [1025]
                 kls = [1025 * max_seg]
     elif mode == 'decode':
-        qls = [1] * 128
+        bs = 128
+        qls = [1] * bs
         if even:
-            kls = [1024] * 128
+            kls = [1024] * bs
         else:
-            kls = [1025] * 128
+            kls = [1025] * bs
     elif mode == 'mix':
-        tbs = 40
-        qls = [(1024 - tbs +1)//max_seg] + [1] * (tbs-1)
+        bs = 40
+        qls = [(1024 - bs +1)//max_seg] + [1] * (bs-1)
         if even:
-            kls = [1024] * tbs
+            kls = [1024] * bs
         else:
-            kls = [1025] * tbs
+            kls = [1025] * bs
     elif mode == 'spec':
-        qls = [mask_size] * 1
+        bs = 16
+        qls = [mask_size] * bs
         if even:
-            kls = [1024] * 1
+            kls = [1024] * bs
         else:
-            kls = [1025] * 1
+            kls = [1025] * bs
 
-        assert qls[0] == mask_size and len(qls) == 1 
+        assert all([x==mask_size for x in qls])
 
-        masks = torch.tril(torch.ones((mask_size, mask_size), 
+        masks = torch.tril(torch.ones((bs, mask_size, mask_size), 
                                 dtype=torch.int8,
                                 device=device), 0)
         for i in range(mask_size):
             for j in range(mask_size):
                 if j < i:
-                    masks[i, j] = random.randint(0, 1)
+                    masks[:, i, j] = random.randint(0, 1)
         # print(f'{masks}')
 
-        full_mask = torch.ones((qls[0], kls[0] - qls[0]),
+        full_mask = torch.ones((bs, qls[0], kls[0] - qls[0]),
                                 dtype=torch.float32,
                                 device=device)
-        torch_mask = -10000 * (1 - torch.cat([full_mask,masks.float()], dim=1))
+        torch_mask = -10000 * (1 - torch.cat([full_mask,masks.float()], dim=2))
+        torch_mask = torch_mask[:,None]
     else:
         raise ValueError(f'unknown mode:{mode}')
 
@@ -122,14 +126,22 @@ def test_seg_attn(max_seg=1, mode='prefill', even=True, online_scale=True):
     flash_attn_meta = get_flash_attn_meta(qls, kls)
 
     if mode == 'spec':
-        org_output = torch_attn(q[None], k[None], v[None], causal=True, mask=torch_mask)[0]
+        org_output = torch_attn(q.view(bs, mask_size, qo_head, dim), 
+                                k.view(bs, kls[0], kv_head, dim), 
+                                v.view(bs, kls[0], kv_head, dim),
+                                causal=True, 
+                                mask=torch_mask).view(bs*qls[0], qo_head, dim)
     else:
         org_output = flash_attn(q, k, v, flash_attn_meta)
+
 
     torch.cuda.synchronize()
 
     opt_output = seg_attn(q, k, v, seg_attn_meta, online_scale=online_scale)
     torch.cuda.synchronize()
+
+    print(org_output.shape, opt_output.shape)
+
 
     # print("org",org_output.dtype,org_output.shape)
     # print("opt",opt_output.dtype,opt_output.shape)
@@ -159,10 +171,10 @@ def test_seg_attn(max_seg=1, mode='prefill', even=True, online_scale=True):
                                    rtol=0.05, atol=0.1)
 
 if __name__ == '__main__':
-    for max_seg in [1,2,4]:
-        for mode in ['prefill', 'decode', 'mix','spec']:
-            for even in [True, False]:
-                for online_scale in [True, False]:
-                    test_seg_attn(max_seg=max_seg, mode=mode, even=even, online_scale=online_scale)
+    # for max_seg in [1,2,4]:
+    #     for mode in ['prefill', 'decode', 'mix','spec']:
+    #         for even in [True, False]:
+    #             for online_scale in [True, False]:
+    #                 test_seg_attn(max_seg=max_seg, mode=mode, even=even, online_scale=online_scale)
 
-    # test_seg_attn(max_seg=2, mode='spec', even=False, online_scale=True)
+    test_seg_attn(max_seg=2, mode='spec', even=False, online_scale=True)

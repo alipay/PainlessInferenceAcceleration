@@ -30,8 +30,9 @@ if __name__ == '__main__':
     # model_path = '/mntnlp/nanxiao/deepseekv3'
     # model_path = '/agent/nanxiao/models/Qwen2.5-32B-Instruct'
 
-    prompts = ['介绍一下杭州',
-    '鲁迅有哪些作品？',
+    prompts = [
+    '介绍一下杭州',
+    # '鲁迅有哪些作品？',
     # 'Consider a sequence of real numbers \( a_1, a_2, a_3, \ldots \) defined as follows: \( a_1 = 1 \)\n For \( n \geq 1 \), \( a_{n+1} = \\frac{a_n + 2}{a_n + 1} \).\nDetermine the value of \( a_{2024} \)'
     ]
 
@@ -53,30 +54,40 @@ if __name__ == '__main__':
             )
             reqs.append(Request(i, input_text=text, output_length=512))
 
+    # with profile(activities=[ProfilerActivity.CUDA, ProfilerActivity.CPU, ProfilerActivity.XPU], record_shapes=False, profile_memory=False, with_flops=True, with_stack=True, with_modules=True) as prof:
     if True:
         worker = LLM(model_path,
                     n_stage=1,  # gpus
                     n_proc=1,
                     chunk_size=1024,
+                    #  model_dtype=torch.float8_e4m3fn,
                     cache_size=None,
                     slot_fully_alloc_under=1024,
                     tune_alloc_size=False,
                     eos_token_id=None,
-                    debug=True,
+                    debug=False,
                     kernels=('sa',),
+                    spec_algo = 'lookahead',
+                    spec_branch_length=8,
+                    max_spec_branch_count=8,
                     logger='example.log')
-
 
         # start process
         input_queue, chunk_queue, working_queue, output_queues = worker.initialize()
         worker.launch(input_queue, chunk_queue, working_queue, output_queues)
 
         # do benchmark
-        for i, req in enumerate(worker.request_stream_generate(reqs,
-                                                    input_queue,
-                                                    output_queues,
-                                                    print_count=0)):
-            print('\n\n')
-            print(f'prompt-{i}: ', req.input_text)
-            print(f'answer-{i}: ', req.output_text)
-        time.sleep(1.0)
+        for _ in range(10):
+            for i, req in enumerate(worker.request_stream_generate(reqs,
+                                                        input_queue,
+                                                        output_queues,
+                                                        print_count=0)):
+                print('\n\n')
+                print(f'prompt-{i}: ', req.input_text)
+                print(f'answer-{i}: ', req.output_text)
+            time.sleep(1.0)
+
+    # print(prof.key_averages().table(sort_by=None, top_level_events_only=True, row_limit=2000))
+    # print(prof.key_averages(group_by_stack_n=5).table(sort_by=None, row_limit=100))
+    # prof.export_chrome_trace("trace.json")
+
