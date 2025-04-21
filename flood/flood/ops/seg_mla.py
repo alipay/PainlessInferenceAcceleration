@@ -9,8 +9,6 @@ import torch
 import triton
 import triton.language as tl
 
-torch.cuda.random.manual_seed(7)
-from flood.utils.benchmark import benchmark_func
 
 
 """
@@ -29,7 +27,7 @@ kv_rope: 64
 
 
 @triton.jit
-def single_seg_causal_mla_kernel(
+def single_seg_mla_kernel(
         Q,
         KV,
         Out,
@@ -118,7 +116,7 @@ def single_seg_causal_mla_kernel(
     out_ptrs = (
             Out
             + q_offset * stride_o + mid * stride_o + (
-                        offs_h[:, None] * 515 + offs_v[None, :])
+                        offs_h[:, None] * 512 + offs_v[None, :])
     )
 
     tl.store(out_ptrs, acc_o)
@@ -127,7 +125,7 @@ def single_seg_causal_mla_kernel(
 
 
 @triton.jit
-def multi_seg_causal_mla_kernel(
+def multi_seg_mla_kernel(
         Q,
         KV,
         Out,
@@ -152,7 +150,7 @@ def multi_seg_causal_mla_kernel(
 
     q_offset = tl.load(q_offsets + bid)
     n_seg = tl.load(k_segs + bid)
-    seqlen_total_k = tl.load(k_lengths + bid * (max_seg + 1) + n_seg)
+    k_total_length = tl.load(k_lengths + bid * (max_seg + 1) + n_seg)
 
     offs_n = tl.arange(0, BLOCK)
     offs_h = tl.arange(0, 128)
@@ -173,15 +171,12 @@ def multi_seg_causal_mla_kernel(
     lse = tl.zeros([128], dtype=tl.float32)
     acc_o = tl.zeros([128, 512], dtype=tl.float32)
 
-    gap = seqlen_total_k - seqlen_q
+    gap = k_total_length - seqlen_q
 
     for i_seg in range(n_seg - 1):
 
-        seqlen_k_accum = tl.load(k_lengths + bid * (max_seg + 1) + i_seg)
-        seqlen_k_accum_next = tl.load(
-            k_lengths + bid * (max_seg + 1) + i_seg + 1)
         k_offset = tl.load(k_offsets + bid * max_seg + i_seg)
-        seqlen_k_seg = seqlen_k_accum_next - seqlen_k_accum
+        k_seg_length = tl.load(k_lengths + bid * (max_seg + 1) + i_seg)
 
         k0_ptrs = (
                 (KV + k_offset * stride_k) + (
@@ -192,13 +187,13 @@ def multi_seg_causal_mla_kernel(
                     offs_n[:, None] * stride_k + offs_p[None, :])
         )
 
-        for i in range(tl.cdiv(seqlen_k_seg, BLOCK)):
+        for i in range(tl.cdiv(k_seg_length, BLOCK)):
             n = i * BLOCK
             if EVEN:
                 k0 = tl.load(k0_ptrs + n * stride_k)
             else:
                 k0 = tl.load(k0_ptrs + n * stride_k,
-                            mask=(n + offs_n)[:, None] < seqlen_k_seg,
+                            mask=(n + offs_n)[:, None] < k_seg_length,
                             other=0.0)
             qk = tl.dot(q0, tl.trans(k0))
             
@@ -206,12 +201,12 @@ def multi_seg_causal_mla_kernel(
                 k1 = tl.load(k1_ptrs + n * 576)
             else:
                 k1 = tl.load(k1_ptrs + n * 576,
-                            mask=(n + offs_n)[:, None] < seqlen_k_seg, other=0.0)
+                            mask=(n + offs_n)[:, None] < k_seg_length, other=0.0)
 
             qk = tl.dot(q1, tl.trans(k1), qk)
 
             # pad mask
-            qk += tl.where((n + offs_n)[None, :] < seqlen_k_seg, 0.0, float("-inf"))
+            qk += tl.where((n + offs_n)[None, :] < k_seg_length, 0.0, float("-inf"))
 
             p = tl.exp(qk * softmax_scale)
             lse += tl.sum(p, 1)
@@ -220,10 +215,9 @@ def multi_seg_causal_mla_kernel(
             acc_o = tl.dot(p, k0, acc_o)
 
 
-    seqlen_k_accum = tl.load(k_lengths + bid * (max_seg + 1) + n_seg - 1)
-    seqlen_k_accum_next = tl.load(k_lengths + bid * (max_seg + 1) + n_seg)
     k_offset = tl.load(k_offsets + bid * max_seg + n_seg - 1)
-    seqlen_k_seg = seqlen_k_accum_next - seqlen_k_accum
+    k_seg_length = tl.load(k_lengths + bid * (max_seg + 1) + n_seg - 1)
+    k_acc_length = k_total_length - k_seg_length
 
     k0_ptrs = (
             (KV + k_offset * stride_k) + (
@@ -234,33 +228,32 @@ def multi_seg_causal_mla_kernel(
                 offs_n[:, None] * stride_k + offs_p[None, :])
     )
 
-    steps = tl.cdiv(gap + mid + 1 - seqlen_k_accum, BLOCK)
+    steps = tl.cdiv(gap + mid + 1 - k_acc_length, BLOCK)
     for step in range(steps):
         n = step * BLOCK
         if EVEN:
             k0 = tl.load(k0_ptrs + n * stride_k)
         else:
             k0 = tl.load(k0_ptrs + n * stride_k,
-                        mask=(n + offs_n)[:, None] < seqlen_k_seg, other=0.0)
+                        mask=(n + offs_n)[:, None] < k_seg_length, other=0.0)
         qk = tl.dot(q0, tl.trans(k0))
 
         if EVEN:
             k1 = tl.load(k1_ptrs + n * 576)
         else:
             k1 = tl.load(k1_ptrs + n * 576,
-                        mask=(n + offs_n)[:, None] < seqlen_k_seg, other=0.0)
+                        mask=(n + offs_n)[:, None] < k_seg_length, other=0.0)
 
         qk = tl.dot(q1, tl.trans(k1), qk)
 
         # pad mask
-        qk += tl.where((gap + n + offs_n)[None, :] < seqlen_k_accum + mid, 0.0, float("-inf"))
+        qk += tl.where((gap + n + offs_n)[None, :] < k_acc_length + mid, 0.0, float("-inf"))
 
         p = tl.exp(qk * softmax_scale)
         lse += tl.sum(p, 1)
 
         p = p.to(KV.dtype.element_ty)
         acc_o = tl.dot(p, k0, acc_o)
-
 
     acc_o = acc_o / lse[:, None]
 
@@ -302,7 +295,7 @@ def seg_mla_fwd(q, kv, meta):
 
     grid = lambda META: (batch, num_m_block)
     if SINGLE:
-        single_seg_causal_mla_kernel[grid](
+        single_seg_mla_kernel[grid](
             q,
             kv,
             o,
@@ -321,7 +314,7 @@ def seg_mla_fwd(q, kv, meta):
         )
         return o
     else:
-        multi_seg_causal_mla_kernel[grid](
+        multi_seg_mla_kernel[grid](
             q,
             kv,
             o,

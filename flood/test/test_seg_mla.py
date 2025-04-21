@@ -84,11 +84,10 @@ def get_seg_mla_meta(qls, klss, mask=None):
     device = 'cuda:0'
     bs = len(qls)
     max_seg = max([len(x) for x in klss])  # equals
-    q_offsets = [0]  # bs+1
-    k_offsets = [0]  # (bs*max_seg+1), [0,l,2l,] even if single seg
+    q_offsets = [0]  # [bs+1]
+    k_offsets = [0]  # [bs+1] if single seg else [bs,max_seg] 
     q_lengths = []  # bs
-    k_lengths = [
-        0] if max_seg > 1 else []  # (bs*max_seg+bs) if multi seg, (bs+1) if single seg. multi seg format:[0,l,2l.,,,0,l,2l..,0]
+    k_lengths = []  # [bs] if single seg else [bs, max_seg+1] if multi seg
     k_segs = []
     max_q_length = max(qls)
     max_k_length = max([sum(x) for x in klss])
@@ -96,11 +95,15 @@ def get_seg_mla_meta(qls, klss, mask=None):
         kls = klss[i]
         q_offsets.append(q_offsets[-1] + ql)
         q_lengths.append(ql)
-        for j, kl in enumerate(kls):
-            k_offsets.append(k_offsets[-1] + kl)
-            k_lengths.append(k_lengths[-1] + kl if max_seg > 1 else kl)
-        if max_seg > 1 and i < len(qls) - 1:
-            k_lengths.append(0)
+        if max_seg == 1:
+            k_offsets.append(k_offsets[-1] + kls[0])
+            k_lengths.append(kls[0])
+        else:
+            for j, kl in enumerate(kls):
+                k_offsets.append(k_offsets[-1] + kl)
+                k_lengths.append(kl)
+            k_lengths.append(kls[0]*max_seg)
+
         k_segs.append(max_seg)
 
     q_offsets = torch.tensor(q_offsets, device=device, dtype=torch.int32)
@@ -131,6 +134,7 @@ def test_seg_mla(max_seg=1, mode='prefill', even=True):
     device = torch.device('cuda:0')
     dtype = torch.bfloat16
     if mode == 'prefill':
+        bs = 1
         if max_seg == 1:
             if even:
                 qls = [1024]
@@ -146,20 +150,22 @@ def test_seg_mla(max_seg=1, mode='prefill', even=True):
                 qls = [1025]
                 kls = [1025 * max_seg]
     elif mode == 'decode':
-        qls = [1] * 128
+        bs = 4
+        qls = [1] * bs
         if even:
-            kls = [1024] * 128
+            kls = [1024] * bs
         else:
-            kls = [1025] * 128
+            kls = [1025] * bs
     elif mode == 'mix':
+        bs = 4
         if max_seg == 1:
-            qls = [1024 - 39] + [1] * 39
+            qls = [1024 - (bs-1)] + [1] * (bs-1)
         else:
-            qls = [(1024 - 39) // max_seg] + [1] * 39
+            qls = [(1024 - (bs-1)) // max_seg] + [1] * (bs-1)
         if even:
-            kls = [1024] * 40
+            kls = [1024] * bs
         else:
-            kls = [1025] * 40
+            kls = [1025] * bs
     else:
         raise ValueError(f'unknown mode:{mode}')
 
@@ -229,9 +235,9 @@ def test_seg_mla(max_seg=1, mode='prefill', even=True):
                                    rtol=0.05, atol=0.1)
 
 if __name__ == '__main__':
-    test_seg_mla(max_seg=1, mode='prefill', even=True)
-    # for max_seg in [1,2,4]:
-    #     for mode in ['prefill', 'decode', 'mix']:
-    #         for even in [True, False]:
-    #             test_seg_mla(max_seg=max_seg, mode=mode, even=even)
+    # test_seg_mla(max_seg=1, mode='decode', even=True)
+    for max_seg in [2]:
+        for mode in ['prefill', 'decode', 'mix']:
+            for even in [True, False]:
+                test_seg_mla(max_seg=max_seg, mode=mode, even=even)
 
