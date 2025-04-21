@@ -512,7 +512,7 @@ class LLM():
             input_empty = input_queue.empty() and fail_sample_count.value == 10 ** self.n_proc and len(chunks) == 0 and len(options) == 0
             working_empty = working_queue.empty() and len(waits) == 0 and counts.value == 0  # TODO: CHECK counts.value
             if input_empty and working_empty:
-                time.sleep(0.01)
+                time.sleep(0.001)
                 continue
 
             task_type = None
@@ -525,7 +525,7 @@ class LLM():
 
             if (task_id != 0 and input_empty and
                     counts.value <= self.min_batch_size and self.spec_algo is None):
-                time.sleep(0.01)
+                time.sleep(0.001)
                 continue
 
             dbs = gbs.value
