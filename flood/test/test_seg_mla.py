@@ -16,18 +16,18 @@ torch.manual_seed(7)
 
 
 
-def scaled_dot_product_attention_fp32(query, key_value):
+def scaled_dot_product_attention_fp32(query, key_value, softmax_scale):
     # query:[bs, q_length, 128, 576]
-    # key_vaue: [bs, k_length, 576]
+    # key_vaue: [bs, k_length, 1, 576]
     _, q_length, _, q_dim = query.size()
     k_length = key_value.size(1)
     query = query.float()
     key = key_value.float()
-    value = key_value[:,:,:512].float()
+    value = key_value[:,:,:,:512].float()
     query = query.permute(0,2,1,3)  # [bs, 128, q_length, 576]
-    key = key.unsqueeze(1).permute(0,1,3,2)  # [bs, 1, 576, k_length]
-    value = value.unsqueeze(1)   # [bs, 1, k_length, 512]
-    attn_weight = query @ key / math.sqrt(q_dim)  # [bs, 128, q_length, k_length]
+    key = key.permute(0,2,3,1)  # [bs, 1, 576, k_length]
+    value = value.permute(0,2,1,3) # [bs, 1, k_length, 512]
+    attn_weight = query @ key * softmax_scale  # [bs, 128, q_length, k_length]
     mask = torch.tril(torch.ones(q_length, k_length, dtype=torch.float32, device=query.device), k_length-q_length)
     # print(mask)
     attn_weight -= 10000*(1-mask)
@@ -192,10 +192,11 @@ def test_seg_mla(max_seg=1, mode='prefill', even=True):
 
     seg_attn_meta = get_seg_mla_meta(qls, klss, mask=attn_mask)
 
+    softmax_scale = 1/128**0.5
     org_outputs = []
     for i, qi in enumerate(qs):
         kvi = kvs[i]
-        org_output, org_lse = scaled_dot_product_attention_fp32(qi[None], kvi[None])
+        org_output, org_lse = scaled_dot_product_attention_fp32(qi.view(1, qls[i], 128, 576), kvi.view(1, kls[i], 1, 576),softmax_scale)
         org_outputs.append(org_output[0])
     org_output = torch.cat(org_outputs, 0)
     
@@ -235,9 +236,9 @@ def test_seg_mla(max_seg=1, mode='prefill', even=True):
                                    rtol=0.05, atol=0.1)
 
 if __name__ == '__main__':
-    # test_seg_mla(max_seg=1, mode='decode', even=True)
-    for max_seg in [2]:
+    for max_seg in [1,2,4]:
         for mode in ['prefill', 'decode', 'mix']:
             for even in [True, False]:
                 test_seg_mla(max_seg=max_seg, mode=mode, even=even)
 
+    # test_seg_mla(max_seg=2, mode='decode', even=True)
