@@ -8,6 +8,7 @@ import os
 os.environ['TOKENIZERS_PARALLELISM'] = 'false'
 os.environ['CUDA_LAUNCH_BLOCKING']='0'
 
+import json
 import random
 import time
 import torch
@@ -30,11 +31,17 @@ if __name__ == '__main__':
     # model_path = '/mntnlp/nanxiao/deepseekv3'
     # model_path = '/agent/nanxiao/models/Qwen2.5-32B-Instruct'
 
-    prompts = [
-    '介绍一下杭州',
-    # '鲁迅有哪些作品？',
-    # 'Consider a sequence of real numbers \( a_1, a_2, a_3, \ldots \) defined as follows: \( a_1 = 1 \)\n For \( n \geq 1 \), \( a_{n+1} = \\frac{a_n + 2}{a_n + 1} \).\nDetermine the value of \( a_{2024} \)'
-    ]
+    # prompts = [
+    # '介绍一下杭州',
+    # # '鲁迅有哪些作品？',
+    # # 'Consider a sequence of real numbers \( a_1, a_2, a_3, \ldots \) defined as follows: \( a_1 = 1 \)\n For \( n \geq 1 \), \( a_{n+1} = \\frac{a_n + 2}{a_n + 1} \).\nDetermine the value of \( a_{2024} \)'
+    # ]
+
+    prompts = []
+    for line in open('/ossfs/workspace/tmp/lookahead.jsonl'):
+        line = line.strip()
+        prompts.append(json.loads(line)['messages'][0]['content'])
+
 
     reqs = []
     if False:
@@ -77,15 +84,15 @@ if __name__ == '__main__':
         worker.launch(input_queue, chunk_queue, working_queue, output_queues)
 
         # do benchmark
-        for _ in range(10):
-            for i, req in enumerate(worker.request_stream_generate(reqs,
+        for i in range(200):
+            rs = [reqs[i%100]]
+            for i, req in enumerate(worker.request_stream_generate(rs,
                                                         input_queue,
                                                         output_queues,
                                                         print_count=0)):
                 print('\n\n')
-                print(f'prompt-{i}: ', req.input_text)
-                print(f'answer-{i}: ', req.output_text)
-            time.sleep(1.0)
+                # print(f'prompt-{i}: ', req.input_text)
+                # print(f'answer-{i}: ', req.output_text)
 
     # print(prof.key_averages().table(sort_by=None, top_level_events_only=True, row_limit=2000))
     # print(prof.key_averages(group_by_stack_n=5).table(sort_by=None, row_limit=100))

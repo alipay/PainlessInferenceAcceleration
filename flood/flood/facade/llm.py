@@ -168,7 +168,7 @@ class LLM():
         self.emb_dtype = emb_dtype or self.torch_dtype
         self.cache_dtype = cache_dtype or self.torch_dtype
         self.n_stage = n_stage
-        self.n_proc = n_proc if n_proc else self.n_stage
+        self.n_proc = n_proc if n_proc else self.n_stage + 1
         self.slot_count = slot_count
         self.schedule_mode = schedule_mode
         self.chunk_size = chunk_size
