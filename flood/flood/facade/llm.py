@@ -1365,13 +1365,19 @@ class LLM():
             responses.append(response)
         return responses
 
-    def request_stream_generate(self, requests: List, input_queue, output_queues,
-                        print_count=0, log_info=''):
+    def request_stream_generate(self, 
+                                requests: List, 
+                                input_queue, 
+                                output_queues,
+                                print_param=True,
+                                print_info='',
+                                print_count=0):
         logger = open(self.logger, 'a+')
-        params = self.format_params(len(requests), log_info=log_info)
-        print(params)
+        params = self.format_params(len(requests), log_info=print_info)
         logger.write(params)
         logger.flush()
+        if print_param:
+            print(params)
 
         tokenizer = self.tokenizer
 
@@ -1405,10 +1411,11 @@ class LLM():
             input_queue.put(r, block=True)
             total_slot_size += slot_size
         te = time.time()
-        print(
-            f'pid:{os.getpid()} tokenize:{te - ts:.3f}s '
-            f'ts:{time.time() % 1000:.3f} '
-            f'mean_slot_size:{total_slot_size / n_sample:.0f}')
+        if print_param:
+            print(
+                f'pid:{os.getpid()} tokenize:{te - ts:.3f}s '
+                f'ts:{time.time() % 1000:.3f} '
+                f'mean_slot_size:{total_slot_size / n_sample:.0f}')
 
         steps = [ts]
         batch_token_counts = []

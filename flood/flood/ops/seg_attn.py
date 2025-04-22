@@ -186,71 +186,44 @@ def single_seg_attn_kernel(
                     other=0.0)
     
     if MASK_TYPE == 0:
-        for n in range(0, k_length, BLOCK_N):
-            n = tl.multiple_of(n, BLOCK_N)
-            
-            acc_o, lse, max_s = seg_attn(
-                q=q,
-                k_ptrs=k_ptrs,
-                v_ptrs=v_ptrs,
-                acc_o=acc_o,
-                lse=lse,
-                max_s=max_s,
-                n_offset=n,
-                k_length=k_length,
-                softmax_scale=softmax_scale,
-                q_pos=None,
-                offs_n=offs_n,
-                mid=mid,
-                stride_k=stride_k,
-                k_acc_length=None,
-                mask_ptrs=None,
-                sub_gap=0,
-                MASK_TYPE=0,
-                MASK_SIZE=MASK_SIZE,
-                BLOCK_N=BLOCK_N,
-                EVEN_N=EVEN_N,
-                ONLINE_SCALE=ONLINE_SCALE,
-                GROUP=GROUP,
-                TOKEN=TOKEN,
-            )
-    else:
-        if MASK_TYPE == 1:  # causal
-            mask_free_step = (mid * TOKEN + gap) // BLOCK_N
-        else:  # customized, mask size must be equal to q_length
-            mask_free_step = gap // BLOCK_N
+        mask_free_step = tl.cdiv(k_length, BLOCK_N)
+    elif MASK_TYPE == 1:  # causal
+        mask_free_step = (mid * TOKEN + gap) // BLOCK_N
+    else:  # customized, mask size must be equal to q_length
+        mask_free_step = gap // BLOCK_N
 
-        # mask free part
-        for i in range(mask_free_step):
-            n = i * BLOCK_N
-            n = tl.multiple_of(n, BLOCK_N)
-            
-            acc_o, lse, max_s = seg_attn(
-                q=q,
-                k_ptrs=k_ptrs,
-                v_ptrs=v_ptrs,
-                acc_o=acc_o,
-                lse=lse,
-                max_s=max_s,
-                n_offset=n,
-                k_length=k_length,
-                softmax_scale=softmax_scale,
-                q_pos=None,
-                offs_n=offs_n,
-                mid=mid,
-                stride_k=stride_k,
-                k_acc_length=None,
-                mask_ptrs=None,
-                sub_gap=0,
-                MASK_TYPE=0,
-                MASK_SIZE=MASK_SIZE,
-                BLOCK_N=BLOCK_N,
-                EVEN_N=EVEN_N,
-                ONLINE_SCALE=ONLINE_SCALE,
-                GROUP=GROUP,
-                TOKEN=TOKEN,
-            )
+    # mask free part
+    for i in range(mask_free_step):
+        n = i * BLOCK_N
+        n = tl.multiple_of(n, BLOCK_N)
         
+        acc_o, lse, max_s = seg_attn(
+            q=q,
+            k_ptrs=k_ptrs,
+            v_ptrs=v_ptrs,
+            acc_o=acc_o,
+            lse=lse,
+            max_s=max_s,
+            n_offset=n,
+            k_length=k_length,
+            softmax_scale=softmax_scale,
+            q_pos=None,
+            offs_n=offs_n,
+            mid=mid,
+            stride_k=stride_k,
+            k_acc_length=None,
+            mask_ptrs=None,
+            sub_gap=0,
+            MASK_TYPE=0,
+            MASK_SIZE=MASK_SIZE,
+            BLOCK_N=BLOCK_N,
+            EVEN_N=EVEN_N,
+            ONLINE_SCALE=ONLINE_SCALE,
+            GROUP=GROUP,
+            TOKEN=TOKEN,
+        )
+    
+    if MASK_TYPE != 0:
         q_pos = gap + mid * TOKEN + q_idx
         if MASK_TYPE == 2 or MASK_TYPE == 3:
             sub_gap = gap - mask_free_step * BLOCK_N
@@ -293,7 +266,7 @@ def single_seg_attn_kernel(
                 GROUP=GROUP,
                 TOKEN=TOKEN,
             )
-    
+
     acc_o = acc_o / lse[:, None]
 
     H = stride_o // HEAD_DIM

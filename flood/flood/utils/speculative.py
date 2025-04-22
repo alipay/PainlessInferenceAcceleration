@@ -1,5 +1,5 @@
 
-
+import os
 import torch
 from flood.ops.draft import *
 
@@ -40,7 +40,6 @@ class Lookahead(Spec):
         self.tokenizer = tokenizer  # used for debug
 
         self.rank = int(os.environ.get('FLOOD_RANK', '0'))
-        self.world_size = int(os.environ.get('FLOOD_WORLD_SIZE', '1'))
 
         if self.rank == 0:
             self.freq_table = torch.zeros((table_size,), 

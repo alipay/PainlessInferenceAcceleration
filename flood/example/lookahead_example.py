@@ -84,13 +84,15 @@ if __name__ == '__main__':
         worker.launch(input_queue, chunk_queue, working_queue, output_queues)
 
         # do benchmark
-        for i in range(200):
-            rs = [reqs[i%100]]
-            for i, req in enumerate(worker.request_stream_generate(rs,
+        c = 500
+        for i in range(2*c):
+            rs = [reqs[i%c]]
+            for j, req in enumerate(worker.request_stream_generate(rs,
                                                         input_queue,
                                                         output_queues,
+                                                        print_param=False,
                                                         print_count=0)):
-                print('\n\n')
+                print(f'{i//c}-{i%c}')
                 # print(f'prompt-{i}: ', req.input_text)
                 # print(f'answer-{i}: ', req.output_text)
 

@@ -139,11 +139,11 @@ def bench_seg_attn(max_seg=1, mode='prefill', even=True, online_scale=True):
                 n_repeat=n_repeat, ref_time=org_time, ref_flops=flops)
 
 if __name__ == '__main__':
-    # for max_seg in [1,2,4]:
-    #     for mode in ['prefill', 'decode', 'mix', 'spec']:
-    #         for even in [True, False]:
-    #             for online_scale in [False, True]:
-    #                 bench_seg_attn(max_seg=max_seg, mode=mode, even=even, online_scale=online_scale)
+    for max_seg in [2,4]:
+        for mode in ['prefill', 'decode', 'mix', 'spec']:
+            for even in [True, False]:
+                for online_scale in [False, True]:
+                    bench_seg_attn(max_seg=max_seg, mode=mode, even=even, online_scale=online_scale)
 
     # bench_seg_attn(max_seg=1, mode='decode', even=True, online_scale=False)
-    bench_seg_attn(max_seg=1, mode='spec', even=True, online_scale=False)
+    # bench_seg_attn(max_seg=1, mode='spec', even=True, online_scale=False)
