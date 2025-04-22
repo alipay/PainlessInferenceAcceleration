@@ -90,7 +90,6 @@ for capability in compute_capabilities:
 print(NVCC_FLAGS)
 ext_modules = []
 
-# cutlass_sources = ["csrc/flood.cpp"]
 
 custom_sources = ["csrc/flood.cpp",
                   "csrc/layernorm/rmsnorm.cu",
@@ -100,9 +99,6 @@ custom_sources = ["csrc/flood.cpp",
                   "csrc/moe/topk_softmax_kernels.cu",
                   "csrc/moe/moe_align.cu",
                   "csrc/moe/moe_sum.cu",
-                  # "csrc/w8a8/scaled_mm_c2x.cu",
-                  # "csrc/w8a8/scaled_mm_c3x.cu",
-                  # "csrc/w8a8/scaled_mm_entry.cu",
                   "csrc/quantize/fp8_quant.cu"
                   ]
 
@@ -119,8 +115,6 @@ include_paths.append(os.path.join(current_dir, 'csrc/activation'))
 include_paths.append(os.path.join(current_dir, 'csrc/rope'))
 include_paths.append(os.path.join(current_dir, 'csrc/cache'))
 include_paths.append(os.path.join(current_dir, 'csrc/moe'))
-# include_paths.append(os.path.join(current_dir, 'csrc/cutlass/include'))
-# include_paths.append(os.path.join(current_dir, 'csrc/w8a8'))
 include_paths.append(os.path.join(current_dir, 'csrc/quantize'))
 
 ext_modules.append(

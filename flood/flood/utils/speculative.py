@@ -39,14 +39,21 @@ class Lookahead(Spec):
         self.vocab_size = vocab_size
         self.tokenizer = tokenizer  # used for debug
 
-        self.freq_table = torch.zeros((table_size,), 
-                                      dtype=torch.float32,
-                                      device=device)
-        self.draft_table = torch.zeros((table_size, branch_length), 
-                                       dtype=torch.int32,
-                                       device=device)
-        torch._dynamo.mark_static_address(self.freq_table)
-        torch._dynamo.mark_static_address(self.draft_table)
+        self.rank = int(os.environ.get('FLOOD_RANK', '0'))
+        self.world_size = int(os.environ.get('FLOOD_WORLD_SIZE', '1'))
+
+        if self.rank == 0:
+            self.freq_table = torch.zeros((table_size,), 
+                                        dtype=torch.float32,
+                                        device=device)
+            self.draft_table = torch.zeros((table_size, branch_length), 
+                                        dtype=torch.int32,
+                                        device=device)
+            torch._dynamo.mark_static_address(self.freq_table)
+            torch._dynamo.mark_static_address(self.draft_table)
+        else:
+            self.freq_table = None 
+            self.draft_table = None
 
     def proposal_draft(self, input_ids, retrieve_count=4, **kwargs):
         output_tokens, output_masks = retrieve_draft_table(input_ids, 
