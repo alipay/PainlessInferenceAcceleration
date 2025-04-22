@@ -140,7 +140,7 @@ def test_seg_attn(max_seg=1, mode='prefill', even=True, online_scale=True):
     opt_output = seg_attn(q, k, v, seg_attn_meta, online_scale=online_scale)
     torch.cuda.synchronize()
 
-    print(org_output.shape, opt_output.shape)
+    # print(org_output.shape, opt_output.shape)
 
 
     # print("org",org_output.dtype,org_output.shape)
@@ -171,10 +171,10 @@ def test_seg_attn(max_seg=1, mode='prefill', even=True, online_scale=True):
                                    rtol=0.05, atol=0.1)
 
 if __name__ == '__main__':
-    # for max_seg in [1,2,4]:
-    #     for mode in ['prefill', 'decode', 'mix','spec']:
-    #         for even in [True, False]:
-    #             for online_scale in [True, False]:
-    #                 test_seg_attn(max_seg=max_seg, mode=mode, even=even, online_scale=online_scale)
+    for max_seg in [1,2,4]:
+        for mode in ['prefill', 'decode', 'mix','spec']:
+            for even in [True, False]:
+                for online_scale in [True, False]:
+                    test_seg_attn(max_seg=max_seg, mode=mode, even=even, online_scale=online_scale)
 
-    test_seg_attn(max_seg=2, mode='spec', even=False, online_scale=True)
+    # test_seg_attn(max_seg=2, mode='spec', even=False, online_scale=True)
