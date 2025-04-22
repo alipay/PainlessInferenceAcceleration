@@ -30,6 +30,79 @@ def fast_scale(qk, lse):
     lse += tl.sum(p, 1)
     return p, lse
 
+@triton.jit
+def seg_attn(
+    q,
+    k_ptrs,
+    v_ptrs,
+    acc_o,
+    lse,
+    max_s,
+    n_offset,
+    k_length,
+    softmax_scale,
+    q_pos,
+    offs_n,
+    mid,
+    stride_k,
+    k_acc_length,
+    mask_ptrs,
+    sub_gap,
+    MASK_TYPE: tl.constexpr,
+    MASK_SIZE: tl.constexpr,
+    BLOCK_N: tl.constexpr,
+    EVEN_N: tl.constexpr,
+    ONLINE_SCALE: tl.constexpr,
+    GROUP: tl.constexpr,
+    TOKEN: tl.constexpr,
+):
+    if EVEN_N:
+        k = tl.load(k_ptrs + n_offset * stride_k)
+    else:
+        k = tl.load(k_ptrs + n_offset * stride_k,
+                mask=(n_offset + offs_n)[:, None] < k_length, 
+                other=0.0)
+    
+    qk = tl.dot(q, tl.trans(k)) * softmax_scale
+
+    if MASK_TYPE == 2:
+        qk = tl.reshape(qk, (TOKEN, GROUP, BLOCK_N), can_reorder=False)
+        mask = tl.load(mask_ptrs, mask=(offs_n[None, :] >= sub_gap) & \
+                (offs_n[None, :] < sub_gap + min(MASK_SIZE, (mid + 1) * TOKEN)), other=1)
+        qk -= 1000000 * (1-mask[:,None,:].to(tl.float32))
+        # qk += tl.where(mask[:, None, :]==1, 0, float("-inf"))
+        qk = tl.reshape(qk, (TOKEN * GROUP, BLOCK_N), can_reorder=False)
+    elif MASK_TYPE == 3:
+        mask = tl.load(mask_ptrs, mask=(offs_n[None, :] >= sub_gap) & \
+                (offs_n[None, :] < sub_gap + min(MASK_SIZE, (mid + 1) * TOKEN)), other=1)
+        qk += tl.where(mask==1, 0, float("-inf"))
+    
+    if not EVEN_N:
+        qk += tl.where((n_offset + offs_n)[None, :] < k_length, 0, float("-inf"))
+    
+    if MASK_TYPE != 0: 
+        if k_acc_length is None:
+            qk += tl.where(q_pos[:, None] >= (n_offset + offs_n)[None, :], 0, float("-inf"))
+        else:
+            qk += tl.where(q_pos >= (k_acc_length + n_offset + offs_n)[None, :], 0.0, float("-inf"))
+
+    if ONLINE_SCALE:
+        p, acc_o, lse, max_s = safe_scale(qk, acc_o, lse, max_s)
+    else:
+        p, lse = fast_scale(qk, lse)
+    
+    if EVEN_N:
+        v = tl.load(v_ptrs + n_offset * stride_k)
+    else:
+        v = tl.load(v_ptrs + n_offset * stride_k,
+                    mask=(n_offset + offs_n)[:, None] < k_length, 
+                    other=0.0)
+    
+    p = p.to(v.dtype)
+    acc_o = tl.dot(p, v, acc_o)
+    
+    return acc_o, lse, max_s
+
 
 """
 MASK_TYPE
@@ -38,6 +111,7 @@ MASK_TYPE
      2: fast customized mask
      3: compatible customized mask
 """
+
 
 @triton.jit
 def single_seg_attn_kernel(
@@ -114,53 +188,69 @@ def single_seg_attn_kernel(
     if MASK_TYPE == 0:
         for n in range(0, k_length, BLOCK_N):
             n = tl.multiple_of(n, BLOCK_N)
-
-            if EVEN_N:
-                k = tl.load(k_ptrs + n * stride_k)
-            else:
-                k = tl.load(k_ptrs + n * stride_k,
-                            mask=(n + offs_n)[:, None] < k_length, 
-                            other=0.0)
-            qk = tl.dot(q, tl.trans(k))*softmax_scale
             
-            if not EVEN_N:
-                qk += tl.where((n + offs_n)[None, :] < k_length, 0, float("-inf"))
-
-            if ONLINE_SCALE:
-                p, acc_o, lse, max_s = safe_scale(qk, acc_o, lse, max_s)
-            else:
-                p, lse = fast_scale(qk, lse)
-
-            if EVEN_N:
-                v = tl.load(v_ptrs + n * stride_k)
-            else:
-                v = tl.load(v_ptrs + n * stride_k,
-                            mask=(n + offs_n)[:, None] < k_length, 
-                            other=0.0)
-            p = p.to(v.dtype)
-            acc_o = tl.dot(p, v, acc_o)
-
+            acc_o, lse, max_s = seg_attn(
+                q=q,
+                k_ptrs=k_ptrs,
+                v_ptrs=v_ptrs,
+                acc_o=acc_o,
+                lse=lse,
+                max_s=max_s,
+                n_offset=n,
+                k_length=k_length,
+                softmax_scale=softmax_scale,
+                q_pos=None,
+                offs_n=offs_n,
+                mid=mid,
+                stride_k=stride_k,
+                k_acc_length=None,
+                mask_ptrs=None,
+                sub_gap=0,
+                MASK_TYPE=0,
+                MASK_SIZE=MASK_SIZE,
+                BLOCK_N=BLOCK_N,
+                EVEN_N=EVEN_N,
+                ONLINE_SCALE=ONLINE_SCALE,
+                GROUP=GROUP,
+                TOKEN=TOKEN,
+            )
     else:
         if MASK_TYPE == 1:  # causal
             mask_free_step = (mid * TOKEN + gap) // BLOCK_N
         else:  # customized, mask size must be equal to q_length
             mask_free_step = gap // BLOCK_N
 
+        # mask free part
         for i in range(mask_free_step):
             n = i * BLOCK_N
             n = tl.multiple_of(n, BLOCK_N)
-            k = tl.load(k_ptrs + n * stride_k)
-            qk = tl.dot(q, tl.trans(k)) * softmax_scale
-
-            if ONLINE_SCALE:
-                p, acc_o, lse, max_s = safe_scale(qk, acc_o, lse, max_s)
-            else:
-                p, lse = fast_scale(qk, lse)
-
-            v = tl.load(v_ptrs + n * stride_k)
-            p = p.to(v.dtype)
-            acc_o += tl.dot(p, v)
-
+            
+            acc_o, lse, max_s = seg_attn(
+                q=q,
+                k_ptrs=k_ptrs,
+                v_ptrs=v_ptrs,
+                acc_o=acc_o,
+                lse=lse,
+                max_s=max_s,
+                n_offset=n,
+                k_length=k_length,
+                softmax_scale=softmax_scale,
+                q_pos=None,
+                offs_n=offs_n,
+                mid=mid,
+                stride_k=stride_k,
+                k_acc_length=None,
+                mask_ptrs=None,
+                sub_gap=0,
+                MASK_TYPE=0,
+                MASK_SIZE=MASK_SIZE,
+                BLOCK_N=BLOCK_N,
+                EVEN_N=EVEN_N,
+                ONLINE_SCALE=ONLINE_SCALE,
+                GROUP=GROUP,
+                TOKEN=TOKEN,
+            )
+        
         q_pos = gap + mid * TOKEN + q_idx
         if MASK_TYPE == 2 or MASK_TYPE == 3:
             sub_gap = gap - mask_free_step * BLOCK_N
@@ -178,49 +268,32 @@ def single_seg_attn_kernel(
             n = i * BLOCK_N
             n = tl.multiple_of(n, BLOCK_N)
 
-            if EVEN_N:
-                k = tl.load(k_ptrs + n * stride_k)
-            else:
-                k = tl.load(k_ptrs + n * stride_k,
-                            mask=(n + offs_n)[:, None] < k_length, 
-                            other=0.0)
-
-            qk = tl.dot(q, tl.trans(k)) * softmax_scale
-
-            if MASK_TYPE == 2:
-                qk = tl.reshape(qk, (TOKEN, GROUP, BLOCK_N), can_reorder=False)
-                mask = tl.load(mask_ptrs, mask=(offs_n[None, :] >= sub_gap) & \
-                        (offs_n[None, :] < sub_gap + min(MASK_SIZE, (mid + 1) * TOKEN)), other=1)
-
-                qk -= 1000000 * (1-mask[:,None,:].to(tl.float32))
-                # qk += tl.where(mask[:, None, :]==1, 0, float("-inf"))
-                qk = tl.reshape(qk, (TOKEN * GROUP, BLOCK_N), can_reorder=False)
-            elif MASK_TYPE == 3:
-                mask = tl.load(mask_ptrs, mask=(offs_n[None, :] >= sub_gap) & \
-                        (offs_n[None, :] < sub_gap + min(MASK_SIZE, (mid + 1) * TOKEN)), other=1)
-                qk += tl.where(mask==1, 0, float("-inf"))
-
-            if not EVEN_N:
-                qk += tl.where((n + offs_n)[None, :] < k_length, 0, float("-inf"))
-            
-            qk += tl.where(q_pos[:, None] >= (n + offs_n)[None, :], 0, float("-inf"))
-            
-            if ONLINE_SCALE:
-                p, acc_o, lse, max_s = safe_scale(qk, acc_o, lse, max_s)
-            else:
-                p, lse = fast_scale(qk, lse)
-
-            if EVEN_N:
-                v = tl.load(v_ptrs + n * stride_k)
-            else:
-                v = tl.load(v_ptrs + n * stride_k,
-                            mask=(n + offs_n)[:, None] < k_length, 
-                            other=0.0)
-
-            p = p.to(v.dtype)
-
-            acc_o = tl.dot(p, v, acc_o)
-
+            acc_o, lse, max_s = seg_attn(
+                q=q,
+                k_ptrs=k_ptrs,
+                v_ptrs=v_ptrs,
+                acc_o=acc_o,
+                lse=lse,
+                max_s=max_s,
+                n_offset=n,
+                k_length=k_length,
+                softmax_scale=softmax_scale,
+                q_pos=q_pos,
+                offs_n=offs_n,
+                mid=mid,
+                stride_k=stride_k,
+                k_acc_length=None,
+                mask_ptrs=mask_ptrs if (MASK_TYPE == 2) | (MASK_TYPE == 3) else None,
+                sub_gap=sub_gap if (MASK_TYPE == 2) | (MASK_TYPE == 3) else 0,
+                MASK_TYPE=MASK_TYPE,
+                MASK_SIZE=MASK_SIZE,
+                BLOCK_N=BLOCK_N,
+                EVEN_N=EVEN_N,
+                ONLINE_SCALE=ONLINE_SCALE,
+                GROUP=GROUP,
+                TOKEN=TOKEN,
+            )
+    
     acc_o = acc_o / lse[:, None]
 
     H = stride_o // HEAD_DIM
@@ -320,22 +393,34 @@ def multi_seg_attn_kernel(
             for i in range(tl.cdiv(k_length, BLOCK_N)):
                 n = i * BLOCK_N
                 n = tl.multiple_of(n, BLOCK_N)
-                k = tl.load(k_ptrs + n * stride_k, mask=(n + offs_n)[:, None] < k_length, other=0.0)
-                qk = tl.dot(q, tl.trans(k)) * softmax_scale
-                if not EVEN_N:
-                    qk += tl.where((n + offs_n)[None, :] < k_length, 0,
-                            float("-inf"))
 
-                if ONLINE_SCALE:
-                    p, acc_o, lse, max_s = safe_scale(qk, acc_o, lse, max_s)
-                else:
-                    p, lse = fast_scale(qk, lse)
-
-                v = tl.load(v_ptrs + n * stride_k, mask=(n + offs_n)[:, None] < k_length, other=0.0)
-                p = p.to(v.dtype)
-                acc_o += tl.dot(p, v)
+                acc_o, lse, max_s = seg_attn(
+                    q=q,
+                    k_ptrs=k_ptrs,
+                    v_ptrs=v_ptrs,
+                    acc_o=acc_o,
+                    lse=lse,
+                    max_s=max_s,
+                    n_offset=n,
+                    k_length=k_length,
+                    softmax_scale=softmax_scale,
+                    q_pos=None,
+                    offs_n=offs_n,
+                    mid=mid,
+                    stride_k=stride_k,
+                    k_acc_length=None,
+                    mask_ptrs=None,
+                    sub_gap=0,
+                    MASK_TYPE=0,
+                    MASK_SIZE=MASK_SIZE,
+                    BLOCK_N=BLOCK_N,
+                    EVEN_N=EVEN_N,
+                    ONLINE_SCALE=ONLINE_SCALE,
+                    GROUP=GROUP,
+                    TOKEN=TOKEN,
+                )
     else:
-        for i_seg in range(n_seg - 1):
+        for i_seg in range(n_seg - 1): # the first n-1 segment
             k_offset = tl.load(k_offsets + bid * max_seg + i_seg).to(tl.int64)
             k_seg_length = tl.load(k_lengths + bid * (max_seg + 1) + i_seg)
 
@@ -351,31 +436,33 @@ def multi_seg_attn_kernel(
             for i in range(tl.cdiv(k_seg_length, BLOCK_N)):
                 n = i * BLOCK_N
                 n = tl.multiple_of(n, BLOCK_N)
-                if EVEN_N:
-                    k = tl.load(k_ptrs + n * stride_k)
-                else:
-                    k = tl.load(k_ptrs + n * stride_k,
-                            mask=(n + offs_n)[:, None] < k_seg_length,
-                                other=0.0)
-                qk = tl.dot(q, tl.trans(k)) * softmax_scale
 
-                if not EVEN_N:
-                    qk += tl.where((n + offs_n)[None, :] < k_seg_length, 0, float("-inf"))
-
-                if ONLINE_SCALE:
-                    p, acc_o, lse, max_s = safe_scale(qk, acc_o, lse, max_s)
-                else:
-                    p, lse = fast_scale(qk, lse)
-
-                if EVEN_N:
-                    v = tl.load(v_ptrs + n * stride_k)
-                else:
-                    v = tl.load(v_ptrs + n * stride_k,
-                                mask=(n + offs_n)[:, None] < k_seg_length,
-                                other=0.0)
-                p = p.to(v.dtype)
-                acc_o += tl.dot(p, v)
-
+                acc_o, lse, max_s = seg_attn(
+                    q=q,
+                    k_ptrs=k_ptrs,
+                    v_ptrs=v_ptrs,
+                    acc_o=acc_o,
+                    lse=lse,
+                    max_s=max_s,
+                    n_offset=n,
+                    k_length=k_seg_length, # current seg length
+                    softmax_scale=softmax_scale,
+                    q_pos=None,
+                    offs_n=offs_n,
+                    mid=mid,
+                    stride_k=stride_k,
+                    k_acc_length=None,
+                    mask_ptrs=None,
+                    sub_gap=0,
+                    MASK_TYPE=0,
+                    MASK_SIZE=MASK_SIZE,
+                    BLOCK_N=BLOCK_N,
+                    EVEN_N=EVEN_N,
+                    ONLINE_SCALE=ONLINE_SCALE,
+                    GROUP=GROUP,
+                    TOKEN=TOKEN,
+                )
+        
         # the last segment
         k_offset = tl.load(k_offsets + bid * max_seg + n_seg - 1).to(tl.int64)
         k_seg_length = tl.load(k_lengths + bid * (max_seg + 1) + n_seg - 1)
@@ -393,20 +480,36 @@ def multi_seg_attn_kernel(
         mask_free_step = min(max(mid * TOKEN + gap - k_acc_length, 0),
                 k_seg_length) // BLOCK_N
         
+        # mask free part
         for i in range(mask_free_step):
             n = i * BLOCK_N
             n = tl.multiple_of(n, BLOCK_N)
-            k = tl.load(k_ptrs + n * stride_k)
-            qk = tl.dot(q, tl.trans(k)) * softmax_scale
 
-            if ONLINE_SCALE:
-                p, acc_o, lse, max_s = safe_scale(qk, acc_o, lse, max_s)
-            else:
-                p, lse = fast_scale(qk, lse)
-
-            v = tl.load(v_ptrs + n * stride_k)
-            p = p.to(v.dtype)
-            acc_o += tl.dot(p, v)
+            acc_o, lse, max_s = seg_attn(
+                q=q,
+                k_ptrs=k_ptrs,
+                v_ptrs=v_ptrs,
+                acc_o=acc_o,
+                lse=lse,
+                max_s=max_s,
+                n_offset=n,
+                k_length=k_seg_length,
+                softmax_scale=softmax_scale,
+                q_pos=None,
+                offs_n=offs_n,
+                mid=mid,
+                stride_k=stride_k,
+                k_acc_length=None,
+                mask_ptrs=None,
+                sub_gap=0,
+                MASK_TYPE=0,
+                MASK_SIZE=MASK_SIZE,
+                BLOCK_N=BLOCK_N,
+                EVEN_N=EVEN_N,
+                ONLINE_SCALE=ONLINE_SCALE,
+                GROUP=GROUP,
+                TOKEN=TOKEN,
+            )
 
         q_pos = ((gap + mid * TOKEN) + tl.arange(0, BLOCK_M) // GROUP)[:, None]
         max_k_idx = min((mid + 1) * TOKEN + gap - k_acc_length, k_seg_length)
@@ -421,49 +524,36 @@ def multi_seg_attn_kernel(
                 mask_ptrs = Mask + bid * MASK_SIZE * MASK_SIZE + \
                         mid * TOKEN * MASK_SIZE - sub_gap + \
                             (tl.arange(0,BLOCK_M)%(GROUP*TOKEN)//GROUP)[:,None] * MASK_SIZE + offs_n[None,:]
-
+        
+        # with mask
         for n in range(mask_free_step * BLOCK_N, max_k_idx, BLOCK_N):
             n = tl.multiple_of(n, BLOCK_N)
 
-            if EVEN_N:
-                k = tl.load(k_ptrs + n * stride_k)
-            else:
-                k = tl.load(k_ptrs + n * stride_k,
-                        mask=(n + offs_n)[:, None] < k_seg_length, other=0.0)
-            qk = tl.dot(q, tl.trans(k)) * softmax_scale
-            
-            if MASK_TYPE == 2:
-                qk = tl.reshape(qk, (TOKEN, GROUP, BLOCK_N), can_reorder=False)
-                mask = tl.load(mask_ptrs, mask=(offs_n[None, :] >= sub_gap) & \
-                             (offs_n[None, :] < MASK_SIZE + sub_gap), other=1)
-                mask = -10000 * (1.0-mask.to(tl.float32))
-                qk += mask[:, None, :]
-                qk = tl.reshape(qk, (TOKEN * GROUP, BLOCK_N), can_reorder=False)
-            elif MASK_TYPE == 3:
-                mask = tl.load(mask_ptrs, mask=(offs_n[None, :] >= sub_gap) & \
-                        (offs_n[None, :] < MASK_SIZE + sub_gap), other=1)
-                qk = tl.where(mask==1, qk, qk-10000.0)
-
-            if not EVEN_N:
-                qk += tl.where((n + offs_n)[None, :] < k_seg_length, 0.0,
-                        float("-inf"))
-
-            qk += tl.where(q_pos >= (k_acc_length + n + offs_n)[None, :], 0.0,
-                    float("-inf"))
-
-            if ONLINE_SCALE:
-                p, acc_o, lse, max_s = safe_scale(qk, acc_o, lse, max_s)
-            else:
-                p, lse = fast_scale(qk, lse)
-
-            if EVEN_N:
-                v = tl.load(v_ptrs + n * stride_k)
-            else:
-                v = tl.load(v_ptrs + n * stride_k,
-                        mask=(n + offs_n)[:, None] < k_seg_length, other=0.0)
-
-            p = p.to(v.dtype)
-            acc_o += tl.dot(p, v)
+            acc_o, lse, max_s = seg_attn(
+                q=q,
+                k_ptrs=k_ptrs,
+                v_ptrs=v_ptrs,
+                acc_o=acc_o,
+                lse=lse,
+                max_s=max_s,
+                n_offset=n,
+                k_length=k_seg_length,
+                softmax_scale=softmax_scale,
+                q_pos=q_pos,
+                offs_n=offs_n,
+                mid=mid,
+                stride_k=stride_k,
+                k_acc_length=k_acc_length,
+                mask_ptrs=mask_ptrs if (MASK_TYPE == 2) | (MASK_TYPE == 3) else None,
+                sub_gap=sub_gap if (MASK_TYPE == 2) | (MASK_TYPE == 3) else 0,
+                MASK_TYPE=MASK_TYPE,
+                MASK_SIZE=MASK_SIZE,
+                BLOCK_N=BLOCK_N,
+                EVEN_N=EVEN_N,
+                ONLINE_SCALE=ONLINE_SCALE,
+                GROUP=GROUP,
+                TOKEN=TOKEN,
+            )
     
     acc_o = acc_o / lse[:, None]
 
