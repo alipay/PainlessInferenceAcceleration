@@ -64,6 +64,7 @@ class LLM():
                  n_proc: Optional[int] = None,
                  cache_size: Optional[Union[int, float]] = None,
                  slot_count: int = 8192,
+                 num_reqs: int = 128,
                  schedule_mode: str = 'pingpong',
                  chunk_size: int = 1024,
                  sync_wait_time: Tuple = (4, 4),
@@ -110,7 +111,8 @@ class LLM():
                 Int: number of tokens.
                 Float: max percent of GPU memory usage.
                 None: determined heuristically.
-        :param slot_size: total segment count.
+        :param slot_count: total segment count.
+        :param num_reqs: number of requests for linear model.
         :param schedule_mode: schedule mode.
                 pingpong: do prefill until no slot available,
                         and do decoding until batch size decrease.
@@ -154,7 +156,7 @@ class LLM():
             assert n_stage <= torch.cuda.device_count()
 
         self.model_path = model_path
-        self.model_type, self.torch_dtype, self.n_layer, self.kv_heads, self.head_dim = Reader.get_conf(
+        self.model_type, self.torch_dtype, self.n_layer, self.kv_heads, self.head_dim, self.linear_layer_group = Reader.get_conf(
             self.model_path)
         self.model_attr = model_attr_map.get(self.model_type, model_attr_map['DEFAULT'])
 
@@ -166,6 +168,7 @@ class LLM():
         self.n_stage = n_stage
         self.n_proc = n_proc if n_proc else self.n_stage
         self.slot_count = slot_count
+        self.num_reqs = num_reqs
         self.schedule_mode = schedule_mode
         self.chunk_size = chunk_size
         self.sync_wait_time = sync_wait_time
@@ -391,14 +394,18 @@ class LLM():
             #         devices.append(torch.device(j))
             #         break
             devices.append(device)
+
         dims = [self.model.config.kv_lora_rank+self.model.config.qk_rope_head_dim] if self.model_type =='DeepseekV3ForCausalLM' else [self.kv_heads*self.head_dim]*2
         cache = SegmentCache(max_token,
+                             num_reqs=self.num_reqs,
                              num_layers=self.n_layer,
-                            # num_key_value_heads=self.kv_heads,
-                            # head_dim=self.head_dim,
+                             num_key_value_heads=self.kv_heads,
+                             head_dim=self.head_dim,
                              dims=dims,
                              dtype=cache_dtype,
-                             devices=devices)
+                             devices=devices,
+                             linear_layer_group=self.linear_layer_group,
+                             )
         return cache
 
     def get_sync_layers(self, tasks, device_list):
@@ -437,6 +444,7 @@ class LLM():
         slots = Array(Slot,
                       [(0, self.cache_size - 128, 1, 0)] + [(0, 0, 0, 0) for i in
                                                       range(self.slot_count)])
+        fixed_slots = Array(Slot,[(0, self.num_reqs, 1, 0)])
 
         for i in range(self.n_proc):
             process = mp.Process(target=self.schedule,
@@ -446,6 +454,7 @@ class LLM():
                                        output_queue,
                                        tasks,
                                        slots,
+                                       fixed_slots,
                                        counts,
                                        state,
                                        allocate_fail_count,
@@ -459,18 +468,18 @@ class LLM():
         time.sleep(10)
 
     def schedule(self, input_queue, chunk_quene, working_queue, output_queues,
-                 tasks, slots, counts, state, allocate_fail_count,
+                 tasks, slots, fixed_slots, counts, state, allocate_fail_count,
                  fail_sample_count, gbs, task_id):
         method_name = f'{self.schedule_mode}_schedule'
         return getattr(self, method_name)(input_queue, chunk_quene,
                                           working_queue, output_queues, tasks,
-                                          slots, counts, state,
+                                          slots, fixed_slots, counts, state,
                                           allocate_fail_count,
                                           fail_sample_count, gbs,
                                           task_id)
 
     def pingpong_schedule(self, input_queue, chunk_quene, working_queue,
-                          output_queues, tasks, slots, counts, state,
+                          output_queues, tasks, slots, fixed_slots , counts, state,
                           allocate_fail_count, fail_sample_count,
                           gbs, task_id):
         print(
@@ -620,6 +629,7 @@ class LLM():
                     fully_alloc_under = sorted(output_lengths)[int(0.9*len(output_lengths))]
 
                 batch = Batch.prefill_batching(reqs, slots,
+                                               fixed_slots,
                                                device=input_device,
                                                min_rate=self.alloc_early_exit_rate,
                                                fully_alloc_under=fully_alloc_under,

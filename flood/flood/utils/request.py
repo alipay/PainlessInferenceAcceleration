@@ -8,7 +8,8 @@ class Req:
     def __init__(self, rid, input_ids=None, input_length=-1, output_length=200,
                  done=0, todo=0, task_type=0, stream=False, emb_idx=0,
                  emb_size=0, segs=None, output_index=0, target_ids=None,
-                 temperature=None, top_k=None, top_p=None, min_p=None):
+                 fix_size_slot_index=None,temperature=None, top_k=None, 
+                 top_p=None, min_p=None):
         # used in queue, remove unused fields to reduce pickle and unpickle time
         self.rid = rid
         self.input_ids = input_ids
@@ -23,6 +24,7 @@ class Req:
         self.segs = segs
         self.output_index = output_index
         self.target_ids = target_ids
+        self.fix_size_slot_index = fix_size_slot_index
         self.temperature = temperature
         self.top_k = top_k
         self.top_p = top_p

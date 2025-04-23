@@ -30,6 +30,7 @@ if __name__ == '__main__':
     # model_path = '/mntnlp/nanxiao/model'
     # model_path = '/mntnlp/nanxiao/deepseekv3'
     # model_path = '/agent/nanxiao/models/Qwen2.5-32B-Instruct'
+    # model_path = '/agent/jingyue/moe_lite_linear/v3_convert'
 
     # do not apply template
     # reqs = [
@@ -60,13 +61,14 @@ if __name__ == '__main__':
                  n_proc=1,
                  chunk_size=4096,
                 #  model_dtype=torch.float8_e4m3fn,
+                 num_reqs=len(reqs),
                  cache_size=16000,
                  slot_fully_alloc_under=1024,
                  tune_alloc_size=False,
                  eos_token_id=None,
                  debug=True,
-                 kernels=('sa',),
-                 spec_algo = 'lookahead',
+                 kernels=('fa2',),
+                #  spec_algo = 'lookahead',
                  logger='example.log')
 
     # start process
