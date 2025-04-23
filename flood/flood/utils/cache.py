@@ -17,10 +17,14 @@ class SegmentCache(Cache):
 
     def __init__(self, 
                  max_token: int, 
-                 num_layers: int = 32, 
+                 num_reqs: int,
+                 num_layers: int = 32,
+                 num_key_value_heads: int = 4,
+                 head_dim: int = 128,
                  dims: List[int] = [1024,1024], 
                  dtype=None,
-                 devices=()) -> None:
+                 devices=(),
+                 linear_layer_group=None) -> None:
         super().__init__()
         self.max_token = max_token
         self.num_layers = num_layers
@@ -31,8 +35,12 @@ class SegmentCache(Cache):
         self.caches: List[torch.Tensor] = []
         cache_shape = (max_token, sum(self.dims))
         for i in range(num_layers):
-            cache = torch.zeros(cache_shape, dtype=self.dtype,
-                             device=devices[i]).share_memory_()
+            if linear_layer_group is not None and i + 1 % linear_layer_group == 0:
+                cache = torch.zeros((num_reqs, num_key_value_heads*head_dim**2), dtype=self.dtype,
+                                device=devices[i]).share_memory_()
+            else:
+                cache = torch.zeros(cache_shape, dtype=self.dtype,
+                                device=devices[i]).share_memory_()
             # Note: `mark_static_address` is used to tag the cache as an fixed data pointer, preventing cuda graph
             # breaks when updating the cache.
             torch._dynamo.mark_static_address(cache)

@@ -3,6 +3,7 @@
 Copyright (c) Ant Financial Service Group and its affiliates.
 """
 
+import enum
 import math
 import copy
 from ctypes import Structure, c_int
@@ -160,6 +161,7 @@ class Batch:
     @staticmethod
     def prefill_batching(reqs,
                          slots,
+                         fixed_slots,
                          device=torch.device(0),
                          cache_size=None,
                          buffer_size=0,
@@ -198,6 +200,7 @@ class Batch:
                 else:
                     reserve = buffer_size
                 cache_offset, slot_index = Batch.allocate(slots, 
+                                                          fixed_slots,
                                                           total_alloc_length,
                                                           reserve=reserve,
                                                           cache_size=cache_size,
@@ -767,7 +770,7 @@ class Batch:
         return hidden_states
 
     @staticmethod
-    def allocate(slots, length, reserve=None, cache_size=None, min_rate=0.95):
+    def allocate(slots, fixed_slots, length, reserve=None, cache_size=None, min_rate=0.95):
         max_end_idx = cache_size - reserve if reserve is not None else 2 ** 30
         with slots.get_lock():
             rates = np.zeros(len(slots), dtype=np.float32)
@@ -784,6 +787,12 @@ class Batch:
                     rates[j] = rate
                 elif s == 0 and e == 0 and state == 0:
                     break
+            # with fixed_slots.get_lock():
+            #     for j, fixed_slot in enumerate(fixed_slots):
+            #         if fix_size_slot_index is not None:
+            #             if fixed_slot.state != 1:
+            #                 fix_size_slot_index = fixed_slot.fix_size_slot_index
+            #             fixed_slot.state = 2
 
             if max_idx == -1:
                 max_idx = np.argmax(rates)
