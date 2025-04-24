@@ -404,7 +404,10 @@ class LLM():
             #         break
             devices.append(device)
 
-        dims = [self.model.config.kv_lora_rank+self.model.config.qk_rope_head_dim] if self.model_type =='DeepseekV3ForCausalLM' else [self.kv_heads*self.head_dim]*2
+        if self.model_type =='DeepseekV3ForCausalLM':
+            dims = [self.model.config.kv_lora_rank+self.model.config.qk_rope_head_dim]  
+        else:
+            dims = [self.kv_heads*self.head_dim]*2
         fix_size_dims = [self.kv_heads*self.head_dim**2]
         cache = SegmentCache(max_token,
                              num_reqs=self.num_reqs,
@@ -809,7 +812,7 @@ class LLM():
                                 input_lengths = input_lengths[-1024:]
                                 output_lengths = output_lengths[-1024:]
 
-                            Batch.recycle(slots, req.segs)
+                            Batch.recycle(slots, req.segs, fix_slots, req.fix_size_slot_index)
                             if self.spec_algo == 'lookahead':
                                 self.spec.update_state(req.output_ids)
                             counts.value -= 1
@@ -832,11 +835,11 @@ class LLM():
                                     options.append(req)
                                 else:
                                     output_queue.put(req)
-                                    Batch.recycle(slots, req.segs)
+                                    Batch.recycle(slots, req.segs, fix_slots, req.fix_size_slot_index)
                                     counts.value -= 1
                         elif len(req.output_ids) >= 1:
                             output_queue.put(req)
-                            Batch.recycle(slots, req.segs)
+                            Batch.recycle(slots, req.segs, fix_slots, req.fix_size_slot_index)
                             counts.value -= 1
                         else:
                             working_queue.put(req)

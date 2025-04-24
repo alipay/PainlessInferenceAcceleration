@@ -7,6 +7,7 @@ import torch
 
 from flood.ops.seg_attn import seg_attn_fwd
 from flood.ops.seg_mla import seg_mla_fwd
+from flood.ops.seg_la import seg_la_fwd
 
 
 try:
@@ -19,9 +20,6 @@ try:
 except:
     flash_attn_3_cuda = None
     print("flash_attn_3_cuda not found!")
-
-from fla.ops.simple_gla.fused_recurrent import fused_recurrent_simple_gla
-from fla.ops.simple_gla.chunk import chunk_simple_gla
 
 
 class AutoAttention():
@@ -37,8 +35,8 @@ class AutoAttention():
             print(f"attention dtype:{dtype}")
         if dtype is None or dtype == torch.bfloat16 or dtype == torch.float16 or dtype in (
         'float16', 'bfloat16'):
-            if 'fla' in kernels:
-                return Fp16LinearAttention(layer_idx)
+            if 'seg_la' in kernels:
+                return Fp16SegLinearAttention(layer_idx)
             elif 'fa3' in kernels:
                 return Fp16Attention3(layer_idx, softmax_scale=softmax_scale)
             elif 'fa2' in kernels:
@@ -140,60 +138,25 @@ class Fp16SegAttention(torch.nn.Module):
 
         return output
 
-class Fp16LinearAttention(torch.nn.Module):
-    def __init__(self, layer_idx, linear_scale=None, linear_mode='chunk'):
+class Fp16SegLinearAttention(torch.nn.Module):
+    def __init__(self, layer_idx):
         super().__init__()
         self.layer_idx = layer_idx
-        self.lightning_attn_ops = {
-            'fused_recurrent': fused_recurrent_simple_gla,
-            'chunk': chunk_simple_gla
-        }
-        self.linear_scale = linear_scale
-        self.linear_mode = linear_mode
 
-    def forward(self, query_states, key_states, value_states, batch_meta_info,
+    def forward(self, query_states, key_states, value_states, s_states, batch_meta_info,
                 cache):
         # if any([x.done>0 for x in batch_meta_info.reqs]):
         #     print('debug') 
-        past_key_value_states = cache.caches[self.layer_idx]
-        H = query_states.shape[2]
-        s = -self.build_slope_tensor(H) * (1 - self.layer_idx / (self.num_layers - 1) + 1e-5)
-        g = s[None, None, :].expand(query_states.shape[0], query_states.shape[1], query_states.shape[2]).contiguous()
 
-        if self.mode in self.lightning_attn_ops:
-            output, past_key_value_states = self.lightning_attn_ops[self.mode](
-                q=query_states,
-                k=key_states,
-                v=value_states,
-                g=g,
-                scale=self.linear_scale,
-                initial_state=past_key_value_states,
-                output_final_state=True,
-                head_first=False
-            )
-        else:
-            raise NotImplementedError(f"Not supported mode `{self.mode}`.")
+        output = seg_la_fwd(
+            query_states,
+            key_states,
+            value_states,
+            s_states,
+            batch_meta_info
+        )
 
         return output
-
-    def build_slope_tensor(self, num_attention_heads: int):
-        def get_slopes(n):
-            def get_slopes_power_of_2(n):
-                start = 2 ** (-(2 ** -(math.log2(n) - 3)))
-                ratio = start
-                return [start * ratio ** i for i in range(n)]
-
-            if math.log2(n).is_integer():
-                return get_slopes_power_of_2(
-                    n)  # In the paper, we only train models that have 2^a heads for some a. This function has
-            else:  # some good properties that only occur when the input is a power of 2. To maintain that even
-                closest_power_of_2 = 2 ** math.floor(
-                    math.log2(n))  # when the number of heads is not a power of 2, we use this workaround.
-                return (get_slopes_power_of_2(closest_power_of_2)
-                        + get_slopes(2 * closest_power_of_2)[0::2][:n - closest_power_of_2])
-
-        slopes = torch.tensor(get_slopes(num_attention_heads), dtype=torch.float)
-        return slopes
 
 
 class Fp16SegMla(torch.nn.Module):
