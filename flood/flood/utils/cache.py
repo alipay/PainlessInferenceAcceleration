@@ -19,24 +19,25 @@ class SegmentCache(Cache):
                  max_token: int, 
                  num_reqs: int,
                  num_layers: int = 32,
-                 num_key_value_heads: int = 4,
-                 head_dim: int = 128,
                  dims: List[int] = [1024,1024], 
+                 fix_size_dims: List[int] = [1024,1024],
                  dtype=None,
                  devices=(),
-                 linear_layer_group=None) -> None:
+                 fix_size_group=None) -> None:
         super().__init__()
         self.max_token = max_token
         self.num_layers = num_layers
         self.dims = dims  # key cache dim + value cache dim, 2048=2*8*128
+        self.fix_size_dims = fix_size_dims
 
         self.dtype = dtype
 
         self.caches: List[torch.Tensor] = []
         cache_shape = (max_token, sum(self.dims))
+        fix_size_cache_shape = (num_reqs, sum(self.fix_size_dims))
         for i in range(num_layers):
-            if linear_layer_group is not None and i + 1 % linear_layer_group == 0:
-                cache = torch.zeros((num_reqs, num_key_value_heads*head_dim**2), dtype=self.dtype,
+            if fix_size_group is not None and (i + 1) % fix_size_group == 0:
+                cache = torch.zeros(fix_size_cache_shape, dtype=self.dtype,
                                 device=devices[i]).share_memory_()
             else:
                 cache = torch.zeros(cache_shape, dtype=self.dtype,

@@ -20,6 +20,8 @@ from flood.utils.sampling import Sampling
     meta.batch_size = bs
     meta.q_offsets = q_offsets
     meta.k_offsets = k_offsets
+    meta.s_offsets = s_offsets
+    meta.s_scales = s_scales
     meta.q_lengths = q_lengths
     meta.k_lengths = k_lengths
     meta.k_segs = k_segs
@@ -57,6 +59,8 @@ class Batch:
                  position_ids=None,
                  q_offsets=None,
                  k_offsets=None,
+                 s_offsets=None,
+                 s_scales=None,
                  max_q_length=None,
                  max_k_length=None,
                  k_segs=None,
@@ -99,6 +103,8 @@ class Batch:
                 example:  
                     first req has 2 segs with indices [4096,1024] and second req has 1 seg with indices [3073]
                     k_offsets = [[4096,1024],[3072,0]]
+        :param s_offsets: the first fixed size key/value indices of each req
+        :param s_scales: the scales used for seg_la
         :param max_q_length: the max query length of queries in a batch
             it is used for computing sm
         :param max_k_length: the max k length, used in flash-attn
@@ -140,6 +146,8 @@ class Batch:
         self.q_offsets = q_offsets
         self.k_offsets = k_offsets
         self.q_lengths = q_lengths
+        self.s_offsets = s_offsets
+        self.s_scales = s_scales
         self.k_lengths = k_lengths
         self.k_segs = k_segs
         self.max_q_length = max_q_length
@@ -161,7 +169,7 @@ class Batch:
     @staticmethod
     def prefill_batching(reqs,
                          slots,
-                         fixed_slots,
+                         fix_slots,
                          device=torch.device(0),
                          cache_size=None,
                          buffer_size=0,
@@ -179,6 +187,8 @@ class Batch:
         cache_indices = []
         q_offsets = [0]
         k_offsets = []
+        s_offsets = []
+        s_scales = []
         q_lengths = []
         k_lengths = []
         logit_indices = []
@@ -199,29 +209,38 @@ class Batch:
                     reserve = Batch.cdiv(req.output_length - output_alloc_length, 16)
                 else:
                     reserve = buffer_size
-                cache_offset, slot_index = Batch.allocate(slots, 
-                                                          fixed_slots,
-                                                          total_alloc_length,
-                                                          reserve=reserve,
-                                                          cache_size=cache_size,
-                                                          min_rate=min_rate)
+                cache_offset, slot_index, s_offset = Batch.allocate(slots, 
+                                                            fix_slots,
+                                                            total_alloc_length,
+                                                            reserve=reserve,
+                                                            cache_size=cache_size,
+                                                            min_rate=min_rate)
+
+                
                 if cache_offset == -1:  # failed
                     for r in allocated:
-                        Batch.recycle(slots, r.segs)
+                        Batch.recycle(slots, r.segs, fix_slots, r.fix_size_slot_index)
                         r.todo = 0
                         r.done = 0
                     return Batch(batch_size=0)
                 req.segs = [
                     (cache_offset, cache_offset + total_alloc_length, slot_index)]
-                allocated.append(req)  
+                req.fix_size_slot_index = [(s_offset)]
+                allocated.append(req)
+                s_scale = 0  # 
             else:  # done > 0, second trunk
                 ql = req.todo
                 cache_offset = req.segs[0][0]
+                s_offset = req.fix_size_slot_index[0][0]
+                s_scale = 1
+                
 
             q_lengths.append(ql)
             sum_ql = sum(q_lengths)
             q_offsets.append(sum_ql)  # next q_offset
             k_offsets.append(cache_offset)
+            s_offsets.append(s_offset)
+            s_scales.append(s_scale)
 
             targeted = req.done >= req.input_length
             # a chunk that not contains the last \
@@ -301,6 +320,8 @@ class Batch:
         max_k_length = max(k_lengths)
         q_offsets = torch.tensor(q_offsets, dtype=torch.int32, device=device)
         k_offsets = torch.tensor(k_offsets, dtype=torch.int32, device=device)
+        s_offsets = torch.tensor(s_offsets, dtype=torch.int32, device=device)
+        s_scales = torch.tensor(s_scales, dtype=torch.int32, device=device)
         q_lengths = torch.tensor(q_lengths, dtype=torch.int32, device=device)
         k_lengths = torch.tensor(k_lengths, dtype=torch.int32, device=device)
         cache_indices = torch.tensor(cache_indices,
@@ -316,6 +337,8 @@ class Batch:
                      position_ids=position_ids,
                      q_offsets=q_offsets,
                      k_offsets=k_offsets,
+                     s_offsets=s_offsets,
+                     s_scales=s_scales,
                      max_q_length=max_q_length,
                      max_k_length=max_k_length,
                      q_lengths=q_lengths,
@@ -345,6 +368,7 @@ class Batch:
         cache_indices = []
         k_offsets = []
         k_lengths = []
+        s_offsets = []
         k_segs = []
         for i in range(bs):
             req = reqs[i]
@@ -354,6 +378,8 @@ class Batch:
             kl = req.input_length + len(req.output_ids)
             position_id = kl - 1
             position_ids.append(position_id)
+            fix_size_slot_index = req.fix_size_slot_index
+            s_offset = fix_size_slot_index[0][0]
             if max_seg == 1:
                 k_offset = segs[0][0]
                 cache_index = k_offset + position_id
@@ -370,12 +396,14 @@ class Batch:
                 k_offsets.append(k_offset + kl)
             cache_indices.append(cache_index)
             k_lengths.append(k_length)
+            s_offsets.append(s_offset)
 
         max_q_length = 1
         max_k_length = max(position_ids) + 1 
 
         qls = [1] * bs
         kls = k_lengths
+        s_scales = [1] * bs
         input_ids = torch.tensor(input_ids, dtype=torch.int32, device=device)
         position_ids = torch.tensor(position_ids, dtype=torch.int32,
                                     device=device)
@@ -386,7 +414,8 @@ class Batch:
         k_segs = torch.tensor(k_segs, dtype=torch.int32, device=device)
         cache_indices = torch.tensor(cache_indices,
                                               dtype=torch.int32, device=device)
-
+        s_offsets = torch.tensor(s_offsets, dtype=torch.int32, device=device)
+        s_scales = torch.tensor(s_scales, dtype=torch.int32, device=device)
         for _, req in enumerate(reqs):
             if req.target_ids or req.temperature \
                  or req.top_k or req.top_p or req.min_p:
@@ -408,6 +437,8 @@ class Batch:
                      position_ids=position_ids,
                      q_offsets=q_offsets,
                      k_offsets=k_offsets,
+                     s_offsets=s_offsets,
+                     s_scales=s_scales,
                      max_q_length=max_q_length,
                      max_k_length=max_k_length,
                      q_lengths=q_lengths,
@@ -560,9 +591,10 @@ class Batch:
                     output_alloc_length = req.output_length if req.output_length <= fully_alloc_under else allocate_rate * req.output_length
                     alloc_length = ((req.input_length + int(
                         output_alloc_length) - 1) // 16 + 1) * 16
-                    cache_offset, slot_index = Batch.allocate(slots,
-                                                              alloc_length,
-                                                              min_rate=min_rate)
+                    cache_offset, slot_index, fix_size_slot_index = Batch.allocate(slots,
+                                                                                fix_slots,
+                                                                                alloc_length,
+                                                                                min_rate=min_rate)
                     if cache_offset == -1:
                         for r in rs:
                             Batch.recycle(slots, r.segs)
@@ -770,12 +802,13 @@ class Batch:
         return hidden_states
 
     @staticmethod
-    def allocate(slots, fixed_slots, length, reserve=None, cache_size=None, min_rate=0.95):
+    def allocate(slots, fix_slots, length, reserve=None, cache_size=None, min_rate=0.95):
         max_end_idx = cache_size - reserve if reserve is not None else 2 ** 30
         with slots.get_lock():
             rates = np.zeros(len(slots), dtype=np.float32)
             max_idx = -1
             max_rate = 0.0
+            fix_slot_index = -1
             for j, slot in enumerate(slots):
                 s, e, state = slot.s, slot.e, slot.state
                 if state == 1 and length <= e - s and s <= max_end_idx:
@@ -787,12 +820,11 @@ class Batch:
                     rates[j] = rate
                 elif s == 0 and e == 0 and state == 0:
                     break
-            # with fixed_slots.get_lock():
-            #     for j, fixed_slot in enumerate(fixed_slots):
-            #         if fix_size_slot_index is not None:
-            #             if fixed_slot.state != 1:
-            #                 fix_size_slot_index = fixed_slot.fix_size_slot_index
-            #             fixed_slot.state = 2
+            for j, fixed_slot in enumerate(fix_slots):
+                if fixed_slot.state == 1:
+                    fixed_slot.state = 2
+                    fix_slot_index = j
+                    break
 
             if max_idx == -1:
                 max_idx = np.argmax(rates)
@@ -813,12 +845,12 @@ class Batch:
                             iter_slot.e = e
                             iter_slot.state = 1  # available
                             break
-                return s, max_idx
+                return s, max_idx, fix_slot_index
             else:
-                return -1, -1
+                return -1, -1, -1
 
     @staticmethod
-    def recycle(slots, segs):  # be carefull with prefix cache
+    def recycle(slots, segs, fix_slots, fix_size_slot_index):  # be carefull with prefix cache
         with slots.get_lock():
             for ts, te, idx in segs:
                 if slots[idx].share:
@@ -861,6 +893,9 @@ class Batch:
 
                 if hit is False:
                     raise ValueError("Recycle error! No slot available!")
+            for fix_slot_idx in fix_size_slot_index:
+                if fix_slot_idx != -1:
+                    fix_slots[fix_slot_idx].state = 1 # available
 
     @staticmethod
     def extend_slot(slots, old_segs, length, contiguous=False):

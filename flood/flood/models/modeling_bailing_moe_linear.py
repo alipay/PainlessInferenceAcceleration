@@ -254,13 +254,8 @@ class BailingMoeLinearAttention(torch.nn.Module):
                                             bias=config.use_bias, 
                                             config=config, 
                                             name='dense')
-        if self.use_low_rank:
-            self.g_proj = torch.nn.Sequential(
-                torch.nn.Linear(self.hidden_size, self.head_dim, bias=False),
-                torch.nn.Linear(self.head_dim, self.num_heads * self.head_dim, bias=False),
-            )
-        else:
-            self.g_proj = torch.nn.Linear(self.hidden_size, self.num_heads * self.head_dim, bias=False)
+
+        self.g_proj = torch.nn.Linear(self.hidden_size, self.num_heads * self.head_dim, bias=False)
         self.g_norm = RMSNorm(hidden_size=self.num_heads * self.head_dim, eps=config.rms_norm_eps)
 
         self.rope = AutoRope.from_pretrained(config)

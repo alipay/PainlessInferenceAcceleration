@@ -396,15 +396,15 @@ class LLM():
             devices.append(device)
 
         dims = [self.model.config.kv_lora_rank+self.model.config.qk_rope_head_dim] if self.model_type =='DeepseekV3ForCausalLM' else [self.kv_heads*self.head_dim]*2
+        fix_size_dims = [self.kv_heads*self.head_dim**2]
         cache = SegmentCache(max_token,
                              num_reqs=self.num_reqs,
                              num_layers=self.n_layer,
-                             num_key_value_heads=self.kv_heads,
-                             head_dim=self.head_dim,
                              dims=dims,
+                             fix_size_dims=fix_size_dims,
                              dtype=cache_dtype,
                              devices=devices,
-                             linear_layer_group=self.linear_layer_group,
+                             fix_size_group=self.linear_layer_group,
                              )
         return cache
 
@@ -444,7 +444,8 @@ class LLM():
         slots = Array(Slot,
                       [(0, self.cache_size - 128, 1, 0)] + [(0, 0, 0, 0) for i in
                                                       range(self.slot_count)])
-        fixed_slots = Array(Slot,[(0, self.num_reqs, 1, 0)])
+        fix_slots = Array(Slot,[(0, self.num_reqs, 1, 0)] + [(0, 0, 1, 0) for i in
+                                                      range(self.num_reqs - 1)])
 
         for i in range(self.n_proc):
             process = mp.Process(target=self.schedule,
@@ -454,7 +455,7 @@ class LLM():
                                        output_queue,
                                        tasks,
                                        slots,
-                                       fixed_slots,
+                                       fix_slots,
                                        counts,
                                        state,
                                        allocate_fail_count,
@@ -468,18 +469,18 @@ class LLM():
         time.sleep(10)
 
     def schedule(self, input_queue, chunk_quene, working_queue, output_queues,
-                 tasks, slots, fixed_slots, counts, state, allocate_fail_count,
+                 tasks, slots, fix_slots, counts, state, allocate_fail_count,
                  fail_sample_count, gbs, task_id):
         method_name = f'{self.schedule_mode}_schedule'
         return getattr(self, method_name)(input_queue, chunk_quene,
                                           working_queue, output_queues, tasks,
-                                          slots, fixed_slots, counts, state,
+                                          slots, fix_slots, counts, state,
                                           allocate_fail_count,
                                           fail_sample_count, gbs,
                                           task_id)
 
     def pingpong_schedule(self, input_queue, chunk_quene, working_queue,
-                          output_queues, tasks, slots, fixed_slots , counts, state,
+                          output_queues, tasks, slots, fix_slots , counts, state,
                           allocate_fail_count, fail_sample_count,
                           gbs, task_id):
         print(
@@ -629,7 +630,7 @@ class LLM():
                     fully_alloc_under = sorted(output_lengths)[int(0.9*len(output_lengths))]
 
                 batch = Batch.prefill_batching(reqs, slots,
-                                               fixed_slots,
+                                               fix_slots,
                                                device=input_device,
                                                min_rate=self.alloc_early_exit_rate,
                                                fully_alloc_under=fully_alloc_under,
@@ -1119,7 +1120,6 @@ class LLM():
             ts = time.time()
 
             step += 1
-
             prefill_gap_time = ts - pts
             counts_value = counts.value
             input_size = input_queue.qsize() + len(chunks) + len(fails)
