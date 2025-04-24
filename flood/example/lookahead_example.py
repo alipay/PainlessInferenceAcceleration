@@ -27,6 +27,7 @@ if __name__ == '__main__':
 
     # model_path = '/mntnlp/common_base_model/Llama-3.1-8B-Instruct'
     model_path = '/mntnlp/common_base_model/Qwen__Qwen2.5-7B-Instruct'
+    model_path = '/mntnlp/common_base_model/Qwen__Qwen2.5-14B-Instruct'
     # model_path = '/mntnlp/nanxiao/model'
     # model_path = '/mntnlp/nanxiao/deepseekv3'
     # model_path = '/agent/nanxiao/models/Qwen2.5-32B-Instruct'
@@ -61,13 +62,13 @@ if __name__ == '__main__':
             )
             reqs.append(Request(i, input_text=text, output_length=512))
 
-    # with profile(activities=[ProfilerActivity.CUDA, ProfilerActivity.CPU, ProfilerActivity.XPU], record_shapes=False, profile_memory=False, with_flops=True, with_stack=True, with_modules=True) as prof:
+    # with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA, ProfilerActivity.XPU], record_shapes=False, profile_memory=False, with_flops=True, with_stack=True, with_modules=True) as prof:
     if True:
         worker = LLM(model_path,
                     n_stage=1,  # gpus
                     n_proc=1,
                     chunk_size=1024,
-                    #  model_dtype=torch.float8_e4m3fn,
+                    # model_dtype=torch.float8_e4m3fn,
                     cache_size=None,
                     slot_fully_alloc_under=1024,
                     tune_alloc_size=False,
@@ -75,8 +76,8 @@ if __name__ == '__main__':
                     debug=False,
                     kernels=('sa',),
                     spec_algo = 'lookahead',
-                    spec_branch_length=8,
-                    max_spec_branch_count=8,
+                    spec_branch_length=16,
+                    max_spec_branch_count=4,
                     logger='example.log')
 
         # start process
@@ -84,18 +85,25 @@ if __name__ == '__main__':
         worker.launch(input_queue, chunk_queue, working_queue, output_queues)
 
         # do benchmark
-        c = 500
-        for i in range(2*c):
-            rs = [reqs[i%c]]
-            for j, req in enumerate(worker.request_stream_generate(rs,
-                                                        input_queue,
-                                                        output_queues,
-                                                        print_param=False,
-                                                        print_count=0)):
-                print(f'{i//c}-{i%c}')
-                # print(f'prompt-{i}: ', req.input_text)
-                # print(f'answer-{i}: ', req.output_text)
-
+        c = 100
+        for i in range(3):
+            ts = time.time()
+            tokens = 0
+            for j in range(c):
+                rs = [reqs[j]]
+                for k, req in enumerate(worker.request_stream_generate(rs,
+                                                            input_queue,
+                                                            output_queues,
+                                                            print_param=False,
+                                                            print_count=0)):
+                    print(f'{i}-{j}')
+                    tokens += len(req.output_ids)
+                    # print(f'prompt-{i}: ', req.input_text)
+                    # print(f'answer-{i}: ', req.output_text)
+            te = time.time()
+            elapse = te-ts 
+            speed = tokens/(te-ts)
+            print(f'sample:{c} tokens:{tokens} elapse:{elapse:.3f} speed:{speed:.2f}')
     # print(prof.key_averages().table(sort_by=None, top_level_events_only=True, row_limit=2000))
     # print(prof.key_averages(group_by_stack_n=5).table(sort_by=None, row_limit=100))
     # prof.export_chrome_trace("trace.json")
