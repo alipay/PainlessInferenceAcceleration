@@ -33,6 +33,7 @@ def seg_la_kernel(
         q_offsets,
         q_lengths,
         s_scales,
+        decay_scales,
         # Mask,
         HEAD_DIM: tl.constexpr,
         SPLIT_DIM: tl.constexpr,
@@ -78,6 +79,7 @@ def seg_la_kernel(
     state = tl.load(s_ptrs)
     s_scale = tl.load(s_scales+bid)
     state = (state*s_scale).to(S.dtype.element_ty)
+    decay_scale = tl.load(decay_scales + bid)
 
     # if bid == 0:
     #     if hid == 1:
@@ -105,27 +107,35 @@ def seg_la_kernel(
 
             # k = (k * softmax_scale).to(q.dtype)
             qk = tl.dot(q, tl.trans(k)) * softmax_scale
-            qk = tl.where(offs_m[:,None]<=offs_m[None,:],qk,0.0)
-            o = tl.dot(qk.to(v.dtype), v) + tl.dot(q, state)
-            state += (tl.dot(tl.trans(k), v) * softmax_scale).to(S.dtype.element_ty)
+
+
+            qk = tl.where(offs_m[None,:] <= offs_m[:,None], qk, 0.0)
+            decays = tl.exp(decay_scale*(offs_m[:,None] - offs_m[None,:]))
+            qk *= decays
+
+            o = tl.dot(qk.to(v.dtype), v) 
+            o =  tl.dot(q, state, acc=o)
+            block_decay = tl.exp(decay_scale*BLOCK)
+            state += (tl.dot(tl.trans(k), v) * (softmax_scale * block_decay) ).to(S.dtype.element_ty)
 
             if EVEN:
                 tl.store(out_ptrs + n * stride_o, o)
             else:
                 tl.store(out_ptrs + n * stride_o, o, mask=(n + offs_m)[:, None] < q_length)
 
+        tl.store(s_ptrs, state)
+
     else:
         q = tl.load(q_ptrs)
         k = tl.load(k_ptrs)
         v = tl.load(v_ptrs)
-        state += ((tl.trans(k) * v)*softmax_scale).to(S.dtype.element_ty)
+        
+        state = (state * decay_scale + (tl.trans(k) * v)*softmax_scale).to(S.dtype.element_ty)
         o = tl.sum(tl.trans(q) * state, axis=0, keep_dims=True)
 
         tl.store(out_ptrs, o)
 
-    tl.store(s_ptrs, state)
-
-
+        tl.store(s_ptrs, state)
 
 def seg_la_fwd(q, k, v, s, meta):
     _, qo_heads, d = q.shape
@@ -163,9 +173,9 @@ def seg_la_fwd(q, k, v, s, meta):
 
     SPLIT_DIM = 16
     num_dim_block = HEAD_DIM // SPLIT_DIM
-    num_warps = 8
+    num_warps = 4
     if meta.mask is None:
-        num_stages = 3
+        num_stages = 1
     else:
         num_stages = 2
 
@@ -191,6 +201,7 @@ def seg_la_fwd(q, k, v, s, meta):
         meta.q_offsets,
         meta.q_lengths,
         meta.s_scales,
+        meta.decay_scales,
         # meta.mask,
         HEAD_DIM=HEAD_DIM,
         SPLIT_DIM=SPLIT_DIM,
