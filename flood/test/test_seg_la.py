@@ -1,5 +1,5 @@
 
-
+import random
 import math 
 import torch 
 from flood.utils.benchmark import benchmark_func
@@ -10,10 +10,15 @@ class Meta:
     def __init__(self) -> None:
         pass
 
-def torch_linear_attn(q, k, v, s, s_scales, causal=True, mask=None):
+def torch_linear_attn(q, k, v, s, s_scales, decay_scales, causal=True, mask=None):
+    q = q.float()
+    k = k.float()
+    v = v.float()
+    s = s.float()
     bs, q_len, q_head, head_dim = q.shape
     k_head = k.shape[2]
     k_len = k.shape[1]
+    assert q_len == k_len
     if mask is None:
         if causal:
             mask = torch.tril(
@@ -29,10 +34,19 @@ def torch_linear_attn(q, k, v, s, s_scales, causal=True, mask=None):
         g = q_head // k_head
         key = torch.repeat_interleave(key, g, dim=1)
         value = torch.repeat_interleave(value, g, dim=1)
-    score = torch.matmul(query, key) / math.sqrt(head_dim)
-    score *=  mask
+
+    arr = torch.arange(q_len, dtype=torch.float32, device=q.device)
+    decay_matrix = arr.view(-1,1) - arr.view(1,-1)
+    decay_matrix = torch.exp(decay_scales[:,None,None] * decay_matrix[None])
+    decay_matrix = torch.tril(decay_matrix, 0)
+
     softmax_scale = 1.0/math.sqrt(head_dim)
-    att = torch.matmul(score, value) * softmax_scale
+    key = key * softmax_scale
+
+    score = torch.matmul(query, key)
+    score *=  mask
+    score *= decay_matrix
+    att = torch.matmul(score, value)
 
     att += torch.matmul(query, s*s_scales[:,None,None,None]) 
 
@@ -62,14 +76,12 @@ def get_seg_attn_meta(qls, kls, mask=None):
     q_offsets = torch.tensor(q_offsets, device=device, dtype=torch.int32)
     q_lengths = torch.tensor(q_lengths, device=device, dtype=torch.int32)
     s_offsets = torch.arange(bs, device=device, dtype=torch.int32)
-    s_scales = torch.ones((bs,), device=device, dtype=torch.int32)
 
     meta = Meta()
     meta.batch_size = bs
     meta.q_offsets = q_offsets
     meta.q_lengths = q_lengths
     meta.s_offsets = s_offsets
-    meta.s_scales = s_scales
     meta.max_q_length = max_q_length
     meta.max_k_length = max_k_length
     meta.mask = mask
@@ -92,32 +104,22 @@ def test_seg_attn(mode='prefill', even=True):
         bs = 1
         if even:
             qls = [1024]
-            kls = [1024]
         else:
             qls = [1025]
-            kls = [1025]
+        kls = qls
 
     elif mode == 'decode':
         bs = 128
         qls = [1] * bs
-        if even:
-            kls = [1024] * bs
-        else:
-            kls = [1025] * bs
+        kls = qls
     elif mode == 'mix':
         bs = 40
         qls = [(1024 - bs +1)] + [1] * (bs-1)
-        if even:
-            kls = [1024] * bs
-        else:
-            kls = [1025] * bs
+        kls = qls
     elif mode == 'spec':
         bs = 16
         qls = [mask_size] * bs
-        if even:
-            kls = [1024] * bs
-        else:
-            kls = [1025] * bs
+        kls = qls
 
         assert all([x==mask_size for x in qls])
 
@@ -161,19 +163,25 @@ def test_seg_attn(mode='prefill', even=True):
     q = torch.cat(qs, 0)
     k = torch.cat(ks, 0)
     v = torch.cat(vs, 0)
-    s = torch.randn(bs, kv_head, dim, dim, dtype=dtype, device=device)
+    s = torch.zeros(bs, kv_head, dim, dim, dtype=dtype, device=device)
+    s_scales = torch.ones((bs,), device=device, dtype=dtype)
+    decay_scales = torch.log(2**(-0.5-0.5*torch.arange(bs, device=device, dtype=torch.float32)))
 
     desc = f'mode:{mode} bs:{len(qls)} q:{qls[0]} k:{kls[0]} qo_head:{qo_head} kv_head:{kv_head} dim:{dim}'
 
     seg_attn_meta = get_seg_attn_meta(qls, kls, mask=masks)
+    seg_attn_meta.s_scales = s_scales
+    seg_attn_meta.decay_scales = decay_scales
 
     org_output = torch_linear_attn(q.view(bs, qls[0], qo_head, dim), 
-                                k.view(bs, kls[0], kv_head, dim), 
-                                v.view(bs, kls[0], kv_head, dim),
-                                s,
-                                seg_attn_meta.s_scales,
-                                causal=True, 
-                                mask=torch_mask).view(bs*qls[0], qo_head, dim)
+                                    k.view(bs, kls[0], kv_head, dim), 
+                                    v.view(bs, kls[0], kv_head, dim),
+                                    s,
+                                    s_scales,
+                                    decay_scales,
+                                    causal=True, 
+                                    mask=torch_mask) 
+    org_output = org_output.view(bs*qls[0], qo_head, dim)
 
 
     torch.cuda.synchronize()
@@ -192,7 +200,7 @@ def test_seg_attn(mode='prefill', even=True):
     amp = org_output.float().abs().mean().item()
     rate = err / amp
 
-    print(f"\n{desc} err:{err:.4f} rate:{rate:.3f}")
+    print(f"\n{desc} err:{err:.4f} rate:{rate:.4f}")
     if math.isnan(rate) or rate > 0.02:
         print(
             f"org max:{torch.max(org_output).item():.3f} min:{torch.min(org_output).item():.3f}")
@@ -212,7 +220,5 @@ def test_seg_attn(mode='prefill', even=True):
         torch.testing.assert_close(opt_output.float(), org_output.float(),
                                    rtol=0.05, atol=0.1)
 
-
-
 if __name__ == '__main__':
-    test_seg_attn(mode='prefill', even=False)
+    test_seg_attn(mode='prefill', even=True)
