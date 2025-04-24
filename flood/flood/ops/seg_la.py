@@ -79,7 +79,7 @@ def seg_la_kernel(
     state = tl.load(s_ptrs)
     s_scale = tl.load(s_scales+bid)
     state = (state*s_scale).to(S.dtype.element_ty)
-    decay_scale = tl.load(decay_scales + bid)
+    decay_scale = tl.load(decay_scales + hid)
 
     # if bid == 0:
     #     if hid == 1:
@@ -111,6 +111,7 @@ def seg_la_kernel(
 
             qk = tl.where(offs_m[None,:] <= offs_m[:,None], qk, 0.0)
             decays = tl.exp(decay_scale*(offs_m[:,None] - offs_m[None,:]))
+            decays = tl.where(offs_m[None,:] <= offs_m[:,None], decays, 0.0)
             qk *= decays
 
             o = tl.dot(qk.to(v.dtype), v) 
@@ -137,7 +138,7 @@ def seg_la_kernel(
 
         tl.store(s_ptrs, state)
 
-def seg_la_fwd(q, k, v, s, meta):
+def seg_la_fwd(q, k, v, s, decay_scales, meta):
     _, qo_heads, d = q.shape
     _, kv_heads, _ = k.shape
     batch = meta.batch_size
@@ -171,13 +172,10 @@ def seg_la_fwd(q, k, v, s, meta):
     #     MASK_TYPE = 0
     #     MASK_SIZE = 0
 
-    SPLIT_DIM = 16
+    SPLIT_DIM = 32
     num_dim_block = HEAD_DIM // SPLIT_DIM
-    num_warps = 4
-    if meta.mask is None:
-        num_stages = 1
-    else:
-        num_stages = 2
+    num_warps = 8
+    num_stages = 2
 
     # name='NVIDIA H20', major=9, minor=0, total_memory=97285MB, multi_processor_count=78
     prop = torch.cuda.get_device_properties(0)
@@ -201,7 +199,7 @@ def seg_la_fwd(q, k, v, s, meta):
         meta.q_offsets,
         meta.q_lengths,
         meta.s_scales,
-        meta.decay_scales,
+        decay_scales,
         # meta.mask,
         HEAD_DIM=HEAD_DIM,
         SPLIT_DIM=SPLIT_DIM,

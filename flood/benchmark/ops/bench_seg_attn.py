@@ -22,8 +22,8 @@ def seg_attn(q, k, v, meta, online_scale=True):
 def bench_seg_attn(max_seg=1, mode='prefill', even=True, online_scale=True):
     device = torch.device('cuda:0')
     dtype = torch.bfloat16
-    qo_head = 64
-    kv_head = 8
+    qo_head = 16
+    kv_head = 16
     dim = 128
     masks = None
     mask_size = 16
@@ -139,7 +139,7 @@ def bench_seg_attn(max_seg=1, mode='prefill', even=True, online_scale=True):
                 n_repeat=n_repeat, ref_time=org_time, ref_flops=flops)
 
 if __name__ == '__main__':
-    for max_seg in [2,4]:
+    for max_seg in [1]:
         for mode in ['prefill', 'decode', 'mix', 'spec']:
             for even in [True, False]:
                 for online_scale in [False, True]:
