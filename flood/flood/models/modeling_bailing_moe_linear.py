@@ -275,7 +275,7 @@ class BailingMoeLinearAttention(torch.nn.Module):
                                      self.num_key_value_heads, 
                                      self.head_dim)
 
-        kernels = kwargs.get('kernels', ['fla'])
+        kernels = ['seg_la']
 
         self.attention = AutoAttention.from_pretrained(cache_dtype, 
                                                        layer_idx=self.layer_idx, 
