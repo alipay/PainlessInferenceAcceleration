@@ -13,7 +13,6 @@ try:
     import flash_attn_2_cuda
 except:
     flash_attn_2_cuda = None
-    print("flash_attn_2_cuda not found!")
 
 try:
     import flash_attn_3_cuda

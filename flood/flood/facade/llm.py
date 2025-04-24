@@ -20,6 +20,7 @@ import torch
 import torch.multiprocessing as mp
 from safetensors import safe_open
 from transformers import AutoTokenizer
+from torch.profiler import profile, record_function, ProfilerActivity
 
 
 from flood.layers.linear import NativeLinear
@@ -82,6 +83,9 @@ class LLM():
                  eos_token_id: Optional[Tuple] = None,
                  embedding_dir: Optional[str] = None,
                  spec_algo: Optional[str] = None,
+                 spec_branch_length: int = 0,
+                 max_spec_branch_count: int = 0,
+                 spec_table_size: int = 2**30,
                  kernels: Tuple = ('sa',),
                  logger: str = 'tmp.log',
                  debug: bool = False):
@@ -141,6 +145,7 @@ class LLM():
                     tuple (or list): eos token ids. Set to () to ignore eos.
         :param embedding_dir: embedding path for image embeddings.
         :param spec_algo: speculative decoding algo.
+        :param spec_table_size: bytes
         :param kernels: kernels for attention and MLP.
         :param logger: logger file.
         :param debug: debug or Not.
@@ -160,13 +165,12 @@ class LLM():
             self.model_path)
         self.model_attr = model_attr_map.get(self.model_type, model_attr_map['DEFAULT'])
 
-
         self.model_dtype = model_dtype or self.torch_dtype
         self.head_dtype = head_dtype or self.torch_dtype
         self.emb_dtype = emb_dtype or self.torch_dtype
         self.cache_dtype = cache_dtype or self.torch_dtype
         self.n_stage = n_stage
-        self.n_proc = n_proc if n_proc else self.n_stage
+        self.n_proc = n_proc if n_proc else self.n_stage + 1
         self.slot_count = slot_count
         self.num_reqs = num_reqs
         self.schedule_mode = schedule_mode
@@ -185,6 +189,9 @@ class LLM():
         self.min_decode_rate = min_decode_rate
         self.embedding_dir = embedding_dir
         self.spec_algo = spec_algo
+        self.spec_branch_length = spec_branch_length
+        self.max_spec_branch_count = max_spec_branch_count
+        self.spec_table_size = spec_table_size 
         self.logger = logger
         self.debug = debug
         self.kernels = kernels
@@ -238,13 +245,15 @@ class LLM():
         self.cache = self.init_kv_cache(self.cache_size, self.cache_dtype)
 
         if self.spec_algo == 'lookahead':
-            self.branch_length = 8
-            self.max_retrieve_count = 2
-            self.spec_buf = self.branch_length * self.max_retrieve_count
-            self.spec = Lookahead(table_size=2 ** 24,
-                                  branch_count=8*self.max_retrieve_count,
-                                  branch_length=self.branch_length,
-                                  vocab_size=self.model.vocab_size)
+            assert self.spec_branch_length > 0
+            assert self.max_spec_branch_count > 0
+            self.spec_buf = self.spec_branch_length * self.max_spec_branch_count
+            self.spec = Lookahead(table_size=self.spec_table_size//self.spec_branch_length//4,
+                                  branch_count=8*self.max_spec_branch_count,
+                                  branch_length=self.spec_branch_length,
+                                  vocab_size=self.model.vocab_size,
+                                  device=torch.device(1) if self.n_stage > 2 else torch.device(0),
+                                  tokenizer=self.tokenizer)
         else:
             self.spec_buf = 0
 
@@ -487,6 +496,7 @@ class LLM():
             f"pingpong_schedule task:{task_id} pid:{os.getpid()} ts:{time.time() % 1000:.3f}")
         sync_layers = self.get_sync_layers(tasks, self.device_list)
         device_list = self.device_list
+        batching_stream = torch.cuda.Stream(device=0)
         streams = [torch.cuda.Stream(device=idx) for idx in range(self.n_stage)]
         queue_timeout = self.queue_timeout
         chunk_size = self.chunk_size
@@ -494,8 +504,8 @@ class LLM():
         fully_alloc_under = self.slot_fully_alloc_under
 
 
-        input_lengths = []  # finished reqs
-        output_lengths = []  # finished reqs
+        input_lengths = []  # input_length of finished reqs
+        output_lengths = []  #  output_length of finished reqs
         fails = []
         chunks = []
         waits = []
@@ -511,7 +521,7 @@ class LLM():
             input_empty = input_queue.empty() and fail_sample_count.value == 10 ** self.n_proc and len(chunks) == 0 and len(options) == 0
             working_empty = working_queue.empty() and len(waits) == 0 and counts.value == 0  # TODO: CHECK counts.value
             if input_empty and working_empty:
-                time.sleep(0.01)
+                time.sleep(0.001)
                 continue
 
             task_type = None
@@ -520,9 +530,11 @@ class LLM():
             if task_id == 0:
                 gbs.value = self.opt_batch_size(counts.value, self.n_proc)
 
+            hungry = counts.value <= self.n_proc * self.min_batch_size
+
             if (task_id != 0 and input_empty and
-                    counts.value <= self.min_batch_size):
-                time.sleep(0.01)
+                    counts.value <= self.min_batch_size and self.spec_algo is None):
+                time.sleep(0.001)
                 continue
 
             dbs = gbs.value
@@ -604,7 +616,7 @@ class LLM():
                         except:
                             break
                         # assert req.done == 0
-                        if self.spec_algo == 'lookahead':
+                        if self.spec_algo == 'lookahead' and hungry:
                             self.spec.update_state(req.input_ids)
                         n_token = req.input_length
                         if n_tokens + n_token <= chunk_size:
@@ -731,17 +743,24 @@ class LLM():
                     # time.sleep(0.001)
                     continue
 
-                if any([len(x.segs) > 1 for x in reqs]):
-                    pass
-                if self.spec_algo == 'lookahead':
-                    # TODO: tune the params with different batch size
-                    batch = Batch.lookahead_batching(reqs,
-                                                     self.spec,
-                                                     device=input_device,
-                                                     retrieve_count=self.max_retrieve_count)
+                if self.spec_algo == 'lookahead' and hungry:
+                    min_buf = min([x.size_of_segs() - x.input_length - len(x.output_ids) for x in reqs])
+                    if min_buf >= self.spec_branch_length:
+                        max_retrieve_count = min(min_buf//self.spec_branch_length, self.max_spec_branch_count)
+                        retrieve_count = min(max(64*self.n_proc//max(self.spec_branch_length*counts.value,1), 1), max_retrieve_count)
+                        with torch.cuda.stream(batching_stream):
+                            batch = Batch.lookahead_batching(reqs,
+                                                            self.spec,
+                                                            device=input_device,
+                                                            retrieve_count=retrieve_count)
+                            batching_stream.synchronize()
+                        task_type = 'spec'
+                    else:
+                        batch = Batch.decoding_batching(reqs, device=input_device)
+                        task_type = 'decode'  
                 else:
                     batch = Batch.decoding_batching(reqs, device=input_device)
-                task_type = 'decode'
+                    task_type = 'decode'
 
             te = time.time()
             batching_time = te - ts
@@ -771,60 +790,36 @@ class LLM():
                         req.input_ids = []
 
                     if req.target_ids is None:
-                        # if len(req.output_ids) >= req.output_length or \
-                        #       self.spec_algo is None and req.output_ids[-1] in self.eos_token_id or \
-                        #       self.spec_algo is not None and any([x in self.eos_token_id for x in req.output_ids[-self.branch_length-1:]]):
-                        #     if self.spec_algo is not None:
-                        #         output_ids = req.output_ids
-                        #         for j in range(max(-self.branch_length-1,-len(output_ids)),-1):
-                        #             if output_ids[j] in self.eos_token_id:
-                        #                 req.output_ids = output_ids[:j+1]
-                        #                 break
-                        #     output_queue.put(req)
-                        #     input_lengths.append(req.input_length)
-                        #     output_lengths.append(len(req.output_ids))
-                        #     if len(input_lengths) >= 2048:
-                        #         input_lengths = input_lengths[-1024:]
-                        #         output_lengths = output_lengths[-1024:]
-                        #     if self.spec_algo == 'lookahead':
-                        #         self.spec.update_state(req.output_ids)
-                        #     Batch.recycle(slots, req.segs)
-                        #     counts.value -= 1
+                        
+                        if len(req.output_ids) >= req.output_length or \
+                            any([x in self.eos_token_id for x in req.output_ids[-self.spec_branch_length-1:]]):
 
-                        if self.spec_algo is None and (len(req.output_ids) >= req.output_length or \
-                               req.output_ids[-1] in self.eos_token_id):
-                            # no spec decode is finished
+                            if task_type == 'spec':
+                                output_ids = req.output_ids
+                                for j in range(max(-self.spec_branch_length-1,-len(output_ids)),-1):
+                                    if output_ids[j] in self.eos_token_id:
+                                        req.output_ids = output_ids[:j+1]
+                                        break
+
                             output_queue.put(req)
                             input_lengths.append(req.input_length)
                             output_lengths.append(len(req.output_ids))
+
                             if len(input_lengths) >= 2048:
                                 input_lengths = input_lengths[-1024:]
                                 output_lengths = output_lengths[-1024:]
+
                             Batch.recycle(slots, req.segs)
-                            counts.value -= 1
-                        elif self.spec_algo is not None and (len(req.output_ids) >= req.output_length or
-                            any([x in self.eos_token_id for x in req.output_ids[-self.branch_length-1:]])):
-                            # spec decode is finished
-                            output_ids = req.output_ids
-                            for j in range(max(-self.branch_length-1,-len(output_ids)),-1):
-                                if output_ids[j] in self.eos_token_id:
-                                    req.output_ids = output_ids[:j+1]
-                                    break
-                            output_queue.put(req)
-                            input_lengths.append(req.input_length)
-                            output_lengths.append(len(req.output_ids))
-                            if len(input_lengths) >= 2048:
-                                input_lengths = input_lengths[-1024:]
-                                output_lengths = output_lengths[-1024:]
                             if self.spec_algo == 'lookahead':
                                 self.spec.update_state(req.output_ids)
-                            Batch.recycle(slots, req.segs)
                             counts.value -= 1
+
                         elif req.input_length + len(
                                 req.output_ids) > req.size_of_segs():
                             waits.append(req)
                         else:
                             working_queue.put(req)
+
                     else:
                         if isinstance(req.target_ids, list):
                             if req.todo == 0: # not chunked
@@ -1369,13 +1364,19 @@ class LLM():
             responses.append(response)
         return responses
 
-    def request_stream_generate(self, requests: List, input_queue, output_queues,
-                        print_count=0, log_info=''):
+    def request_stream_generate(self, 
+                                requests: List, 
+                                input_queue, 
+                                output_queues,
+                                print_param=True,
+                                print_info='',
+                                print_count=0):
         logger = open(self.logger, 'a+')
-        params = self.format_params(len(requests), log_info=log_info)
-        print(params)
+        params = self.format_params(len(requests), log_info=print_info)
         logger.write(params)
         logger.flush()
+        if print_param:
+            print(params)
 
         tokenizer = self.tokenizer
 
@@ -1409,10 +1410,11 @@ class LLM():
             input_queue.put(r, block=True)
             total_slot_size += slot_size
         te = time.time()
-        print(
-            f'pid:{os.getpid()} tokenize:{te - ts:.3f}s '
-            f'ts:{time.time() % 1000:.3f} '
-            f'mean_slot_size:{total_slot_size / n_sample:.0f}')
+        if print_param:
+            print(
+                f'pid:{os.getpid()} tokenize:{te - ts:.3f}s '
+                f'ts:{time.time() % 1000:.3f} '
+                f'mean_slot_size:{total_slot_size / n_sample:.0f}')
 
         steps = [ts]
         batch_token_counts = []
@@ -1454,10 +1456,10 @@ class LLM():
                 fmt_output_text = output_text.replace('\n', ' ')
                 print(
                     f"\n------------ {output_sample_count}  -------------")
-                print(f"**** prompt ****:{request.input_text}")
                 print(f"**** input_ids ****:{request.input_ids}")
-                print(f"**** answer ****:{fmt_output_text}")
+                print(f"**** prompt ****:{request.input_text}")
                 print(f"**** output_ids ****:{request.output_ids}\n")
+                print(f"**** answer ****:{fmt_output_text}")
 
             if output_sample_count % 100 == 0:
                 steps.append(time.time())
@@ -1569,6 +1571,7 @@ class LLM():
         fmt = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
         device = str(self.n_stage) + '*' + \
                  torch.cuda.get_device_name().split(' ')[-1]
+        blocking = os.environ.get('CUDA_LAUNCH_BLOCKING','0')=='1'
         params = f'\ntime:{fmt} ' \
                  f'model:{self.model_path}  ' \
                  f'torch_dtype:{self.torch_dtype} ' \
@@ -1599,6 +1602,7 @@ class LLM():
                  f'eos:{self.eos_token_id} ' \
                  f'sample:{n_sample} ' \
                  f'device:{device} ' \
+                 f'blocking:{blocking} ' \
                  f'{log_info}\n'
         return params
 

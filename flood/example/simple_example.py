@@ -6,13 +6,13 @@ Copyright (c) Ant Financial Service Group and its affiliates.
 import os
 
 os.environ['TOKENIZERS_PARALLELISM'] = 'false'
-os.environ['CUDA_LAUNCH_BLOCKING']='1'
-
+os.environ['CUDA_LAUNCH_BLOCKING']='0'
 
 import random
 import time
 import torch
 import torch.multiprocessing as mp
+from torch.profiler import profile, record_function, ProfilerActivity
 
 from transformers import AutoTokenizer
 from flood.facade.llm import LLM
@@ -24,9 +24,8 @@ random.seed(7)
 if __name__ == '__main__':
     mp.set_start_method('spawn', force=True)
 
-    model_path = '/mntnlp/common_base_model/Llama-3.1-8B-Instruct'
-    # model_path = '/mntnlp/common_base_model/Qwen__Qwen2.5-7B-Instruct'
-    # model_path = '/mnt/prev_nas/chatgpt/pretrained_models/Qwen2.5-7B-Instruct'
+    # model_path = '/mntnlp/common_base_model/Llama-3.1-8B-Instruct'
+    model_path = '/mntnlp/common_base_model/Qwen__Qwen2.5-7B-Instruct'
     # model_path = '/mntnlp/nanxiao/model'
     # model_path = '/mntnlp/nanxiao/deepseekv3'
     # model_path = '/agent/nanxiao/models/Qwen2.5-32B-Instruct'
@@ -86,4 +85,4 @@ if __name__ == '__main__':
             print('\n\n')
             print(f'prompt-{i}: ', req.input_text)
             print(f'answer-{i}: ', req.output_text)
-
+        time.sleep(1.0)

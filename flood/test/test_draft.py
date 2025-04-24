@@ -44,8 +44,9 @@ if __name__ == '__main__':
     draft_table = torch.zeros((size, length), dtype=torch.int32,
                               device='cuda:0')
     tokens = list(range(10000))
-    update_draft_table(tokens, freq_table, draft_table, size=size,
-                       length=length, count=count)
+    update_draft_table(tokens, freq_table, draft_table, table_size=size,
+                       branch_length=length, branch_count=count, vocab=128256, eos=0)
+
 
     # print(freq_table[freq_table>0])
     # print(draft_table[draft_table[:,1]>0])
@@ -56,13 +57,14 @@ if __name__ == '__main__':
     retrieve_count = 4
     retrieve_length = 4
     tokens = [[i * 2, i * 2 + 1] for i in range(batch_size)]
-    output_tokens, output_masks = retrieve_draft_table(tokens, freq_table,
-                                                       draft_table, size=size,
-                                                       length=length,
-                                                       count=count,
-                                                       retrieve_count=retrieve_count,
-                                                       retrieve_length=retrieve_length,
-                                                       vocab=100000, eos=1000)
+    output_tokens, output_masks = retrieve_draft_table(tokens, 
+                                                       freq_table,
+                                                       draft_table, 
+                                                       table_size=size,
+                                                       vocab=128256,
+                                                       branch_length=length,
+                                                       branch_count=count,
+                                                       retrieve_count=retrieve_count)
     print(output_tokens)
     print(output_masks)
     benchmark_func(retrieve_draft_table, tokens, freq_table, draft_table,

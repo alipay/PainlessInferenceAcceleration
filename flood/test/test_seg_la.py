@@ -1,52 +1,102 @@
-# -*- coding: utf-8 -*-
-"""
-Copyright (c) Ant Financial Service Group and its affiliates.
-"""
-
-import torch
-from flood.ops.seg_attn import seg_attn_fwd
-from flood.utils.benchmark import *
-
-seed_everything(7)
-
-def seg_attn(q, k, v, meta, online_scale=True):
-    outputs = seg_attn_fwd(
-        q,
-        k,
-        v,
-        meta,
-        online_scale=online_scale
-    )
-
-    return outputs
 
 
+import math 
+import torch 
+from flood.utils.benchmark import benchmark_func
 
-def test_seg_attn(max_seg=1, mode='prefill', even=True, online_scale=True):
+from flood.ops.seg_la import seg_la_fwd
+
+class Meta:
+    def __init__(self) -> None:
+        pass
+
+def torch_linear_attn(q, k, v, s, s_scales, causal=True, mask=None):
+    bs, q_len, q_head, head_dim = q.shape
+    k_head = k.shape[2]
+    k_len = k.shape[1]
+    if mask is None:
+        if causal:
+            mask = torch.tril(
+                torch.ones((q_len, k_len), dtype=q.dtype, device='cuda:0'),
+                k_len - q_len)
+        else:
+            mask = torch.ones((q_len, k_len), dtype=q.dtype, device='cuda:0')
+
+    query = q.transpose(1, 2)
+    key = torch.permute(k, (0, 2, 3, 1))
+    value = v.transpose(1, 2)
+    if k_head != q_head:
+        g = q_head // k_head
+        key = torch.repeat_interleave(key, g, dim=1)
+        value = torch.repeat_interleave(value, g, dim=1)
+    score = torch.matmul(query, key) / math.sqrt(head_dim)
+    score *=  mask
+    softmax_scale = 1.0/math.sqrt(head_dim)
+    att = torch.matmul(score, value) * softmax_scale
+
+    att += torch.matmul(query, s*s_scales[:,None,None,None]) 
+
+    att = torch.reshape(att.transpose(1, 2),
+                        [bs, q_len, q_head, head_dim]).contiguous()
+    return att
+
+
+
+
+def get_seg_attn_meta(qls, kls, mask=None):
+    device = 'cuda:0'
+    bs = len(qls)
+    q_offsets = [0]  # [bs+1]
+    k_offsets = [0]  # [bs+1]
+    q_lengths = []  # [bs]
+    k_lengths = []  # [bs]
+    max_q_length = max(qls)
+    max_k_length = max(kls)
+    for i, ql in enumerate(qls):
+        kl = kls[i]
+        q_offsets.append(q_offsets[-1] + ql)
+        q_lengths.append(ql)
+        k_offsets.append(k_offsets[-1] + kl)
+        k_lengths.append(kl)
+
+    q_offsets = torch.tensor(q_offsets, device=device, dtype=torch.int32)
+    q_lengths = torch.tensor(q_lengths, device=device, dtype=torch.int32)
+    s_offsets = torch.arange(bs, device=device, dtype=torch.int32)
+    s_scales = torch.ones((bs,), device=device, dtype=torch.int32)
+
+    meta = Meta()
+    meta.batch_size = bs
+    meta.q_offsets = q_offsets
+    meta.q_lengths = q_lengths
+    meta.s_offsets = s_offsets
+    meta.s_scales = s_scales
+    meta.max_q_length = max_q_length
+    meta.max_k_length = max_k_length
+    meta.mask = mask
+    meta.qls = qls
+    meta.kls = kls
+    return meta
+
+
+
+def test_seg_attn(mode='prefill', even=True):
     device = torch.device('cuda:0')
     dtype = torch.bfloat16
-    qo_head = 64
-    kv_head = 8
+    qo_head = 16
+    kv_head = 16
     dim = 128
     masks = None
     mask_size = 16
     torch_mask = None
     if mode == 'prefill':
         bs = 1
-        if max_seg == 1:
-            if even:
-                qls = [1024]
-                kls = [1024]
-            else:
-                qls = [1025]
-                kls = [1025]
+        if even:
+            qls = [1024]
+            kls = [1024]
         else:
-            if even:
-                qls = [1024]
-                kls = [1024 * max_seg]
-            else:
-                qls = [1025]
-                kls = [1025 * max_seg]
+            qls = [1025]
+            kls = [1025]
+
     elif mode == 'decode':
         bs = 128
         qls = [1] * bs
@@ -56,7 +106,7 @@ def test_seg_attn(max_seg=1, mode='prefill', even=True, online_scale=True):
             kls = [1025] * bs
     elif mode == 'mix':
         bs = 40
-        qls = [(1024 - bs +1)//max_seg] + [1] * (bs-1)
+        qls = [(1024 - bs +1)] + [1] * (bs-1)
         if even:
             kls = [1024] * bs
         else:
@@ -89,12 +139,8 @@ def test_seg_attn(max_seg=1, mode='prefill', even=True, online_scale=True):
         raise ValueError(f'unknown mode:{mode}')
 
     assert all([x<=kls[i] for i,x in enumerate(qls)])
-    klss = split(kls, max_seg)
     flops = 0
 
-    # flash_attn = flash_attn_3 if torch.cuda.get_device_properties(
-    #         0).major >= 9 else flash_attn_2
-    flash_attn = flash_attn_2
 
     qs = []
     ks = []
@@ -115,33 +161,29 @@ def test_seg_attn(max_seg=1, mode='prefill', even=True, online_scale=True):
     q = torch.cat(qs, 0)
     k = torch.cat(ks, 0)
     v = torch.cat(vs, 0)
+    s = torch.randn(bs, kv_head, dim, dim, dtype=dtype, device=device)
 
-    desc = f'seg:{max_seg} mode:{mode} online:{online_scale} bs:{len(qls)} q:{qls[0]} k:{kls[0]} qo_head:{qo_head} kv_head:{kv_head} dim:{dim}'
+    desc = f'mode:{mode} bs:{len(qls)} q:{qls[0]} k:{kls[0]} qo_head:{qo_head} kv_head:{kv_head} dim:{dim}'
 
-    # ks = torch.stack([k]*group,2).view(sum(kls), qo_head, dim)
-    # vs = torch.stack([v]*group,2).view(sum(kls), qo_head, dim)
+    seg_attn_meta = get_seg_attn_meta(qls, kls, mask=masks)
 
-    seg_attn_meta = get_seg_attn_meta(qls, klss, mask=masks)
-
-    flash_attn_meta = get_flash_attn_meta(qls, kls)
-
-    if mode == 'spec':
-        org_output = torch_attn(q.view(bs, mask_size, qo_head, dim), 
+    org_output = torch_linear_attn(q.view(bs, qls[0], qo_head, dim), 
                                 k.view(bs, kls[0], kv_head, dim), 
                                 v.view(bs, kls[0], kv_head, dim),
+                                s,
+                                seg_attn_meta.s_scales,
                                 causal=True, 
                                 mask=torch_mask).view(bs*qls[0], qo_head, dim)
-    else:
-        org_output = flash_attn(q, k, v, flash_attn_meta)
 
 
     torch.cuda.synchronize()
 
-    opt_output = seg_attn(q, k, v, seg_attn_meta, online_scale=online_scale)
+    opt_output = seg_la_fwd(q, k, v, s, seg_attn_meta)
     torch.cuda.synchronize()
 
     # print(org_output.shape, opt_output.shape)
 
+    benchmark_func(seg_la_fwd, q, k, v, s, seg_attn_meta, ref_flops=flops)
 
     # print("org",org_output.dtype,org_output.shape)
     # print("opt",opt_output.dtype,opt_output.shape)
@@ -170,11 +212,7 @@ def test_seg_attn(max_seg=1, mode='prefill', even=True, online_scale=True):
         torch.testing.assert_close(opt_output.float(), org_output.float(),
                                    rtol=0.05, atol=0.1)
 
-if __name__ == '__main__':
-    for max_seg in [1,2,4]:
-        for mode in ['prefill', 'decode', 'mix','spec']:
-            for even in [True, False]:
-                for online_scale in [True, False]:
-                    test_seg_attn(max_seg=max_seg, mode=mode, even=even, online_scale=online_scale)
 
-    # test_seg_attn(max_seg=2, mode='spec', even=False, online_scale=True)
+
+if __name__ == '__main__':
+    test_seg_attn(mode='prefill', even=False)

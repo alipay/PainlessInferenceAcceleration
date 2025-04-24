@@ -16,49 +16,24 @@ torch.manual_seed(7)
 
 
 
-def scaled_dot_product_attention_fp32(query, key_value):
+def scaled_dot_product_attention_fp32(query, key_value, softmax_scale):
     # query:[bs, q_length, 128, 576]
-    # key_vaue: [bs, k_length, 576]
+    # key_vaue: [bs, k_length, 1, 576]
     _, q_length, _, q_dim = query.size()
     k_length = key_value.size(1)
     query = query.float()
     key = key_value.float()
-    value = key_value[:,:,:512].float()
+    value = key_value[:,:,:,:512].float()
     query = query.permute(0,2,1,3)  # [bs, 128, q_length, 576]
-    key = key.unsqueeze(1).permute(0,1,3,2)  # [bs, 1, 576, k_length]
-    value = value.unsqueeze(1)   # [bs, 1, k_length, 512]
-    attn_weight = query @ key / math.sqrt(q_dim)  # [bs, 128, q_length, k_length]
+    key = key.permute(0,2,3,1)  # [bs, 1, 576, k_length]
+    value = value.permute(0,2,1,3) # [bs, 1, k_length, 512]
+    attn_weight = query @ key * softmax_scale  # [bs, 128, q_length, k_length]
     mask = torch.tril(torch.ones(q_length, k_length, dtype=torch.float32, device=query.device), k_length-q_length)
     # print(mask)
     attn_weight -= 10000*(1-mask)
     lse = torch.exp(attn_weight).sum(-1).permute(0,2,1)
     attn_weight = torch.softmax(attn_weight, dim=-1, dtype=torch.float32)
     output = attn_weight @ value  # [bs, 128, q_length, 512]
-    output = output.permute(0,2,1,3).contiguous()
-    return output, lse
-
-
-def scaled_dot_product_attention(query, key_value):
-    # query:[bs, q_length, 128, 576]
-    # key_vaue: [bs, k_length, 576]
-    _, q_length, _, q_dim = query.size()
-    k_length = key_value.size(1)
-    query = query.clone()
-    key = key_value.clone()
-    value = key_value[:,:,:512].clone()
-    query = query.permute(0,2,1,3)  # [bs, 128, q_length, 576]
-    key = key.unsqueeze(1).permute(0,1,3,2)  # [bs, 1, 576, k_length]
-    value = value.unsqueeze(1)   # [bs, 1, k_length, 512]
-    attn_weight = query @ key / math.sqrt(q_dim)  # [bs, 128, q_length, k_length]
-    mask = torch.tril(torch.ones(q_length, k_length, dtype=query.dtype, device=query.device), k_length-q_length)
-    # print(mask)
-    attn_weight -= 10000*(1-mask)
-    lse = torch.exp(attn_weight).sum(-1)
-    attn_weight = torch.exp(attn_weight).to(query.dtype)
-    # print(attn_weight[0,0,1,:4])
-    output = attn_weight @ value  # [bs, 128, q_length, 512]
-    output = output/lse[...,None]
-    lse = lse.permute(0,2,1)
     output = output.permute(0,2,1,3).contiguous()
     return output, lse
 
@@ -84,11 +59,10 @@ def get_seg_mla_meta(qls, klss, mask=None):
     device = 'cuda:0'
     bs = len(qls)
     max_seg = max([len(x) for x in klss])  # equals
-    q_offsets = [0]  # bs+1
-    k_offsets = [0]  # (bs*max_seg+1), [0,l,2l,] even if single seg
+    q_offsets = [0]  # [bs+1]
+    k_offsets = [0]  # [bs+1] if single seg else [bs,max_seg] 
     q_lengths = []  # bs
-    k_lengths = [
-        0] if max_seg > 1 else []  # (bs*max_seg+bs) if multi seg, (bs+1) if single seg. multi seg format:[0,l,2l.,,,0,l,2l..,0]
+    k_lengths = []  # [bs] if single seg else [bs, max_seg+1] if multi seg
     k_segs = []
     max_q_length = max(qls)
     max_k_length = max([sum(x) for x in klss])
@@ -96,11 +70,15 @@ def get_seg_mla_meta(qls, klss, mask=None):
         kls = klss[i]
         q_offsets.append(q_offsets[-1] + ql)
         q_lengths.append(ql)
-        for j, kl in enumerate(kls):
-            k_offsets.append(k_offsets[-1] + kl)
-            k_lengths.append(k_lengths[-1] + kl if max_seg > 1 else kl)
-        if max_seg > 1 and i < len(qls) - 1:
-            k_lengths.append(0)
+        if max_seg == 1:
+            k_offsets.append(k_offsets[-1] + kls[0])
+            k_lengths.append(kls[0])
+        else:
+            for j, kl in enumerate(kls):
+                k_offsets.append(k_offsets[-1] + kl)
+                k_lengths.append(kl)
+            k_lengths.append(kls[0]*max_seg)
+
         k_segs.append(max_seg)
 
     q_offsets = torch.tensor(q_offsets, device=device, dtype=torch.int32)
@@ -131,6 +109,7 @@ def test_seg_mla(max_seg=1, mode='prefill', even=True):
     device = torch.device('cuda:0')
     dtype = torch.bfloat16
     if mode == 'prefill':
+        bs = 1
         if max_seg == 1:
             if even:
                 qls = [1024]
@@ -146,20 +125,22 @@ def test_seg_mla(max_seg=1, mode='prefill', even=True):
                 qls = [1025]
                 kls = [1025 * max_seg]
     elif mode == 'decode':
-        qls = [1] * 128
+        bs = 4
+        qls = [1] * bs
         if even:
-            kls = [1024] * 128
+            kls = [1024] * bs
         else:
-            kls = [1025] * 128
+            kls = [1025] * bs
     elif mode == 'mix':
+        bs = 4
         if max_seg == 1:
-            qls = [1024 - 39] + [1] * 39
+            qls = [1024 - (bs-1)] + [1] * (bs-1)
         else:
-            qls = [(1024 - 39) // max_seg] + [1] * 39
+            qls = [(1024 - (bs-1)) // max_seg] + [1] * (bs-1)
         if even:
-            kls = [1024] * 40
+            kls = [1024] * bs
         else:
-            kls = [1025] * 40
+            kls = [1025] * bs
     else:
         raise ValueError(f'unknown mode:{mode}')
 
@@ -186,10 +167,11 @@ def test_seg_mla(max_seg=1, mode='prefill', even=True):
 
     seg_attn_meta = get_seg_mla_meta(qls, klss, mask=attn_mask)
 
+    softmax_scale = 1/128**0.5
     org_outputs = []
     for i, qi in enumerate(qs):
         kvi = kvs[i]
-        org_output, org_lse = scaled_dot_product_attention_fp32(qi[None], kvi[None])
+        org_output, org_lse = scaled_dot_product_attention_fp32(qi.view(1, qls[i], 128, 576), kvi.view(1, kls[i], 1, 576),softmax_scale)
         org_outputs.append(org_output[0])
     org_output = torch.cat(org_outputs, 0)
     
@@ -227,11 +209,14 @@ def test_seg_mla(max_seg=1, mode='prefill', even=True):
         print("opt_output[0,0,:]", opt_output[0, 0, :])
         torch.testing.assert_close(opt_output.float(), org_output.float(),
                                    rtol=0.05, atol=0.1)
+    else:
+        n_repeat = 100
+        benchmark_func(seg_mla_fwd, q, kv, seg_attn_meta, ref_flops=flops, n_repeat=n_repeat)
 
 if __name__ == '__main__':
-    test_seg_mla(max_seg=1, mode='prefill', even=True)
-    # for max_seg in [1,2,4]:
-    #     for mode in ['prefill', 'decode', 'mix']:
-    #         for even in [True, False]:
-    #             test_seg_mla(max_seg=max_seg, mode=mode, even=even)
+    for max_seg in [1,2,4]:
+        for mode in ['prefill', 'decode', 'mix']:
+            for even in [True, False]:
+                test_seg_mla(max_seg=max_seg, mode=mode, even=even)
 
+    # test_seg_mla(max_seg=2, mode='decode', even=True)
