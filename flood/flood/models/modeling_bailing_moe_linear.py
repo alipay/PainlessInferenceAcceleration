@@ -284,7 +284,7 @@ class BailingMoeLinearAttention(torch.nn.Module):
                                                        softmax_scale=self.softmax_scale)
 
         start = 2 ** (-(2 ** -(math.log2(self.num_key_value_heads) - 3)))
-        exponents = torch.arange(1, self.num_key_value_heads + 1, dtype=torch.float32, device=self.query_key_value.weight.data.device)
+        exponents = torch.arange(1, self.num_key_value_heads + 1, dtype=torch.float32)
         self.decay_scales = torch.log(torch.pow(start, exponents) * (1 - self.layer_idx / (self.num_layers - 1) + 1e-5))
 
     def forward(
@@ -314,7 +314,8 @@ class BailingMoeLinearAttention(torch.nn.Module):
                   key_states, 
                   batch_meta_info.q_offsets if batch_meta_info.draft_offsets is None else batch_meta_info.draft_offsets, 
                   batch_meta_info.position_ids)
-
+        if self.decay_scales.device != query_states.device:
+            self.decay_scales = self.decay_scales.to(query_states.device)
         attn_output = self.attention(query_states, key_states, value_states, self.decay_scales,
                                      batch_meta_info, past_key_value)
 
