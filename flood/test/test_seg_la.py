@@ -45,7 +45,7 @@ def torch_linear_attn(q, k, v, s, s_scales, decay_scales, causal=True, mask=None
 
     score = torch.matmul(query, key)
     score *=  mask
-    score *= decay_matrix
+    score *= decay_matrix[None]
     att = torch.matmul(score, value)
 
     att += torch.matmul(query, s*s_scales[:,None,None,None]) 
@@ -147,7 +147,7 @@ def test_seg_attn(mode='prefill', even=True):
     qs = []
     ks = []
     vs = []
-    flops = 0.0
+    flops = 0.0  # act as softmax attn
     for i, ql in enumerate(qls):
         kvl = kls[i]
         q = torch.randn(ql, qo_head, dim, dtype=dtype, device=device)
@@ -165,13 +165,12 @@ def test_seg_attn(mode='prefill', even=True):
     v = torch.cat(vs, 0)
     s = torch.zeros(bs, kv_head, dim, dim, dtype=dtype, device=device)
     s_scales = torch.ones((bs,), device=device, dtype=dtype)
-    decay_scales = torch.log(2**(-0.5-0.5*torch.arange(bs, device=device, dtype=torch.float32)))
+    decay_scales = torch.log(2**(-0.5-0.5*torch.arange(qo_head, device=device, dtype=torch.float32)))
 
     desc = f'mode:{mode} bs:{len(qls)} q:{qls[0]} k:{kls[0]} qo_head:{qo_head} kv_head:{kv_head} dim:{dim}'
 
     seg_attn_meta = get_seg_attn_meta(qls, kls, mask=masks)
     seg_attn_meta.s_scales = s_scales
-    seg_attn_meta.decay_scales = decay_scales
 
     org_output = torch_linear_attn(q.view(bs, qls[0], qo_head, dim), 
                                     k.view(bs, kls[0], kv_head, dim), 
@@ -186,12 +185,11 @@ def test_seg_attn(mode='prefill', even=True):
 
     torch.cuda.synchronize()
 
-    opt_output = seg_la_fwd(q, k, v, s, seg_attn_meta)
+    opt_output = seg_la_fwd(q, k, v, s, decay_scales, seg_attn_meta)
     torch.cuda.synchronize()
 
     # print(org_output.shape, opt_output.shape)
 
-    benchmark_func(seg_la_fwd, q, k, v, s, seg_attn_meta, ref_flops=flops)
 
     # print("org",org_output.dtype,org_output.shape)
     # print("opt",opt_output.dtype,opt_output.shape)
@@ -207,8 +205,6 @@ def test_seg_attn(mode='prefill', even=True):
         print(
             f"opt max:{torch.max(opt_output).item():.3f} min:{torch.min(opt_output).item():.3f}")
 
-        print(torch.isnan(opt_output).float().argmax())
-
         print("org_output[:,0,0]", org_output[:, 0, 0])
         print("opt_output[:,0,0]", opt_output[:, 0, 0])
 
@@ -219,6 +215,9 @@ def test_seg_attn(mode='prefill', even=True):
         print("opt_output[0,0,:]", opt_output[0, 0, :])
         torch.testing.assert_close(opt_output.float(), org_output.float(),
                                    rtol=0.05, atol=0.1)
+
+    benchmark_func(seg_la_fwd, q, k, v, s, decay_scales, seg_attn_meta, ref_flops=flops)
+
 
 if __name__ == '__main__':
     test_seg_attn(mode='prefill', even=True)
