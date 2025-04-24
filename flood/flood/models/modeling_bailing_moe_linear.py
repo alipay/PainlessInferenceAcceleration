@@ -242,6 +242,7 @@ class BailingMoeLinearAttention(torch.nn.Module):
         self.softmax_scale = math.sqrt(1.0 / self.head_dim)
         self.use_linear_silu = config.use_linear_silu
         self.use_low_rank = config.use_low_rank
+        self.num_layers = config.num_hidden_layers
 
         qkv_dim = (self.num_heads + 2 * self.num_key_value_heads) * self.head_dim
         self.query_key_value = AutoLinear.from_pretrained(self.hidden_size, 
