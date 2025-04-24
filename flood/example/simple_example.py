@@ -25,11 +25,11 @@ if __name__ == '__main__':
     mp.set_start_method('spawn', force=True)
 
     # model_path = '/mntnlp/common_base_model/Llama-3.1-8B-Instruct'
-    model_path = '/mntnlp/common_base_model/Qwen__Qwen2.5-7B-Instruct'
+    # model_path = '/mntnlp/common_base_model/Qwen__Qwen2.5-7B-Instruct'
     # model_path = '/mntnlp/nanxiao/model'
     # model_path = '/mntnlp/nanxiao/deepseekv3'
     # model_path = '/agent/nanxiao/models/Qwen2.5-32B-Instruct'
-    # model_path = '/agent/jingyue/moe_lite_linear/v3_convert'
+    model_path = '/agent/jingyue/moe_lite_linear/v3_convert'
 
     # do not apply template
     # reqs = [
