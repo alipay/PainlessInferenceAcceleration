@@ -212,8 +212,8 @@ class Batch:
                 else:
                     reserve = buffer_size
                 cache_offset, slot_index, s_offset = Batch.allocate(slots, 
-                                                            fix_slots,
                                                             total_alloc_length,
+                                                            fix_slots=fix_slots,
                                                             reserve=reserve,
                                                             cache_size=cache_size,
                                                             min_rate=min_rate)
@@ -227,7 +227,7 @@ class Batch:
                     return Batch(batch_size=0)
                 req.segs = [
                     (cache_offset, cache_offset + total_alloc_length, slot_index)]
-                req.fix_size_slot_index = [(s_offset)]
+                req.fix_size_slot_index = s_offset
                 allocated.append(req)
                 s_scale = 0  # 
             else:  # done > 0, second trunk
@@ -380,8 +380,7 @@ class Batch:
             kl = req.input_length + len(req.output_ids)
             position_id = kl - 1
             position_ids.append(position_id)
-            fix_size_slot_index = req.fix_size_slot_index
-            s_offset = fix_size_slot_index[0][0]
+            s_offset = req.fix_size_slot_index
             if max_seg == 1:
                 k_offset = segs[0][0]
                 cache_index = k_offset + position_id
@@ -695,6 +694,7 @@ class Batch:
             self.s_offsets = self.s_offsets.to(device, non_blocking=non_blocking) 
         if isinstance(self.s_scales, torch.Tensor):
             self.s_scales = self.s_scales.to(device, non_blocking=non_blocking)   
+            
     def send(self, hidden_states, dst=1, group=None, light=False, log=False):
         dim = hidden_states.size(-1)
         dtype = 0 if hidden_states.dtype == torch.float16 else 1
@@ -843,7 +843,7 @@ class Batch:
         return hidden_states
 
     @staticmethod
-    def allocate(slots, fix_slots, length, reserve=None, cache_size=None, min_rate=0.95):
+    def allocate(slots, length, fix_slots=None, reserve=None, cache_size=None, min_rate=0.95):
         max_end_idx = cache_size - reserve if reserve is not None else 2 ** 30
         with slots.get_lock():
             rates = np.zeros(len(slots), dtype=np.float32)
@@ -862,8 +862,8 @@ class Batch:
                 elif s == 0 and e == 0 and state == 0:
                     break
             for j, fixed_slot in enumerate(fix_slots):
-                if fixed_slot.state == 1:
-                    fixed_slot.state = 2
+                if fixed_slot == 1:
+                    fix_slots[j] = 2
                     fix_slot_index = j
                     break
 
@@ -891,7 +891,7 @@ class Batch:
                 return -1, -1, -1
 
     @staticmethod
-    def recycle(slots, segs, fix_slots, fix_size_slot_index):  # be carefull with prefix cache
+    def recycle(slots, segs, fix_slots=None, fix_size_slot_index=None):  # be carefull with prefix cache
         with slots.get_lock():
             for ts, te, idx in segs:
                 if slots[idx].share:
@@ -934,9 +934,8 @@ class Batch:
 
                 if hit is False:
                     raise ValueError("Recycle error! No slot available!")
-            for fix_slot_idx in fix_size_slot_index:
-                if fix_slot_idx != -1:
-                    fix_slots[fix_slot_idx].state = 1 # available
+            if fix_size_slot_index is not None:
+                fix_slots[fix_size_slot_index] = 1 # available
 
     @staticmethod
     def extend_slot(slots, old_segs, length, contiguous=False):

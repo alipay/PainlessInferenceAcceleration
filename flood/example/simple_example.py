@@ -6,7 +6,7 @@ Copyright (c) Ant Financial Service Group and its affiliates.
 import os
 
 os.environ['TOKENIZERS_PARALLELISM'] = 'false'
-os.environ['CUDA_LAUNCH_BLOCKING']='0'
+os.environ['CUDA_LAUNCH_BLOCKING']='1'
 
 import random
 import time
@@ -52,7 +52,7 @@ if __name__ == '__main__':
             tokenize=False,
             add_generation_prompt=True,
         )
-        reqs.append(Request(i, input_text=text, output_length=4096))
+        reqs.append(Request(i, input_text=text, output_length=128))
 
 
     worker = LLM(model_path,
@@ -60,7 +60,7 @@ if __name__ == '__main__':
                  n_proc=1,
                  chunk_size=4096,
                 #  model_dtype=torch.float8_e4m3fn,
-                 num_reqs=len(reqs),
+                 num_reqs=1024,
                  cache_size=16000,
                  slot_fully_alloc_under=1024,
                  tune_alloc_size=False,
