@@ -144,9 +144,9 @@ def test_seg_attn(mode='prefill', even=True):
     flops = 0.0
     for i, ql in enumerate(qls):
         kvl = kls[i]
-        q = 0.1*torch.randn(ql, qo_head, dim, dtype=dtype, device=device)
-        k = 0.1*torch.randn(kvl, kv_head, dim, dtype=dtype, device=device)
-        v = 0.1*torch.randn(kvl, kv_head, dim, dtype=dtype, device=device)
+        q = torch.randn(ql, qo_head, dim, dtype=dtype, device=device)
+        k = torch.randn(kvl, kv_head, dim, dtype=dtype, device=device)
+        v = torch.randn(kvl, kv_head, dim, dtype=dtype, device=device)
         qs.append(q)
         ks.append(k)
         vs.append(v)
@@ -157,10 +157,10 @@ def test_seg_attn(mode='prefill', even=True):
     q = torch.cat(qs, 0)
     k = torch.cat(ks, 0)
     v = torch.cat(vs, 0)
-    s = torch.randn(bs, kv_head, dim, dim, dtype=dtype, device=device)
-    s_scales = torch.zeros((bs,), device=device, dtype=dtype)
+    s = torch.zeros(bs, kv_head, dim, dim, dtype=dtype, device=device)
+    s_scales = torch.ones((bs,), device=device, dtype=dtype)
 
-    print(f'{s[0,1,:,16:2*16]=}')
+    # print(f'{s[0,1,:,16:2*16]=}')
 
     desc = f'mode:{mode} bs:{len(qls)} q:{qls[0]} k:{kls[0]} qo_head:{qo_head} kv_head:{kv_head} dim:{dim}'
 
@@ -168,12 +168,12 @@ def test_seg_attn(mode='prefill', even=True):
     seg_attn_meta.s_scales = s_scales
 
     org_output = torch_linear_attn(q.view(bs, qls[0], qo_head, dim), 
-                                k.view(bs, kls[0], kv_head, dim), 
-                                v.view(bs, kls[0], kv_head, dim),
-                                s,
-                                s_scales,
-                                causal=True, 
-                                mask=torch_mask) 
+                                    k.view(bs, kls[0], kv_head, dim), 
+                                    v.view(bs, kls[0], kv_head, dim),
+                                    s,
+                                    s_scales,
+                                    causal=True, 
+                                    mask=torch_mask) 
     org_output = org_output.view(bs*qls[0], qo_head, dim)
 
 
