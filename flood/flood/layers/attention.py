@@ -143,7 +143,7 @@ class Fp16SegLinearAttention(torch.nn.Module):
         super().__init__()
         self.layer_idx = layer_idx
 
-    def forward(self, query_states, key_states, value_states, batch_meta_info,
+    def forward(self, query_states, key_states, value_states, decay_scales, batch_meta_info,
                 cache):
         # if any([x.done>0 for x in batch_meta_info.reqs]):
         #     print('debug') 
@@ -153,6 +153,7 @@ class Fp16SegLinearAttention(torch.nn.Module):
             key_states,
             value_states,
             s_states,
+            decay_scales,
             batch_meta_info
         )
 
