@@ -79,10 +79,10 @@ def seg_la_kernel(
     s_scale = tl.load(s_scales+bid)
     state = (state*s_scale).to(S.dtype.element_ty)
 
-    if bid == 0:
-        if hid == 1:
-            if sid == 1:
-                tl.device_print("state",state.to(tl.float32))
+    # if bid == 0:
+    #     if hid == 1:
+    #         if sid == 1:
+    #             tl.device_print("state",state.to(tl.float32))
 
     if BLOCK > 1:
         for n in range(0, q_length, BLOCK):
@@ -103,19 +103,17 @@ def seg_la_kernel(
                             mask=(n + offs_m)[:, None] < q_length, 
                             other=0.0)
 
-            k = (k * softmax_scale).to(q.dtype)
-            qk = tl.dot(q, tl.trans(k))
-            # tl.static_print('qk',qk)
+            # k = (k * softmax_scale).to(q.dtype)
+            qk = tl.dot(q, tl.trans(k)) * softmax_scale
             qk = tl.where(offs_m[:,None]<=offs_m[None,:],qk,0.0)
             o = tl.dot(qk.to(v.dtype), v) + tl.dot(q, state)
-            state += (tl.dot(tl.trans(k), v)).to(S.dtype.element_ty)
+            state += (tl.dot(tl.trans(k), v) * softmax_scale).to(S.dtype.element_ty)
 
             if EVEN:
                 tl.store(out_ptrs + n * stride_o, o)
             else:
                 tl.store(out_ptrs + n * stride_o, o, mask=(n + offs_m)[:, None] < q_length)
 
-        tl.store(s_ptrs, state)
     else:
         q = tl.load(q_ptrs)
         k = tl.load(k_ptrs)
@@ -125,7 +123,7 @@ def seg_la_kernel(
 
         tl.store(out_ptrs, o)
 
-        tl.store(s_ptrs, state)
+    tl.store(s_ptrs, state)
 
 
 
@@ -165,11 +163,11 @@ def seg_la_fwd(q, k, v, s, meta):
 
     SPLIT_DIM = 16
     num_dim_block = HEAD_DIM // SPLIT_DIM
-    num_warps = 8  # TODO: only for compatible mode
-    if meta.mask is not None:
-        num_stages = 2
-    else:
+    num_warps = 8
+    if meta.mask is None:
         num_stages = 3
+    else:
+        num_stages = 2
 
     # name='NVIDIA H20', major=9, minor=0, total_memory=97285MB, multi_processor_count=78
     prop = torch.cuda.get_device_properties(0)
