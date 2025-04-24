@@ -682,7 +682,7 @@ class Batch:
         self.k_offsets = self.k_offsets.to(device, non_blocking=non_blocking)
         self.q_lengths = self.q_lengths.to(device, non_blocking=non_blocking)
         self.k_lengths = self.k_lengths.to(device, non_blocking=non_blocking)
-        self.cache_indices = self.cache_indices.to(device, non_blocking=non_blocking)
+        self.cache_indices = self.cache_indices.to(device, non_blocking=non_blocking)      
         if isinstance(self.k_segs, torch.Tensor):
             self.k_segs = self.k_segs.to(device, non_blocking=non_blocking)    
         if isinstance(self.logit_indices, torch.Tensor):
@@ -691,7 +691,10 @@ class Batch:
             self.mask = self.mask.to(device, non_blocking=non_blocking)
         if isinstance(self.draft_offsets, torch.Tensor):
             self.draft_offsets = self.draft_offsets.to(device, non_blocking=non_blocking)
-
+        if isinstance(self.s_offsets, torch.Tensor):
+            self.s_offsets = self.s_offsets.to(device, non_blocking=non_blocking) 
+        if isinstance(self.s_scales, torch.Tensor):
+            self.s_scales = self.s_scales.to(device, non_blocking=non_blocking)   
     def send(self, hidden_states, dst=1, group=None, light=False, log=False):
         dim = hidden_states.size(-1)
         dtype = 0 if hidden_states.dtype == torch.float16 else 1
