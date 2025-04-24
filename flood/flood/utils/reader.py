@@ -108,9 +108,8 @@ class Reader:
         head_dim = conf.get('head_dim')
         head_dim = head_dim if head_dim else hidden_size // num_heads
         num_key_value_heads = conf['num_key_value_heads']
-        linear_layer_group = conf.get('layer_group_size', None)
 
-        return model_type, torch_dtype, n_layer, num_key_value_heads, head_dim, linear_layer_group
+        return conf, model_type, torch_dtype, n_layer, num_key_value_heads, head_dim
 
     @staticmethod
     def list_files(data_path, postfix=None):

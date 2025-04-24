@@ -6,7 +6,7 @@ Copyright (c) Ant Financial Service Group and its affiliates.
 import os
 
 os.environ['TOKENIZERS_PARALLELISM'] = 'false'
-os.environ['CUDA_LAUNCH_BLOCKING']='0'
+os.environ['CUDA_LAUNCH_BLOCKING']='1'
 
 import random
 import time
@@ -42,22 +42,17 @@ if __name__ == '__main__':
     
     prompts = ['Consider a sequence of real numbers \( a_1, a_2, a_3, \ldots \) defined as follows: \( a_1 = 1 \)\n For \( n \geq 1 \), \( a_{n+1} = \\frac{a_n + 2}{a_n + 1} \).\nDetermine the value of \( a_{2024} \)']
     reqs = []
-    if False:
-        for i, prompt in enumerate(prompts):
-            reqs.append(Request(0, input_text=prompt, output_length=512))
-    else:
-        tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
-        for i, prompt in enumerate(prompts):
-            messages = [
-                        {"role": "system","content": "You are Qwen, created by Alibaba Cloud. You are a helpful assistant."},
-                        {"role": "user", "content": prompt}
-                    ]
-            text = tokenizer.apply_chat_template(
-                messages,
-                tokenize=False,
-                add_generation_prompt=True,
-            )
-            reqs.append(Request(i, input_text=text, output_length=512))
+    for i, prompt in enumerate(prompts):
+        messages = [
+                    {"role": "system","content": "You are Qwen, created by Alibaba Cloud. You are a helpful assistant."},
+                    {"role": "user", "content": prompt}
+                ]
+        text = tokenizer.apply_chat_template(
+            messages,
+            tokenize=False,
+            add_generation_prompt=True,
+        )
+        reqs.append(Request(i, input_text=text, output_length=128))
 
     if True:
         worker = LLM(model_path,

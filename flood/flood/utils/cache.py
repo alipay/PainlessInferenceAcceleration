@@ -3,7 +3,7 @@
 Copyright (c) Ant Financial Service Group and its affiliates.
 """
 
-from typing import List, Tuple
+from typing import List, Tuple, Optional
 
 from huggingface_hub import cached_assets_path
 import torch
@@ -17,31 +17,33 @@ class SegmentCache(Cache):
 
     def __init__(self, 
                  max_token: int, 
-                 num_reqs: int,
                  num_layers: int = 32,
                  dims: List[int] = [1024,1024], 
-                 fix_size_dims: List[int] = [1024,1024],
+                 num_reqs: Optional[int] = 1024,
+                 fix_size_dim: int = 2**18,
                  dtype=None,
                  devices=(),
-                 fix_size_group=None) -> None:
+                 fix_size_indices=None) -> None:
         super().__init__()
         self.max_token = max_token
         self.num_layers = num_layers
         self.dims = dims  # key cache dim + value cache dim, 2048=2*8*128
-        self.fix_size_dims = fix_size_dims
+        self.fix_size_dim = fix_size_dim
 
         self.dtype = dtype
 
         self.caches: List[torch.Tensor] = []
         cache_shape = (max_token, sum(self.dims))
-        fix_size_cache_shape = (num_reqs, sum(self.fix_size_dims))
+        fix_size_cache_shape = (num_reqs, self.fix_size_dim)
         for i in range(num_layers):
-            if fix_size_group is not None and (i + 1) % fix_size_group == 0:
-                cache = torch.zeros(fix_size_cache_shape, dtype=self.dtype,
-                                device=devices[i]).share_memory_()
+            if fix_size_indices is not None and i in fix_size_indices:
+                cache = torch.zeros(fix_size_cache_shape, 
+                                    dtype=self.dtype,
+                                    device=devices[i]).share_memory_()
             else:
-                cache = torch.zeros(cache_shape, dtype=self.dtype,
-                                device=devices[i]).share_memory_()
+                cache = torch.zeros(cache_shape, 
+                                    dtype=self.dtype,
+                                    device=devices[i]).share_memory_()
             # Note: `mark_static_address` is used to tag the cache as an fixed data pointer, preventing cuda graph
             # breaks when updating the cache.
             torch._dynamo.mark_static_address(cache)

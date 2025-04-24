@@ -21,6 +21,7 @@ import torch.multiprocessing as mp
 from safetensors import safe_open
 from transformers import AutoTokenizer
 from torch.profiler import profile, record_function, ProfilerActivity
+from ctypes import Structure, c_int
 
 
 from flood.layers.linear import NativeLinear
@@ -161,7 +162,7 @@ class LLM():
             assert n_stage <= torch.cuda.device_count()
 
         self.model_path = model_path
-        self.model_type, self.torch_dtype, self.n_layer, self.kv_heads, self.head_dim, self.linear_layer_group = Reader.get_conf(
+        self.conf, self.model_type, self.torch_dtype, self.n_layer, self.kv_heads, self.head_dim = Reader.get_conf(
             self.model_path)
         self.model_attr = model_attr_map.get(self.model_type, model_attr_map['DEFAULT'])
 
@@ -195,6 +196,14 @@ class LLM():
         self.logger = logger
         self.debug = debug
         self.kernels = kernels
+
+        if 'layer_group_size' in self.conf:
+            layer_group_size = self.conf['layer_group_size']
+            self.fix_size_indices = [i for i in range(self.n_layer) if (i+1)%layer_group_size != 0]
+            if self.n_layer % layer_group_size == 0:
+                self.fix_size_indices.append(-1)  # -1 means the last layer
+        else:
+            self.fix_size_indices = None
 
         self.tokenizer = self.load_tokenizer(self.model_path)
 
@@ -408,15 +417,14 @@ class LLM():
             dims = [self.model.config.kv_lora_rank+self.model.config.qk_rope_head_dim]  
         else:
             dims = [self.kv_heads*self.head_dim]*2
-        fix_size_dims = [self.kv_heads*self.head_dim**2]
         cache = SegmentCache(max_token,
-                             num_reqs=self.num_reqs,
                              num_layers=self.n_layer,
                              dims=dims,
-                             fix_size_dims=fix_size_dims,
+                             num_reqs=self.num_reqs,
+                             fix_size_dim=self.kv_heads*self.head_dim**2,
                              dtype=cache_dtype,
                              devices=devices,
-                             fix_size_group=self.linear_layer_group,
+                             fix_size_indices=self.fix_size_indices,
                              )
         return cache
 
@@ -456,8 +464,7 @@ class LLM():
         slots = Array(Slot,
                       [(0, self.cache_size - 128, 1, 0)] + [(0, 0, 0, 0) for i in
                                                       range(self.slot_count)])
-        fix_slots = Array(Slot,[(0, self.num_reqs, 1, 0)] + [(0, 0, 1, 0) for i in
-                                                      range(self.num_reqs - 1)])
+        fix_slots = Array(c_int,[1 for _ in range(self.num_reqs)])
 
         for i in range(self.n_proc):
             process = mp.Process(target=self.schedule,
@@ -812,7 +819,7 @@ class LLM():
                                 input_lengths = input_lengths[-1024:]
                                 output_lengths = output_lengths[-1024:]
 
-                            Batch.recycle(slots, req.segs, fix_slots, req.fix_size_slot_index)
+                            Batch.recycle(slots, req.segs, fix_slots=fix_slots, fix_size_slot_index=req.fix_size_slot_index)
                             if self.spec_algo == 'lookahead':
                                 self.spec.update_state(req.output_ids)
                             counts.value -= 1
