@@ -142,7 +142,8 @@ def seg_la_fwd(q, k, v, s, decay_scales, meta):
     _, qo_heads, d = q.shape
     _, kv_heads, _ = k.shape
     batch = meta.batch_size
-    softmax_scale = 1.0 / math.sqrt(d)
+    # softmax_scale = 1.0 / math.sqrt(d)
+    softmax_scale = 1.0
 
     o = torch.empty(q.shape, device=q.device, dtype=q.dtype)
 

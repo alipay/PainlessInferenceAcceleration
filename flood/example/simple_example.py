@@ -6,7 +6,7 @@ Copyright (c) Ant Financial Service Group and its affiliates.
 import os
 
 os.environ['TOKENIZERS_PARALLELISM'] = 'false'
-os.environ['CUDA_LAUNCH_BLOCKING']='1'
+# os.environ['CUDA_LAUNCH_BLOCKING']='1'
 
 import random
 import time
@@ -40,7 +40,8 @@ if __name__ == '__main__':
 
     tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
     
-    prompts = ['Consider a sequence of real numbers \( a_1, a_2, a_3, \ldots \) defined as follows: \( a_1 = 1 \)\n For \( n \geq 1 \), \( a_{n+1} = \\frac{a_n + 2}{a_n + 1} \).\nDetermine the value of \( a_{2024} \)']
+    # prompts = ['Consider a sequence of real numbers \( a_1, a_2, a_3, \ldots \) defined as follows: \( a_1 = 1 \)\n For \( n \geq 1 \), \( a_{n+1} = \\frac{a_n + 2}{a_n + 1} \).\nDetermine the value of \( a_{2024} \)']
+    prompts = ['杭州在哪里']
     reqs = []
     for i, prompt in enumerate(prompts):
         messages = [
@@ -54,30 +55,32 @@ if __name__ == '__main__':
         )
         reqs.append(Request(i, input_text=text, output_length=128))
 
-    if True:
-        worker = LLM(model_path,
-                    n_stage=1,  # gpus
-                    n_proc=1,
-                    chunk_size=1024,
-                    cache_size=None,
-                    slot_fully_alloc_under=1024,
-                    tune_alloc_size=False,
-                    eos_token_id=None,
-                    debug=True,
-                    kernels=('sa',),
-                    logger='example.log')
 
+    worker = LLM(model_path,
+                 n_stage=1,  # gpus
+                 n_proc=1,
+                 chunk_size=4096,
+                #  model_dtype=torch.float8_e4m3fn,
+                 max_concurrency=1024,
+                 cache_size=16000,
+                 slot_fully_alloc_under=1024,
+                 tune_alloc_size=False,
+                 eos_token_id=None,
+                 debug=True,
+                 kernels=('fa2',),
+                #  spec_algo = 'lookahead',
+                 logger='example.log')
 
-        # start process
-        input_queue, chunk_queue, working_queue, output_queues = worker.initialize()
-        worker.launch(input_queue, chunk_queue, working_queue, output_queues)
+    # start process
+    input_queue, chunk_queue, working_queue, output_queues = worker.initialize()
+    worker.launch(input_queue, chunk_queue, working_queue, output_queues)
 
-        # do benchmark
-        for i, req in enumerate(worker.request_stream_generate(reqs,
-                                                    input_queue,
-                                                    output_queues,
-                                                    print_count=0)):
-            print('\n\n')
-            print(f'prompt-{i}: ', req.input_text)
-            print(f'answer-{i}: ', req.output_text)
-        time.sleep(1.0)
+    # do benchmark
+    for i, req in enumerate(worker.request_stream_generate(reqs,
+                                                input_queue,
+                                                output_queues,
+                                                print_count=0)):
+        print('\n\n')
+        print(f'prompt-{i}: ', req.input_text)
+        print(f'answer-{i}: ', req.output_text)
+    time.sleep(1.0)

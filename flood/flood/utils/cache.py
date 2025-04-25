@@ -19,7 +19,7 @@ class SegmentCache(Cache):
                  max_token: int, 
                  num_layers: int = 32,
                  dims: List[int] = [1024,1024], 
-                 num_reqs: Optional[int] = 1024,
+                 max_concurrency: Optional[int] = None,
                  fix_size_dim: int = 2**18,
                  dtype=None,
                  devices=(),
@@ -34,9 +34,9 @@ class SegmentCache(Cache):
 
         self.caches: List[torch.Tensor] = []
         cache_shape = (max_token, sum(self.dims))
-        fix_size_cache_shape = (num_reqs, self.fix_size_dim)
         for i in range(num_layers):
             if fix_size_indices is not None and i in fix_size_indices:
+                fix_size_cache_shape = (max_concurrency, self.fix_size_dim)
                 cache = torch.zeros(fix_size_cache_shape, 
                                     dtype=self.dtype,
                                     device=devices[i]).share_memory_()

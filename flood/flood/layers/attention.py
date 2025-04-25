@@ -33,9 +33,10 @@ class AutoAttention():
                         name=None):
         if layer_idx == 0:
             print(f"attention dtype:{dtype}")
-        if dtype is None or dtype == torch.bfloat16 or dtype == torch.float16 or dtype in (
-        'float16', 'bfloat16'):
-            if 'seg_la' in kernels:
+        if (dtype is None or dtype == torch.bfloat16 or 
+            dtype == torch.float16 or 
+            dtype in ('float16', 'bfloat16')):
+            if 'sla' in kernels:
                 return Fp16SegLinearAttention(layer_idx)
             elif 'fa3' in kernels:
                 return Fp16Attention3(layer_idx, softmax_scale=softmax_scale)

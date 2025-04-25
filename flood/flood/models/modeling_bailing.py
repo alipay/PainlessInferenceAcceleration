@@ -11,7 +11,9 @@ from typing import List, Optional, Tuple, Union, Dict
 
 import torch
 from transformers.cache_utils import Cache
-from transformers.modeling_utils import PreTrainedModel, PretrainedConfig
+from transformers.modeling_utils import PreTrainedModel
+from transformers.modeling_utils import PretrainedConfig
+
 
 from flood.ops.activation import silu_and_mul
 from flood.ops.norm import RMSNorm
@@ -149,9 +151,11 @@ class BailingAttention(torch.nn.Module):
 
         batch_meta_info = kwargs['batch_meta_info']
 
+        q_offsets = (batch_meta_info.q_offsets if batch_meta_info.draft_offsets is None
+                 else batch_meta_info.draft_offsets)
         self.rope(query_states, 
                   key_states, 
-                  batch_meta_info.q_offsets if batch_meta_info.draft_offsets is None else batch_meta_info.draft_offsets, 
+                  q_offsets, 
                   batch_meta_info.position_ids)
 
         attn_output = self.attention(query_states, key_states, value_states, 
@@ -168,11 +172,11 @@ class BailingDecoderLayer(torch.nn.Module):
     def __init__(self, config: PretrainedConfig, layer_idx: int = 0):
         super().__init__()
         self.hidden_size = config.hidden_size
+        self.n_layer = config.num_layers
         self.layer_idx = layer_idx
 
         # use layer_idx==None to indicate that the layer does not 
-        # initialized on the current node, and use layer_idx==-1
-        # to indicate the final layer of the model
+        # initialized on the current node
         if self.layer_idx is not None:
             self.attention = BailingAttention(config, layer_idx=layer_idx)
             self.mlp = BailingMLP(config, layer_idx=layer_idx)
@@ -205,7 +209,7 @@ class BailingDecoderLayer(torch.nn.Module):
 
         hidden_states += residual
 
-        if self.layer_idx == -1 and batch_meta_info.logit_indices is not None:
+        if self.layer_idx == self.n_layer - 1 and batch_meta_info.logit_indices is not None:
             if batch_meta_info.logit_indices.numel() == 0:
                 return
             hidden_states = hidden_states[batch_meta_info.logit_indices]
@@ -246,7 +250,6 @@ class BailingModel(PreTrainedModel):
         local_size = n_layer // self.world_size
         for i in range(n_layer):
             layer_idx = i if i // local_size == self.rank else None
-            layer_idx = -1 if layer_idx == n_layer - 1 and self.rank == self.world_size - 1 else layer_idx
             layers.append(BailingDecoderLayer(config, layer_idx=layer_idx))
         self.layers = torch.nn.ModuleList(layers)
 
@@ -326,7 +329,6 @@ class BailingForCausalLM(PreTrainedModel):
     ) -> List:
 
         n_devices = len(device_list)
-        n_layers = len(self.model.layers)
         for i, indices in enumerate(device_list):
             stream = streams[i]
             with torch.cuda.stream(stream):
@@ -369,6 +371,8 @@ class BailingForCausalLM(PreTrainedModel):
 
         # TODO: adapt for multi-node serving
         if batch_meta_info.mode == 2:
-            batch_meta_info.spec.update_cache(batch_meta_info.cache_src_indices, batch_meta_info.cache_dst_indices, past_key_values)
+            batch_meta_info.spec.update_cache(batch_meta_info.cache_src_indices, 
+                                              batch_meta_info.cache_dst_indices, 
+                                              past_key_values)
 
         return outputs
