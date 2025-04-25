@@ -45,7 +45,7 @@ if __name__ == '__main__':
     reqs = []
     for i, prompt in enumerate(prompts):
         messages = [
-                    {"role": "system","content": "You are Qwen, created by Alibaba Cloud. You are a helpful assistant."},
+                    # {"role": "system","content": "You are Qwen, created by Alibaba Cloud. You are a helpful assistant."},
                     {"role": "user", "content": prompt}
                 ]
         text = tokenizer.apply_chat_template(
@@ -67,7 +67,7 @@ if __name__ == '__main__':
                  tune_alloc_size=False,
                  eos_token_id=None,
                  debug=True,
-                 kernels=('fa2',),
+                 kernels=('sa',),
                 #  spec_algo = 'lookahead',
                  logger='example.log')
 
