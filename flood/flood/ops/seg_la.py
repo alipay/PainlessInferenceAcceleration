@@ -116,7 +116,7 @@ def seg_la_kernel(
 
             o = tl.dot(qk.to(v.dtype), v) 
             o =  tl.dot(q, state, acc=o)
-            block_decay = tl.exp(decay_scale*BLOCK)
+            block_decay = tl.exp(decay_scale*min(BLOCK, q_length - n))
             state += (tl.dot(tl.trans(k), v) * (softmax_scale * block_decay) ).to(S.dtype.element_ty)
 
             if EVEN:
@@ -142,8 +142,8 @@ def seg_la_fwd(q, k, v, s, decay_scales, meta):
     _, qo_heads, d = q.shape
     _, kv_heads, _ = k.shape
     batch = meta.batch_size
-    # softmax_scale = 1.0 / math.sqrt(d)
-    softmax_scale = 1.0
+    softmax_scale = 1.0 / math.sqrt(d)
+    # softmax_scale = 1.0
 
     o = torch.empty(q.shape, device=q.device, dtype=q.dtype)
 
@@ -158,9 +158,7 @@ def seg_la_fwd(q, k, v, s, decay_scales, meta):
 
     BLOCK = 1 if meta.max_q_length == 1 else HEAD_DIM
 
-    EVEN = all(
-        [x % BLOCK == 0 for
-         x in meta.qls])
+    EVEN = all([x % BLOCK == 0 for x in meta.qls])
 
     # if meta.mask is not None:
     #     MASK_TYPE = 2

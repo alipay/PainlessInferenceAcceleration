@@ -281,9 +281,8 @@ class BailingMoeLinearAttention(torch.nn.Module):
                                                        kernels= ['sla'],
                                                        softmax_scale=self.softmax_scale)
 
-        start = 2 ** (-(2 ** -(math.log2(self.num_key_value_heads) - 3)))
-        exponents = torch.arange(1, self.num_key_value_heads + 1, dtype=torch.float32)
-        self.decay_scales = torch.log(torch.pow(start, exponents) * (1 - self.layer_idx / (self.num_layers - 1) + 1e-5))
+        self.decay_scales = (-(8 / self.num_heads * (1 - self.layer_idx / self.num_layers))
+                                 * torch.arange(self.num_heads, dtype=torch.float32))
 
     def forward(
         self,
@@ -340,8 +339,7 @@ class BailingMoeDecoderLayer(torch.nn.Module):
         # initialized on the current node, and use layer_idx==-1
         # to indicate the final layer of the model
         if self.layer_idx is not None:
-            if (self.layer_idx + 1) % config.layer_group_size == 0 or \
-                self.layer_idx >= config.num_hidden_layers // config.layer_group_size * config.layer_group_size:
+            if (self.layer_idx + 1) % config.layer_group_size == 0:
                 self.attention = BailingMoeAttention(config, layer_idx=layer_idx)
             else:
                 self.attention = BailingMoeLinearAttention(config, layer_idx=layer_idx)
@@ -434,6 +432,7 @@ class BailingMoeLinearForCausalLM(PreTrainedModel):
 
     def __init__(self, config: PretrainedConfig):
         super().__init__(config)
+        self.config = config
         self.model = BailingMoeModel(config)
         self.vocab_size = config.vocab_size
 
@@ -474,6 +473,11 @@ class BailingMoeLinearForCausalLM(PreTrainedModel):
             print('patch lm_head')            
             self.lm_head.patch()
 
+        if self.config.norm_head:
+            data = self.lm_head.weight.data
+            dtype = data.dtype
+            norm = torch.norm(data.float(), p=2, dim=0, keepdim=True) + 1e-7
+            self.lm_head.weight.data = (data.float() / norm).to(dtype)
 
     @torch.inference_mode()
     def forward(

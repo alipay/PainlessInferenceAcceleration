@@ -19,7 +19,6 @@ try:
     import flash_attn_3_cuda
 except:
     flash_attn_3_cuda = None
-    print("flash_attn_3_cuda not found!")
 
 
 class AutoAttention():
@@ -121,14 +120,11 @@ class Fp16SegAttention(torch.nn.Module):
 
     def forward(self, query_states, key_states, value_states, batch_meta_info,
                 cache):
-        # if any([x.done>0 for x in batch_meta_info.reqs]):
-        #     print('debug') 
         key_states, value_states = cache.update_cache(key_states, 
                                                       value_states,
                                                       self.layer_idx, 
                                                       batch_meta_info)
-        # batch_meta_info.max_seg = 1
-        # batch_meta_info.mask = None
+
         output = seg_attn_fwd(
             query_states,
             key_states,
@@ -146,8 +142,6 @@ class Fp16SegLinearAttention(torch.nn.Module):
 
     def forward(self, query_states, key_states, value_states, decay_scales, batch_meta_info,
                 cache):
-        # if any([x.done>0 for x in batch_meta_info.reqs]):
-        #     print('debug') 
         s_states = cache.caches[self.layer_idx]
         output = seg_la_fwd(
             query_states,
