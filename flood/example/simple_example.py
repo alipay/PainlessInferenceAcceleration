@@ -6,7 +6,7 @@ Copyright (c) Ant Financial Service Group and its affiliates.
 import os
 
 os.environ['TOKENIZERS_PARALLELISM'] = 'false'
-os.environ['CUDA_LAUNCH_BLOCKING']='1'
+# os.environ['CUDA_LAUNCH_BLOCKING']='1'
 
 import random
 import time
@@ -40,7 +40,8 @@ if __name__ == '__main__':
 
     tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
     
-    prompts = ['Consider a sequence of real numbers \( a_1, a_2, a_3, \ldots \) defined as follows: \( a_1 = 1 \)\n For \( n \geq 1 \), \( a_{n+1} = \\frac{a_n + 2}{a_n + 1} \).\nDetermine the value of \( a_{2024} \)']
+    # prompts = ['Consider a sequence of real numbers \( a_1, a_2, a_3, \ldots \) defined as follows: \( a_1 = 1 \)\n For \( n \geq 1 \), \( a_{n+1} = \\frac{a_n + 2}{a_n + 1} \).\nDetermine the value of \( a_{2024} \)']
+    prompts = ['杭州在哪里']
     reqs = []
     for i, prompt in enumerate(prompts):
         messages = [
@@ -60,7 +61,7 @@ if __name__ == '__main__':
                  n_proc=1,
                  chunk_size=4096,
                 #  model_dtype=torch.float8_e4m3fn,
-                 num_reqs=1024,
+                 max_concurrency=1024,
                  cache_size=16000,
                  slot_fully_alloc_under=1024,
                  tune_alloc_size=False,

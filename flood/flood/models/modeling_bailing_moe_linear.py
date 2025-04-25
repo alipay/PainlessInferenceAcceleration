@@ -276,11 +276,9 @@ class BailingMoeLinearAttention(torch.nn.Module):
                                      self.num_key_value_heads, 
                                      self.head_dim)
 
-        kernels = ['seg_la']
-
         self.attention = AutoAttention.from_pretrained(cache_dtype, 
                                                        layer_idx=self.layer_idx, 
-                                                       kernels=kernels,
+                                                       kernels= ['sla'],
                                                        softmax_scale=self.softmax_scale)
 
         start = 2 ** (-(2 ** -(math.log2(self.num_key_value_heads) - 3)))
@@ -316,8 +314,12 @@ class BailingMoeLinearAttention(torch.nn.Module):
                   batch_meta_info.position_ids)
         if self.decay_scales.device != query_states.device:
             self.decay_scales = self.decay_scales.to(query_states.device)
-        attn_output = self.attention(query_states, key_states, value_states, self.decay_scales,
-                                     batch_meta_info, past_key_value)
+        attn_output = self.attention(query_states, 
+                                     key_states, 
+                                     value_states, 
+                                     self.decay_scales,
+                                     batch_meta_info, 
+                                     past_key_value)
 
         attn_output = attn_output.view(q_len, self.intermediate_size)  
         attn_output = self.g_norm(attn_output)
@@ -331,6 +333,7 @@ class BailingMoeDecoderLayer(torch.nn.Module):
     def __init__(self, config: PretrainedConfig, layer_idx: int = 0):
         super().__init__()
         self.hidden_size = config.hidden_size
+        self.n_layer = config.num_hidden_layers
         self.layer_idx = layer_idx
 
         # use layer_idx==None to indicate that the layer does not 
@@ -372,7 +375,7 @@ class BailingMoeDecoderLayer(torch.nn.Module):
 
         hidden_states += residual
 
-        if self.layer_idx == -1 and batch_meta_info.logit_indices is not None:
+        if self.layer_idx == self.n_layer - 1 and batch_meta_info.logit_indices is not None:
             if batch_meta_info.logit_indices.numel() == 0:
                 return
             hidden_states = hidden_states[batch_meta_info.logit_indices]
@@ -413,7 +416,6 @@ class BailingMoeModel(PreTrainedModel):
         local_size = n_layer // self.world_size
         for i in range(n_layer):
             layer_idx = i if i // local_size == self.rank else None
-            layer_idx = -1 if layer_idx == n_layer - 1 and self.rank == self.world_size - 1 else layer_idx
             layers.append(BailingMoeDecoderLayer(config, layer_idx=layer_idx))
         self.layers = torch.nn.ModuleList(layers)
 

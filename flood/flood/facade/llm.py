@@ -66,7 +66,7 @@ class LLM():
                  n_proc: Optional[int] = None,
                  cache_size: Optional[Union[int, float]] = None,
                  slot_count: int = 8192,
-                 num_reqs: int = 128,
+                 max_concurrency: Optional[int] = None,
                  schedule_mode: str = 'pingpong',
                  chunk_size: int = 1024,
                  sync_wait_time: Tuple = (4, 4),
@@ -117,7 +117,8 @@ class LLM():
                 Float: max percent of GPU memory usage.
                 None: determined heuristically.
         :param slot_count: total segment count.
-        :param num_reqs: number of requests for linear model.
+        :param max_concurrency: max number of requests for linear attention model.
+               it is used for cache allocation.
         :param schedule_mode: schedule mode.
                 pingpong: do prefill until no slot available,
                         and do decoding until batch size decrease.
@@ -173,7 +174,7 @@ class LLM():
         self.n_stage = n_stage
         self.n_proc = n_proc if n_proc else self.n_stage + 1
         self.slot_count = slot_count
-        self.num_reqs = num_reqs
+        self.max_concurrency = max_concurrency
         self.schedule_mode = schedule_mode
         self.chunk_size = chunk_size
         self.sync_wait_time = sync_wait_time
@@ -200,8 +201,6 @@ class LLM():
         if 'layer_group_size' in self.conf:
             layer_group_size = self.conf['layer_group_size']
             self.fix_size_indices = [i for i in range(self.n_layer) if (i+1)%layer_group_size != 0]
-            if self.n_layer % layer_group_size == 0:
-                self.fix_size_indices.append(-1)  # -1 means the last layer
         else:
             self.fix_size_indices = None
 
@@ -417,11 +416,15 @@ class LLM():
             dims = [self.model.config.kv_lora_rank+self.model.config.qk_rope_head_dim]  
         else:
             dims = [self.kv_heads*self.head_dim]*2
+        if self.fix_size_indices is  None:
+            fix_size_dim = None
+        else:
+            fix_size_dim = self.conf['num_attention_heads']*self.head_dim**2
         cache = SegmentCache(max_token,
                              num_layers=self.n_layer,
                              dims=dims,
-                             num_reqs=self.num_reqs,
-                             fix_size_dim=self.kv_heads*self.head_dim**2,
+                             max_concurrency=self.max_concurrency,
+                             fix_size_dim=fix_size_dim,
                              dtype=cache_dtype,
                              devices=devices,
                              fix_size_indices=self.fix_size_indices,
@@ -464,7 +467,7 @@ class LLM():
         slots = Array(Slot,
                       [(0, self.cache_size - 128, 1, 0)] + [(0, 0, 0, 0) for i in
                                                       range(self.slot_count)])
-        fix_slots = Array(c_int,[1 for _ in range(self.num_reqs)])
+        fix_slots = Array(c_int,[1 for _ in range(self.max_concurrency)])
 
         for i in range(self.n_proc):
             process = mp.Process(target=self.schedule,

@@ -229,12 +229,12 @@ class Batch:
                     (cache_offset, cache_offset + total_alloc_length, slot_index)]
                 req.fix_size_slot_index = s_offset
                 allocated.append(req)
-                s_scale = 0  # 
+                s_scale = 0.0  # 
             else:  # done > 0, second trunk
                 ql = req.todo
                 cache_offset = req.segs[0][0]
-                s_offset = req.fix_size_slot_index[0][0]
-                s_scale = 1
+                s_offset = req.fix_size_slot_index
+                s_scale = 1.0
                 
 
             q_lengths.append(ql)
@@ -323,7 +323,7 @@ class Batch:
         q_offsets = torch.tensor(q_offsets, dtype=torch.int32, device=device)
         k_offsets = torch.tensor(k_offsets, dtype=torch.int32, device=device)
         s_offsets = torch.tensor(s_offsets, dtype=torch.int32, device=device)
-        s_scales = torch.tensor(s_scales, dtype=torch.int32, device=device)
+        s_scales = torch.tensor(s_scales, dtype=torch.float32, device=device)
         q_lengths = torch.tensor(q_lengths, dtype=torch.int32, device=device)
         k_lengths = torch.tensor(k_lengths, dtype=torch.int32, device=device)
         cache_indices = torch.tensor(cache_indices,
@@ -404,7 +404,6 @@ class Batch:
 
         qls = [1] * bs
         kls = k_lengths
-        s_scales = [1] * bs
         input_ids = torch.tensor(input_ids, dtype=torch.int32, device=device)
         position_ids = torch.tensor(position_ids, dtype=torch.int32,
                                     device=device)
@@ -416,7 +415,7 @@ class Batch:
         cache_indices = torch.tensor(cache_indices,
                                               dtype=torch.int32, device=device)
         s_offsets = torch.tensor(s_offsets, dtype=torch.int32, device=device)
-        s_scales = torch.tensor(s_scales, dtype=torch.int32, device=device)
+        s_scales = torch.ones((bs,), dtype=torch.float32, device=device)
         for _, req in enumerate(reqs):
             if req.target_ids or req.temperature \
                  or req.top_k or req.top_p or req.min_p:
@@ -694,7 +693,7 @@ class Batch:
             self.s_offsets = self.s_offsets.to(device, non_blocking=non_blocking) 
         if isinstance(self.s_scales, torch.Tensor):
             self.s_scales = self.s_scales.to(device, non_blocking=non_blocking)   
-            
+
     def send(self, hidden_states, dst=1, group=None, light=False, log=False):
         dim = hidden_states.size(-1)
         dtype = 0 if hidden_states.dtype == torch.float16 else 1
