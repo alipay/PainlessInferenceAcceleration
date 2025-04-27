@@ -30,6 +30,8 @@ class Reader:
             if len(cs) < 2:
                 continue
             prompt = cs[0]['value']
+            if len(prompt) >= 1024*16:
+                continue
             input_length = len(tokenizer(prompt).input_ids)
             if input_length >= 1024 or input_length < 4:
                 continue

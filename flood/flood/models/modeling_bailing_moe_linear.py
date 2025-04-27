@@ -281,8 +281,9 @@ class BailingMoeLinearAttention(torch.nn.Module):
                                                        kernels= ['sla'],
                                                        softmax_scale=self.softmax_scale)
 
-        self.decay_scales = (-(8 / self.num_heads * (1 - self.layer_idx / self.num_layers))
-                                 * torch.arange(self.num_heads, dtype=torch.float32))
+        start = 2 ** (-(2 ** -(math.log2(self.num_key_value_heads) - 3)))
+        exponents = torch.arange(1, self.num_key_value_heads + 1, dtype=torch.float32)
+        self.decay_scales = -torch.pow(start, exponents) * (1 - self.layer_idx / (self.num_layers - 1) + 1e-5)
 
     def forward(
         self,
