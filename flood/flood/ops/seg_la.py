@@ -78,7 +78,7 @@ def seg_la_kernel(
     )
 
     state = tl.load(s_ptrs)
-    state = (state*s_scale)
+    state = state*s_scale.to(state.dtype)  # s_scale is 0 or 1, cast is precision preserved
 
     if BLOCK > 1:
         for n in range(0, q_length, BLOCK):
@@ -107,8 +107,8 @@ def seg_la_kernel(
             qk *= decays
             o = tl.dot(qk.to(v.dtype), v) 
 
-            decays = tl.exp(decay_scale*(offs_m[:,None]+1)) * softmax_scale
-            o = tl.dot((q*decays).to(q.dtype), state, acc=o)
+            decay_arr = tl.exp(decay_scale*(offs_m[:,None]+1)) * softmax_scale
+            o = tl.dot(q*decay_arr.to(q.dtype), state, acc=o)
 
             if EVEN:
                 b = BLOCK
