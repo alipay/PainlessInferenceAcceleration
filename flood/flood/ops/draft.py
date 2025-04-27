@@ -11,7 +11,7 @@ import triton.language as tl
 
 
 @triton.jit
-def update_draft_table_kernel(
+def deprecated_update_draft_table_kernel(
         tokens,
         freq_table,
         draft_table,
@@ -83,6 +83,63 @@ def update_draft_table_kernel(
                         tl.store(freq_table + bucket_idx + j, freq)
 
 
+@triton.jit
+def update_draft_table_kernel(
+        tokens,
+        freq_table,
+        draft_table,
+        token_count,
+        stride,
+        vocab,
+        BRANCH_LENGTH: tl.constexpr,
+        BRANCH_COUNT: tl.constexpr,
+        BLOCK: tl.constexpr,
+        SIZE: tl.constexpr
+):
+    bid = tl.program_id(0)
+    indices = tl.arange(0, BRANCH_LENGTH)
+    for i in range(BLOCK):
+        if bid * BLOCK + i + 4 <= token_count:
+            p0 = tl.load(tokens + bid * BLOCK + i, mask = bid * BLOCK + i < token_count, other=0)
+            p1 = tl.load(tokens + bid * BLOCK + i + 1, mask = bid * BLOCK + i + 1 < token_count, other=0)
+            uid = p0.to(tl.int64) * vocab + p1
+            bucket_idx = uid % (SIZE - BRANCH_COUNT)
+            branch = tl.load(tokens + bid * BLOCK + 2 + i + indices, 
+                             mask=bid * BLOCK + 2 + i + indices < token_count, 
+                             other=0)
+            branch_uid = tl.sum(branch)
+            
+            hit_mask = tl.zeros((), dtype=tl.int1)
+
+            for j in range(BRANCH_COUNT): # find existing match or empty slot
+                draft_branch = tl.load(draft_table + (bucket_idx + j) * stride + indices)
+                draft_branch_uid = tl.sum(draft_branch)
+                freq = tl.load(freq_table + bucket_idx + j)
+
+                current_not_hit = ~hit_mask
+                match_mask = (branch_uid == draft_branch_uid) & current_not_hit
+                empty_mask = (freq == 0) & current_not_hit
+
+                new_freq = tl.where(match_mask, freq + 1.0, tl.where(empty_mask, 1.0, freq))
+                tl.store(freq_table + bucket_idx + j, new_freq)
+                tl.store(draft_table + (bucket_idx + j) * stride + indices, branch, mask=empty_mask)
+
+                hit_mask |= (match_mask | empty_mask)
+
+            not_hit = ~hit_mask
+
+            for j in range(BRANCH_COUNT): # frequency decay and replacement
+                freq = tl.load(freq_table + bucket_idx + j)
+                freq_half = freq / 2.0
+                replace_mask = (freq_half < 1.0) & not_hit
+
+                new_freq = tl.where(replace_mask, 1.0, freq_half)
+                tl.store(freq_table + bucket_idx + j, new_freq)
+                tl.store(draft_table + (bucket_idx + j) * stride + indices, branch, mask=replace_mask)
+
+                hit_mask |= replace_mask
+
+
 def update_draft_table(tokens, 
                        freq_table, 
                        draft_table, 
@@ -116,7 +173,6 @@ def update_draft_table(tokens,
         num_warps=1,
         num_stages=1
     )
-
 
 @triton.jit
 def retrieve_draft_table_kernel(
