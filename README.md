@@ -32,7 +32,8 @@
 
 Our repo, PIA (short for Painless Inference Acceleration), is designed for LLM inference, and currently contains three key features:
 
-- [`FLOOD`](./flood/README.md): It employs pure pipeline parallelism to enhance inference throughput, thereby reducing communication costs typically associated with tensor parallelism. `FLOOD` is designed as the successor to our previous framework, `LOOKAHEAD`, in order to achieve optimal performance across both small and large batch sizes.
+- [`FLOOD`](./flood/README.md): It employs pure pipeline parallelism to enhance inference throughput, thereby reducing communication costs typically associated with tensor parallelism. `FLOOD` is designed as the successor to our previous framework, `LOOKAHEAD`, in order to achieve optimal performance across both small and large batch sizes. `FLOOD` is an infenrence infra for our LLM Models [`Ling`](https://github.com/inclusionAI/Ling) and Multi-Agent framwork [`AWorld`](https://github.com/inclusionAI/AWorld?tab=readme-ov-file) 🚀.
+
 
 - [`LOOKAHEAD`](./lookahead/README.md): It uses an on-the-fly trie-tree cache to prepare hierarchical multi-branch drafts, without the demand for assist models (e.g., speculative decoding) or additional head training (e.g., block decoding). 
 With the efficient hierarchical structure, we can lookahead tens of branches, therefore significantly improve generated token count in a forward pass. It is important to note that `LOOKAHEAD` is fully based on `transformers`, which is inefficient for serving large models. Consequently, we have updated `LOOKAHEAD` to `FLOOD` and will maintain only minimal support for `LOOKAHEAD`.
@@ -40,6 +41,7 @@ With the efficient hierarchical structure, we can lookahead tens of branches, th
 - [`IPAD`](./ipad/README.md): It applies iterative pruning and distillation techniques to reduce the model size.
 
 Other features, including quantization, KV cache sparsification, will release soon. 
+
 
 ## Citations
 ```
