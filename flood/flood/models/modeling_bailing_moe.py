@@ -364,7 +364,12 @@ class BailingMoeForCausalLM(PreTrainedModel):
             print('patch lm_head')            
             self.lm_head.patch()
 
-
+        if self.config.norm_head:
+            data = self.lm_head.weight.data
+            dtype = data.dtype
+            norm = torch.norm(data.float(), p=2, dim=0, keepdim=True) + 1e-7
+            self.lm_head.weight.data = (data.float() / norm).to(dtype)
+            
     @torch.inference_mode()
     def forward(
         self,
