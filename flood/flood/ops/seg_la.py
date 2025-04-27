@@ -53,6 +53,8 @@ def seg_la_kernel(
     q_length = tl.load(q_lengths + bid)
     q_offset = tl.load(q_offsets + bid)
     s_offset = tl.load(s_offsets + bid)
+    decay_scale = tl.load(decay_scales + hid)
+    s_scale = tl.load(s_scales+bid)
 
     q_ptrs = (
             Q + q_offset * stride_q + hid * HEAD_DIM + (
@@ -75,16 +77,8 @@ def seg_la_kernel(
                 offs_d[:, None] * HEAD_DIM + offs_s[None, :])
     )
 
-
     state = tl.load(s_ptrs)
-    s_scale = tl.load(s_scales+bid)
-    state = (state*s_scale).to(S.dtype.element_ty)
-    decay_scale = tl.load(decay_scales + hid)
-
-    # if bid == 0:
-    #     if hid == 1:
-    #         if sid == 1:
-    #             tl.device_print("state",state.to(tl.float32))
+    state = (state*s_scale)
 
     if BLOCK > 1:
         for n in range(0, q_length, BLOCK):
@@ -105,19 +99,26 @@ def seg_la_kernel(
                             mask=(n + offs_m)[:, None] < q_length, 
                             other=0.0)
 
-            # k = (k * softmax_scale).to(q.dtype)
+            # q = q * softmax_scale.to(q.dtype)
             qk = tl.dot(q, tl.trans(k)) * softmax_scale
-
-
-            qk = tl.where(offs_m[None,:] <= offs_m[:,None], qk, 0.0)
+            # qk = tl.where(offs_m[None,:] <= offs_m[:,None], qk, 0.0)
             decays = tl.exp(decay_scale*(offs_m[:,None] - offs_m[None,:]))
             decays = tl.where(offs_m[None,:] <= offs_m[:,None], decays, 0.0)
             qk *= decays
-
             o = tl.dot(qk.to(v.dtype), v) 
-            o =  tl.dot(q, state, acc=o)
-            block_decay = tl.exp(decay_scale*min(BLOCK, q_length - n))
-            state += (tl.dot(tl.trans(k), v) * (softmax_scale * block_decay) ).to(S.dtype.element_ty)
+
+            decays = tl.exp(decay_scale*(offs_m[:,None]+1)) * softmax_scale
+            o = tl.dot((q*decays).to(q.dtype), state, acc=o)
+
+            if EVEN:
+                b = BLOCK
+            else:
+                b = min(BLOCK, q_length - n)
+            b_offs = b-1-offs_m
+            b_offs = tl.where(b_offs >= 0, b_offs, 10000)
+            decays = tl.exp(decay_scale*b_offs).to(k.dtype)
+            block_decay = tl.exp(decay_scale*b).to(k.dtype)
+            state = state * block_decay + tl.dot(tl.trans(k*decays[:,None]), v).to(S.dtype.element_ty)
 
             if EVEN:
                 tl.store(out_ptrs + n * stride_o, o)
@@ -130,20 +131,22 @@ def seg_la_kernel(
         q = tl.load(q_ptrs)
         k = tl.load(k_ptrs)
         v = tl.load(v_ptrs)
-        
-        state = (state * decay_scale + (tl.trans(k) * v)*softmax_scale).to(S.dtype.element_ty)
-        o = tl.sum(tl.trans(q) * state, axis=0, keep_dims=True)
+        # state = state * tl.exp(decay_scale) + (tl.trans(k) * v)
+        state *= tl.exp(decay_scale)
+        state += tl.trans(k) * v
+
+        o = tl.sum(tl.trans(q) * state, axis=0, keep_dims=True) * softmax_scale.to(q.dtype)
 
         tl.store(out_ptrs, o)
 
         tl.store(s_ptrs, state)
 
-def seg_la_fwd(q, k, v, s, decay_scales, meta):
+def seg_la_fwd(q, k, v, s, decay_scales, meta, softmax_scale=None):
     _, qo_heads, d = q.shape
     _, kv_heads, _ = k.shape
     batch = meta.batch_size
-    softmax_scale = 1.0 / math.sqrt(d)
-    # softmax_scale = 1.0
+    if softmax_scale is None:
+        softmax_scale = 1.0 / math.sqrt(d)
 
     o = torch.empty(q.shape, device=q.device, dtype=q.dtype)
 
@@ -171,10 +174,10 @@ def seg_la_fwd(q, k, v, s, decay_scales, meta):
     #     MASK_TYPE = 0
     #     MASK_SIZE = 0
 
-    SPLIT_DIM = 32
+    SPLIT_DIM = 64 if BLOCK == 1 else 32
     num_dim_block = HEAD_DIM // SPLIT_DIM
     num_warps = 8
-    num_stages = 2
+    num_stages = 1
 
     # name='NVIDIA H20', major=9, minor=0, total_memory=97285MB, multi_processor_count=78
     prop = torch.cuda.get_device_properties(0)

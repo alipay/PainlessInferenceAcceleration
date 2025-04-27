@@ -698,8 +698,7 @@ class Batch:
         dim = hidden_states.size(-1)
         dtype = 0 if hidden_states.dtype == torch.float16 else 1
         mask_shape = None if self.mask is None else self.mask.shape 
-        draft_offfets_shape = None if self.draft_offsets is Non else self.draft_offsets.shape
-        logits
+        draft_offfets_shape = None if self.draft_offsets is None else self.draft_offsets.shape
         device = hidden_states.device
         comm_device = None
         objects = [
@@ -860,11 +859,15 @@ class Batch:
                     rates[j] = rate
                 elif s == 0 and e == 0 and state == 0:
                     break
-            for j, fixed_slot in enumerate(fix_slots):
-                if fixed_slot == 1:
-                    fix_slots[j] = 2
-                    fix_slot_index = j
-                    break
+            if fix_slots is not None:
+                for j, fixed_slot in enumerate(fix_slots):
+                    if fixed_slot == 1:
+                        fix_slots[j] = 2
+                        fix_slot_index = j
+                        break
+
+            if fix_slots is not None and fix_slot_index == -1:
+                return  -1, -1, -1
 
             if max_idx == -1:
                 max_idx = np.argmax(rates)

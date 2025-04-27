@@ -23,7 +23,7 @@ def bench_seg_attn(max_seg=1, mode='prefill', even=True, online_scale=True):
     device = torch.device('cuda:0')
     dtype = torch.bfloat16
     qo_head = 16
-    kv_head = 16
+    kv_head = 4
     dim = 128
     masks = None
     mask_size = 16
@@ -32,8 +32,8 @@ def bench_seg_attn(max_seg=1, mode='prefill', even=True, online_scale=True):
         bs = 1
         if max_seg == 1:
             if even:
-                qls = [1024]
-                kls = [1024]
+                qls = [2048]
+                kls = [2048]
             else:
                 qls = [1025]
                 kls = [1025]
