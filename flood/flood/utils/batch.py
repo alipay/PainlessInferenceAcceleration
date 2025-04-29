@@ -936,7 +936,7 @@ class Batch:
 
                 if hit is False:
                     raise ValueError("Recycle error! No slot available!")
-            if fix_size_slot_index is not None:
+            if fix_slots is not None and fix_size_slot_index is not None:
                 fix_slots[fix_size_slot_index] = 1 # available
 
     @staticmethod
