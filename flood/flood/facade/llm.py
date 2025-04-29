@@ -199,11 +199,12 @@ class LLM():
         self.kernels = kernels
 
         if 'layer_group_size' in self.conf:
+            assert self.max_concurrency is not None, "max_concurrency must be set for linear model"
             layer_group_size = self.conf['layer_group_size']
             self.fix_size_indices = [i for i in range(self.n_layer) if (i+1)%layer_group_size != 0]
         else:
             self.fix_size_indices = None
-
+            self.max_concurrency = None
         self.tokenizer = self.load_tokenizer(self.model_path)
 
         self.device_list = self.get_device_list(self.n_layer, self.n_stage)
@@ -467,7 +468,11 @@ class LLM():
         slots = Array(Slot,
                       [(0, self.cache_size - 128, 1, 0)] + [(0, 0, 0, 0) for i in
                                                       range(self.slot_count)])
-        fix_slots = Array(c_int,[1 for _ in range(self.max_concurrency)])
+
+        if self.max_concurrency is not None:
+            fix_slots = Array(c_int,[1 for _ in range(self.max_concurrency)]) 
+        else:
+            fix_slots = None
 
         for i in range(self.n_proc):
             process = mp.Process(target=self.schedule,
@@ -1597,6 +1602,7 @@ class LLM():
                  f'n_proc:{self.n_proc} ' \
                  f'cache_size:{self.cache_size} ' \
                  f'slot_count:{self.slot_count} ' \
+                 f'max_concurrency:{self.max_concurrency} ' \
                  f'schedule_mode:{self.schedule_mode} ' \
                  f'chunk_size:{self.chunk_size} ' \
                  f'sync_wait_time:{self.sync_wait_time} ' \

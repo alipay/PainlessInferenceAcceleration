@@ -382,13 +382,13 @@ def sample_random_requests(
                                          size=prefix_len).tolist()
 
     input_lens = np.random.randint(
-        int(input_len * range_ratio),
-        input_len + 1,
+        int(input_len * (1 - range_ratio)),
+        int(input_len * (1 + range_ratio)),
         size=num_prompts,
     )
     output_lens = np.random.randint(
-        int(output_len * range_ratio),
-        output_len + 1,
+        int(output_len * (1 - range_ratio)),
+        int(output_len * (1 + range_ratio)),
         size=num_prompts,
     )
     offsets = np.random.randint(0, tokenizer.vocab_size, size=num_prompts)
