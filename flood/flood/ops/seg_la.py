@@ -39,6 +39,7 @@ def seg_la_kernel(
         SPLIT_DIM: tl.constexpr,
         BLOCK: tl.constexpr,
         EVEN: tl.constexpr,
+        DECOUPLE: tl.constexpr,
         # MASK_SIZE: tl.constexpr,
         # MASK_TYPE: tl.constexpr
 ):  
@@ -99,26 +100,49 @@ def seg_la_kernel(
                             mask=(n + offs_m)[:, None] < q_length, 
                             other=0.0)
 
-            # q = q * softmax_scale.to(q.dtype)
-            qk = tl.dot(q, tl.trans(k)) * softmax_scale
-            # qk = tl.where(offs_m[None,:] <= offs_m[:,None], qk, 0.0)
-            decays = tl.exp(decay_scale*(offs_m[:,None] - offs_m[None,:]))
-            decays = tl.where(offs_m[None,:] <= offs_m[:,None], decays, 0.0)
-            qk *= decays
-            o = tl.dot(qk.to(v.dtype), v) 
+            if DECOUPLE:
+                # only work with small scales
+                if EVEN:
+                    b = BLOCK
+                else:
+                    b = min(BLOCK, q_length - n)
+                b_offs = b-1-offs_m
 
-            decay_arr = tl.exp(decay_scale*(offs_m[:,None]+1)) * softmax_scale
-            o = tl.dot(q*decay_arr.to(q.dtype), state, acc=o)
+                decays = tl.where(b_offs >= 0, tl.exp(decay_scale*b_offs), 0)
+                inv_decays = tl.where(b_offs >= 0, tl.exp(-decay_scale*b_offs), 0)
 
-            if EVEN:
-                b = BLOCK
+                q = q*inv_decays.to(q.dtype)[:,None]
+                k = k*decays.to(k.dtype)[:,None]
+                qk = tl.dot(q, tl.trans(k)) * softmax_scale
+                qk = tl.where(offs_m[None,:] <= offs_m[:,None], qk, 0.0)
+                o = tl.dot(qk.to(v.dtype), v) 
+
+                block_decay_plus = tl.exp(decay_scale*b) * softmax_scale
+                o = tl.dot(q, state)*block_decay_plus + o
+
+                block_decay = tl.exp(decay_scale*b)
+                state = state * block_decay.to(state.dtype) + (tl.dot(tl.trans(k), v)).to(state.dtype)
+
             else:
-                b = min(BLOCK, q_length - n)
-            b_offs = b-1-offs_m
-            b_offs = tl.where(b_offs >= 0, b_offs, 10000)
-            decays = tl.exp(decay_scale*b_offs).to(k.dtype)
-            block_decay = tl.exp(decay_scale*b).to(k.dtype)
-            state = state * block_decay + tl.dot(tl.trans(k*decays[:,None]), v).to(S.dtype.element_ty)
+
+                qk = tl.dot(q, tl.trans(k)) * softmax_scale
+                decays = tl.exp(decay_scale*(offs_m[:,None] - offs_m[None,:]))
+                decays = tl.where(offs_m[None,:] <= offs_m[:,None], decays, 0.0)
+                qk *= decays
+                o = tl.dot(qk.to(v.dtype), v) 
+
+                decay_arr = tl.exp(decay_scale*(offs_m[:,None]+1)) * softmax_scale
+                o = tl.dot(q*decay_arr.to(q.dtype), state, acc=o)
+
+                if EVEN:
+                    b = BLOCK
+                else:
+                    b = min(BLOCK, q_length - n)
+                b_offs = b-1-offs_m
+                b_offs = tl.where(b_offs >= 0, b_offs, 10000)
+                decays = tl.exp(decay_scale*b_offs).to(k.dtype)
+                block_decay = tl.exp(decay_scale*b).to(k.dtype)
+                state = state * block_decay + tl.dot(tl.trans(k*decays[:,None]), v).to(S.dtype.element_ty)
 
             if EVEN:
                 tl.store(out_ptrs + n * stride_o, o)
@@ -141,7 +165,7 @@ def seg_la_kernel(
 
         tl.store(s_ptrs, state)
 
-def seg_la_fwd(q, k, v, s, decay_scales, meta, softmax_scale=None):
+def seg_la_fwd(q, k, v, s, decay_scales, meta, softmax_scale=None, decouple=False):
     _, qo_heads, d = q.shape
     _, kv_heads, _ = k.shape
     batch = meta.batch_size
@@ -159,7 +183,9 @@ def seg_la_fwd(q, k, v, s, decay_scales, meta, softmax_scale=None):
     # NOT support customized MASK currently
     assert meta.mask is None
 
-    BLOCK = 1 if meta.max_q_length == 1 else HEAD_DIM
+    DECOUPLE = decouple
+
+    BLOCK = 1 if meta.max_q_length == 1 else (64 if DECOUPLE else HEAD_DIM)
 
     EVEN = all([x % BLOCK == 0 for x in meta.qls])
 
@@ -177,7 +203,7 @@ def seg_la_fwd(q, k, v, s, decay_scales, meta, softmax_scale=None):
     SPLIT_DIM = 64 if BLOCK == 1 else 32
     num_dim_block = HEAD_DIM // SPLIT_DIM
     num_warps = 8
-    num_stages = 2
+    num_stages = 3 if DECOUPLE else 2
 
     # name='NVIDIA H20', major=9, minor=0, total_memory=97285MB, multi_processor_count=78
     prop = torch.cuda.get_device_properties(0)
@@ -207,6 +233,7 @@ def seg_la_fwd(q, k, v, s, decay_scales, meta, softmax_scale=None):
         SPLIT_DIM=SPLIT_DIM,
         BLOCK=BLOCK,
         EVEN=EVEN,
+        DECOUPLE=DECOUPLE,
         # MASK_SIZE=MASK_SIZE,
         # MASK_TYPE=MASK_TYPE,
         num_warps=num_warps,
