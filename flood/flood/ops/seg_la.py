@@ -177,7 +177,7 @@ def seg_la_fwd(q, k, v, s, decay_scales, meta, softmax_scale=None):
     SPLIT_DIM = 64 if BLOCK == 1 else 32
     num_dim_block = HEAD_DIM // SPLIT_DIM
     num_warps = 8
-    num_stages = 1
+    num_stages = 2
 
     # name='NVIDIA H20', major=9, minor=0, total_memory=97285MB, multi_processor_count=78
     prop = torch.cuda.get_device_properties(0)
