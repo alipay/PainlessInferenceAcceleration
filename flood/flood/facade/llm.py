@@ -20,7 +20,6 @@ import torch
 import torch.multiprocessing as mp
 from safetensors import safe_open
 from transformers import AutoTokenizer
-from torch.profiler import profile, record_function, ProfilerActivity
 from ctypes import Structure, c_int
 
 
@@ -33,9 +32,10 @@ from flood.utils.reader import Reader
 from flood.utils.request import Req, Request
 from flood.models import model_class_map, model_attr_map
 
-random.seed(7)
-os.environ['TOKENIZERS_PARALLELISM'] = 'false'
 
+random.seed(7)
+# bypass warning
+os.environ['TOKENIZERS_PARALLELISM'] = 'false'
 # rename RANK with prefix FLOOD to run within dist docker
 os.environ['FLOOD_WORLD_SIZE'] = '1'
 os.environ['FLOOD_RANK'] = '0'
@@ -1378,7 +1378,7 @@ class LLM():
         for response in self.request_stream_generate(requests, input_queue,
                                              output_queues,
                                              print_count=print_count,
-                                             log_info=log_info):
+                                             print_info=log_info):
             responses.append(response)
         return responses
 
@@ -1513,7 +1513,7 @@ class LLM():
 
     def opt_batch_size(self, value, n_proc):
         bs = value / self.n_proc
-        if bs >= self.batch_size_step * (1 + self.batch_size_round_frac):
+        if bs >= self.batch_size_step:
             bs = int(value / n_proc / self.batch_size_step + self.batch_size_round_frac) * self.batch_size_step
         else:
             bs = 2 ** int(math.log2( max(value/ n_proc, 1)) + 0.999)

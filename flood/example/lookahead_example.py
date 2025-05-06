@@ -27,7 +27,7 @@ if __name__ == '__main__':
 
     # model_path = '/mntnlp/common_base_model/Llama-3.1-8B-Instruct'
     model_path = '/mntnlp/common_base_model/Qwen__Qwen2.5-7B-Instruct'
-    model_path = '/mntnlp/common_base_model/Qwen__Qwen2.5-14B-Instruct'
+    # model_path = '/mntnlp/common_base_model/Qwen__Qwen2.5-14B-Instruct'
     # model_path = '/mntnlp/nanxiao/model'
     # model_path = '/mntnlp/nanxiao/deepseekv3'
     # model_path = '/agent/nanxiao/models/Qwen2.5-32B-Instruct'
@@ -96,7 +96,7 @@ if __name__ == '__main__':
                                                             output_queues,
                                                             print_param=False,
                                                             print_count=0)):
-                    print(f'{i}-{j}')
+                    # print(f'{i}-{j}')
                     tokens += len(req.output_ids)
                     # print(f'prompt-{i}: ', req.input_text)
                     # print(f'answer-{i}: ', req.output_text)

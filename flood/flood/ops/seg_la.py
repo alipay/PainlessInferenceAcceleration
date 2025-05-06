@@ -155,9 +155,7 @@ def seg_la_kernel(
         q = tl.load(q_ptrs)
         k = tl.load(k_ptrs)
         v = tl.load(v_ptrs)
-        # state = state * tl.exp(decay_scale) + (tl.trans(k) * v)
-        state *= tl.exp(decay_scale)
-        state += tl.trans(k) * v
+        state = state * tl.exp(decay_scale).to(state.dtype) + tl.trans(k) * v
 
         o = tl.sum(tl.trans(q) * state, axis=0, keep_dims=True) * softmax_scale.to(q.dtype)
 
