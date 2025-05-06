@@ -23,9 +23,6 @@ if __name__ == '__main__':
                  schedule_mode='timely',
                  eos_token_id=None,
                  debug=False,
-                 output_file_name='tmp.jsonl',
-                 output_file_mode='w+',
-                 output_field_names=('output_text',),
                  logger='stream.log')
 
     # start process
