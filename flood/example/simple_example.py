@@ -31,16 +31,9 @@ if __name__ == '__main__':
     # model_path = '/agent/nanxiao/models/Qwen2.5-32B-Instruct'
     model_path = '/agent/jingyue/moe_lite_linear/v3_convert'
 
-    # do not apply template
-    # reqs = [
-    #         Request(0, input_text='<|im_start|>system\nYou are Qwen, created by Alibaba Cloud. You are a helpful assistant.<|im_end|>\n<|im_start|>user\nConsider a sequence of real numbers \( a_1, a_2, a_3, \ldots \) defined as follows:\n \( a_1 = 1 \)\n For \( n \geq 1 \), \( a_{n+1} = \frac{a_n + 2}{a_n + 1} \).\nDetermine the value of \( a_{2024} \).<|im_end|>\n<|im_start|>assistant\n', output_length=2048),
-    #         Request(1, input_text='<|im_start|>system\nYou are Qwen, created by Alibaba Cloud. You are a helpful assistant.<|im_end|>\n<|im_start|>user\nConsider the polynomial \( P(x, y) = x^4 + y^4 - 2x^2y^2 \). Let \( S \) be the set of points \( (x, y) \) where \( x \) and \( y \) are integers in the range \( -10 \leq x, y \leq 10 \) such that \( P(x, y) = 0 \). Determine the number of elements in the set \( S \).<|im_end|>\n<|im_start|>assistant\n', output_length=2048)
-    #         ]
-    # apply template
 
     tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
     
-    # prompts = ['Consider a sequence of real numbers \( a_1, a_2, a_3, \ldots \) defined as follows: \( a_1 = 1 \)\n For \( n \geq 1 \), \( a_{n+1} = \\frac{a_n + 2}{a_n + 1} \).\nDetermine the value of \( a_{2024} \)']
     prompts = ['杭州在哪里']
     reqs = []
     for i, prompt in enumerate(prompts):
@@ -59,7 +52,7 @@ if __name__ == '__main__':
     worker = LLM(model_path,
                  n_stage=1,  # gpus
                  n_proc=1,
-                 chunk_size=4096,
+                 chunk_size=1024,
                 #  model_dtype=torch.float8_e4m3fn,
                  max_concurrency=1024,
                  cache_size=16000,
@@ -68,7 +61,6 @@ if __name__ == '__main__':
                  eos_token_id=None,
                  debug=True,
                  kernels=('sa',),
-                #  spec_algo = 'lookahead',
                  logger='example.log')
 
     # start process
