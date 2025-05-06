@@ -26,61 +26,60 @@ def deprecated_update_draft_table_kernel(
     bid = tl.program_id(0)
     indices = tl.arange(0, BRANCH_LENGTH)
     for i in range(BLOCK):
-        if bid * BLOCK + i + 4 <= token_count:
-            p0 = tl.load(tokens + bid * BLOCK + i, mask = bid * BLOCK + i < token_count, other=0)
-            p1 = tl.load(tokens + bid * BLOCK + i + 1, mask = bid * BLOCK + i + 1 < token_count, other=0)
-            uid = p0.to(tl.int64) * vocab + p1
-            bucket_idx = uid % (SIZE - BRANCH_COUNT)
-            branch = tl.load(tokens + bid * BLOCK + 2 + i + indices, 
-                             mask=bid * BLOCK + 2 + i + indices < token_count, 
-                             other=0)
-            branch_uid = tl.sum(branch)
-            hit = False
+        p0 = tl.load(tokens + bid * BLOCK + i, mask = bid * BLOCK + i < token_count, other=0)
+        p1 = tl.load(tokens + bid * BLOCK + i + 1, mask = bid * BLOCK + i + 1 < token_count, other=0)
+        uid = p0.to(tl.int64) * vocab + p1
+        bucket_idx = uid % (SIZE - BRANCH_COUNT)
+        branch = tl.load(tokens + bid * BLOCK + 2 + i + indices, 
+                            mask=bid * BLOCK + 2 + i + indices < token_count, 
+                            other=0)
+        branch_uid = tl.sum(branch)
+        hit = False
 
-            # if bid==0:
-            #     if i==0:
-            #         tl.device_print('uid',uid)
-            #         tl.device_print('SIZE',SIZE)
-            #         tl.device_print('bucket_idx',bucket_idx)
-            #         # tl.device_print('branch',branch)
+        # if bid==0:
+        #     if i==0:
+        #         tl.device_print('uid',uid)
+        #         tl.device_print('SIZE',SIZE)
+        #         tl.device_print('bucket_idx',bucket_idx)
+        #         # tl.device_print('branch',branch)
 
+        for j in range(BRANCH_COUNT):
+            if not hit:
+                draft_branch = tl.load(
+                    draft_table + (bucket_idx + j) * stride + indices)
+                draft_branch_uid = tl.sum(draft_branch)
+                freq = tl.load(freq_table + bucket_idx + j)
+
+                # if bid==0:
+                #     if i==0:
+                #         if j == 0:
+                #             tl.device_print('freq',freq)
+                #             # tl.device_print('draft_branch_uid',draft_branch_uid)
+
+                if branch_uid == draft_branch_uid:
+                    tl.store(freq_table + bucket_idx + j, freq + 1.0)
+                    hit = True
+                elif freq == 0:
+                    tl.store(
+                        draft_table + (bucket_idx + j) * stride + indices,
+                        branch)
+                    tl.store(freq_table + bucket_idx + j, 1.0)
+                    hit = True
+
+        if not hit:
             for j in range(BRANCH_COUNT):
-                if not hit:
-                    draft_branch = tl.load(
-                        draft_table + (bucket_idx + j) * stride + indices)
-                    draft_branch_uid = tl.sum(draft_branch)
-                    freq = tl.load(freq_table + bucket_idx + j)
+                freq = tl.load(freq_table + bucket_idx + j)
+                freq = freq / 2
 
-                    # if bid==0:
-                    #     if i==0:
-                    #         if j == 0:
-                    #             tl.device_print('freq',freq)
-                    #             # tl.device_print('draft_branch_uid',draft_branch_uid)
-
-                    if branch_uid == draft_branch_uid:
-                        tl.store(freq_table + bucket_idx + j, freq + 1.0)
-                        hit = True
-                    elif freq == 0:
-                        tl.store(
-                            draft_table + (bucket_idx + j) * stride + indices,
-                            branch)
+                if freq < 1:
+                    if not hit:
+                        tl.store(draft_table + (
+                                    bucket_idx + j) * stride + indices,
+                                    branch)
                         tl.store(freq_table + bucket_idx + j, 1.0)
                         hit = True
-
-            if not hit:
-                for j in range(BRANCH_COUNT):
-                    freq = tl.load(freq_table + bucket_idx + j)
-                    freq = freq / 2
-
-                    if freq < 1:
-                        if not hit:
-                            tl.store(draft_table + (
-                                        bucket_idx + j) * stride + indices,
-                                     branch)
-                            tl.store(freq_table + bucket_idx + j, 1.0)
-                            hit = True
-                    else:
-                        tl.store(freq_table + bucket_idx + j, freq)
+                else:
+                    tl.store(freq_table + bucket_idx + j, freq)
 
 
 @triton.jit

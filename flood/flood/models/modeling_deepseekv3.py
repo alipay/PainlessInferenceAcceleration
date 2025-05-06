@@ -166,8 +166,7 @@ class MoEGate(torch.nn.Module):
         )
         scores = logits.sigmoid()
 
-
-    ### select top-k experts
+        ### select top-k experts
         scores_for_choice = scores.view(num_tokens, -1) + self.e_score_correction_bias.unsqueeze(0)
         group_scores = (
             scores_for_choice.view(num_tokens, self.n_group, -1).topk(2, dim=-1)[0].sum(dim = -1)
@@ -400,6 +399,7 @@ class DeepseekV3DecoderLayer(torch.nn.Module):
         super().__init__()
         self.hidden_size = config.hidden_size
         self.layer_idx = layer_idx
+        self.n_layer = config.num_hidden_layers
 
         # use layer_idx==None to indicate that the layer does not 
         # initialized on the current node, and use layer_idx==-1
@@ -436,7 +436,7 @@ class DeepseekV3DecoderLayer(torch.nn.Module):
 
         hidden_states += residual
 
-        if self.layer_idx == -1 and batch_meta_info.logit_indices is not None:
+        if self.layer_idx == self.n_layer - 1 and batch_meta_info.logit_indices is not None:
             if batch_meta_info.logit_indices.numel() == 0:
                 return
             hidden_states = hidden_states[batch_meta_info.logit_indices]
@@ -477,7 +477,6 @@ class DeepseekV3Model(PreTrainedModel):
         local_size = n_layer // world_size
         for i in range(n_layer):
             layer_idx = i if i // local_size == rank else None
-            layer_idx = -1 if layer_idx == n_layer - 1 and rank == world_size - 1 else layer_idx
             layers.append(DeepseekV3DecoderLayer(config, layer_idx=layer_idx))
         self.layers = torch.nn.ModuleList(layers)
 
