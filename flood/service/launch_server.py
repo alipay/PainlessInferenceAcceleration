@@ -10,7 +10,7 @@ import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.responses import StreamingResponse
 
-from flood.common.llm import LLM
+from flood.facade.llm import LLM
 from flood.utils.request import Request as FloodRequest
 
 app = FastAPI()
@@ -50,11 +50,10 @@ if __name__ == '__main__':
 
     model_path = '/mntnlp/common_base_model/Qwen__Qwen2.5-7B-Instruct'
 
-    pred_path = 'tmp.jsonl'
 
-    n_stage = 8
-    n_proc = 8
-    eos_token_id = ()
+    n_stage = 1
+    n_proc = 1
+    eos_token_id = None
     worker = LLM(model_path,
                  #  model_dtype=torch.float8_e4m3fn,
                  #  head_dtype=torch.float8_e4m3fn,
@@ -62,22 +61,24 @@ if __name__ == '__main__':
                  #  cache_dtype=torch.float8_e4m3fn,
                  n_stage=n_stage,
                  n_proc=n_proc,
-                 cache_size=0.7,
-                 slot_size=8,
+                 cache_size=None,
+                 slot_count=256,
                  schedule_mode='timely',
-                 max_prefill_token=2048,
+                 chunk_size=1024,
                  sync_wait_time=(4.0, 4.0),
                  queue_timeout=0.0005,
                  max_slot_alloc_fail_count=1,
                  alloc_early_exit_rate=0.95,
-                 slot_rate=1.0,
                  min_batch_size=32,
                  max_batch_size=256,
-                 batch_size_step=None,
+                 batch_size_step=128,
                  batch_size_round_frac=1.0,  # 0.585
                  min_decode_rate=0.97,  # 0.97
                  eos_token_id=eos_token_id,
-                 layer_name='model.layers',
+                 kernels=('sa',),
+                 spec_algo = 'lookahead',
+                 spec_branch_length=8,
+                 max_spec_branch_count=8,
                  logger='server.log',
                  debug=True)
 

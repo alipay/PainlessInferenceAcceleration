@@ -16,6 +16,7 @@ from multiprocessing.sharedctypes import Array
 from typing import List, Optional, Tuple, Union
 import itertools
 
+from numpy import amax
 import torch
 import torch.multiprocessing as mp
 from safetensors import safe_open
@@ -660,7 +661,7 @@ class LLM():
                     fully_alloc_under = sorted(output_lengths)[int(0.9*len(output_lengths))]
 
                 batch = Batch.prefill_batching(reqs, slots,
-                                               fix_slots,
+                                               fix_slots=fix_slots,
                                                device=input_device,
                                                min_rate=self.alloc_early_exit_rate,
                                                fully_alloc_under=fully_alloc_under,
@@ -809,15 +810,15 @@ class LLM():
 
                     if req.target_ids is None:
                         
-                        if len(req.output_ids) >= req.output_length or \
-                            any([x in self.eos_token_id for x in req.output_ids[-self.spec_branch_length-1:]]):
+                        # remove token_ids after eos
+                        if task_type == 'spec':
+                            for j in range(max(-self.spec_branch_length-1,-len(req.output_ids)),-1):
+                                if req.output_ids[j] in self.eos_token_id:
+                                    req.output_ids = req.output_ids[:j+1]
+                                    break
 
-                            if task_type == 'spec':
-                                output_ids = req.output_ids
-                                for j in range(max(-self.spec_branch_length-1,-len(output_ids)),-1):
-                                    if output_ids[j] in self.eos_token_id:
-                                        req.output_ids = output_ids[:j+1]
-                                        break
+                        if len(req.output_ids) >= req.output_length or \
+                            req.output_ids[-1] in self.eos_token_id:
 
                             output_queue.put(req)
                             input_lengths.append(req.input_length)
@@ -1098,17 +1099,27 @@ class LLM():
 
 
     def timely_schedule(self, input_queue, chunk_quene, working_queue,
-                        output_queues, tasks, slots, counts, state,
+                        output_queues, tasks, slots, fix_slots, counts, state,
                         allocate_fail_count, fail_sample_count,
                         gbs, task_id):
+        """
+        NOT support features:
+        1. multi-modal models
+        2. PPL evaluation
+        3. slot extending 
+        NEW features:
+        1. subbatch scheduling
+        """
         print(
             f"timely_schedule task:{task_id} pid:{os.getpid()}"
             f" ts:{time.time() % 1000:.3f}")
         sync_layers = self.get_sync_layers(tasks, self.device_list)
         device_list = self.device_list
+        batching_stream = torch.cuda.Stream(device=0)
         streams = [torch.cuda.Stream(device=idx) for idx in range(self.n_stage)]
         queue_timeout = self.queue_timeout
         chunk_size = self.chunk_size
+        fully_alloc_under = self.slot_fully_alloc_under
 
         fails = []
         chunks = []
@@ -1121,16 +1132,18 @@ class LLM():
 
             # both empty, wait
             input_empty = (input_queue.empty() and
-                           fail_sample_count.value == 10 ** self.n_proc)
-            working_empty = working_queue.empty() and len(waits) == 0
+                           fail_sample_count.value == 10 ** self.n_proc and 
+                           len(chunks) == 0) 
+            working_empty = working_queue.empty() and len(waits) == 0 and counts.value == 0
             if input_empty and working_empty:
                 time.sleep(0.001)
                 temp_step = 1
                 continue
-            # chunk_size = max(self.chunk_size-256*temp_step, 512)
             temp_step += 1
             task_type = None
             ts = time.time()
+
+            hungry = counts.value <= self.n_proc * self.min_batch_size
 
             step += 1
             prefill_gap_time = ts - pts
@@ -1203,6 +1216,11 @@ class LLM():
                                                   timeout=queue_timeout)
                         except:
                             break
+
+                        # may be subbatch
+                        if req.done == 0 and self.spec_algo == 'lookahead' and hungry:
+                            self.spec.update_state(req.input_ids)
+
                         # may be subbatch
                         n_token = req.input_length - req.done
                         if n_tokens + n_token <= chunk_size:
@@ -1224,10 +1242,13 @@ class LLM():
                     time.sleep(0.001)
                     continue
 
-                batch = Batch.prefill_batching(reqs, slots, device=input_device,
+                batch = Batch.prefill_batching(reqs, 
+                                               slots, 
+                                               device=input_device,
                                                min_rate=self.alloc_early_exit_rate,
                                                fully_alloc_under=self.slot_fully_alloc_under,
-                                               cache_size=self.cache_size)
+                                               cache_size=self.cache_size,
+                                               buffer_size=self.spec_buf)
 
                 if batch.batch_size > 0:
                     task_type = 'prefill'
@@ -1275,16 +1296,28 @@ class LLM():
                 update_waits = []
                 for req in waits:
                     if len(reqs) < min(dbs, 16):
-                        assert req.input_length + len(req.output_ids) >= \
-                               req.segs[1] - req.segs[0]
-                        slot_size = ((req.input_length + req.output_length - 1) // 16 + 1) * 16
-                        extend_length = slot_size - (
-                                req.segs[-1][1] - req.segs[-1][0])
-                        segs = Batch.extend_slot(slots, req.segs, extend_length)
+                        size_of_segs = req.size_of_segs()
+                        assert req.input_length + len(req.output_ids) >= size_of_segs + 1
+                        slot_size = req.input_length + req.output_length + self.spec_buf
+                        extend_length = min(slot_size - size_of_segs, self.max_extend_size)
+                        slot_size = ((extend_length - 1) // 128 + 1) * 128
+                        segs = Batch.extend_slot(slots, 
+                                                 req.segs, 
+                                                 extend_length,
+                                                 contiguous='sa' not in self.kernels)
                         if segs is not None:
                             req.segs = segs
                             reqs.append(req)
                         else:
+                            if 'sa' in self.kernels:  # no segment avaible
+                                allocate_fail_count.value += 1
+
+                                if allocate_fail_count.value >= self.max_slot_alloc_fail_count:
+                                    gbs.value = self.opt_batch_size(counts.value//2, self.n_proc)
+                                    state.value = min(
+                                        int(self.min_decode_rate * counts.value),
+                                        gbs.value * self.n_proc)
+                                    allocate_fail_count.value = 0
                             update_waits.append(req)
                     else:
                         update_waits.insert(0, req)
@@ -1304,14 +1337,30 @@ class LLM():
                     time.sleep(0.001)
                     continue
 
-                batch = Batch.decoding_batching(reqs, device=input_device)
-                task_type = 'decode'
+                if self.spec_algo == 'lookahead' and hungry:
+                    min_buf = min([x.size_of_segs() - x.input_length - len(x.output_ids) for x in reqs])
+                    if min_buf >= self.spec_branch_length:
+                        max_retrieve_count = min(min_buf//self.spec_branch_length, self.max_spec_branch_count)
+                        retrieve_count = min(max(64*self.n_proc//max(self.spec_branch_length*counts.value,1), 1), max_retrieve_count)
+                        with torch.cuda.stream(batching_stream):
+                            batch = Batch.lookahead_batching(reqs,
+                                                            self.spec,
+                                                            device=input_device,
+                                                            retrieve_count=retrieve_count)
+                            batching_stream.synchronize()
+                        task_type = 'spec'
+                    else:
+                        batch = Batch.decoding_batching(reqs, device=input_device)
+                        task_type = 'decode'  
+                else:
+                    batch = Batch.decoding_batching(reqs, device=input_device)
+                    task_type = 'decode'
 
             te = time.time()
             batching_time = te - ts
 
             ts = te
-            next_token_id_list = self.model.forward(input_ids=batch.input_ids,
+            self.model.forward(input_ids=batch.input_ids,
                                                     position_ids=None,
                                                     past_key_values=self.cache,
                                                     batch_meta_info=batch,
@@ -1323,8 +1372,7 @@ class LLM():
             forward_time = te - ts
             ts = te
 
-            for i, next_token_id in enumerate(next_token_id_list):
-                req = reqs[i]
+            for i, req in enumerate(batch.reqs):
                 if req.todo > 0 and req.done + req.todo < req.input_length:
                     assert req.task_type == 2
                     # req.done += req.todo
@@ -1332,20 +1380,31 @@ class LLM():
                     # chunks.append(req)
                     pass  # subbatch req should be discard
                 else:
-                    req.output_ids.append(next_token_id)
                     # reduce pickle cost
                     if task_type == 'prefill':
                         req.input_ids = []
 
+                    # remove token_ids after eos
+                    if task_type == 'spec':
+                        for j in range(max(-self.spec_branch_length-1,-len(req.output_ids)),-1):
+                            if req.output_ids[j] in self.eos_token_id:
+                                req.output_ids = req.output_ids[:j+1]
+                                break
+
                     if (len(req.output_ids) >= req.output_length
-                            or next_token_id in self.eos_token_id):
+                            or req.output_ids[-1] in self.eos_token_id ):
+                        
                         req.output_ids.append(
-                            None)  # TODO: MUST USE NONE WITH stream MODE
+                            None)  # NOTE: MUST USE NONE WITH stream MODE
                         output_queues[req.output_index].queue.put(req)
-                        Batch.recycle(slots, req.segs)
+
+                        Batch.recycle(slots, req.segs, fix_slots=fix_slots, fix_size_slot_index=req.fix_size_slot_index)
+                        if self.spec_algo == 'lookahead':
+                            self.spec.update_state(req.output_ids[:-1])  # the last one is None
                         counts.value -= 1
-                    elif req.input_length + len(req.output_ids) >= req.segs[1] - \
-                            req.segs[0]:
+
+
+                    elif req.input_length + len(req.output_ids) >= req.size_of_segs():
                         waits.append(req)
                     else:
                         if (len(req.output_ids) - 1) % 10 == 0:
@@ -1538,7 +1597,50 @@ class LLM():
         print(
             f'pid:{os.getpid()} tokenize:{te - ts:.3f}s ts:{time.time() % 1000:.3f}')
 
-    async def async_stream_generate(self, request: Request, input_queue,
+
+
+    def stream_generate(self, 
+                                    request: Request, 
+                                    input_queue,
+                                    output_queues):
+
+        tokenizer = self.tokenizer
+
+        input_ids = tokenizer(request.input_text)['input_ids']
+        request.input_ids = input_ids
+        output_length = request.output_length
+        input_length = len(input_ids)
+        request.input_length = input_length
+
+        req = Req(request.rid, input_ids=input_ids, input_length=input_length,
+                  output_length=output_length, stream=True,
+                  output_index=request.output_index)
+
+        input_queue.put(req)
+
+        cursor = 0
+        while True:
+            try:
+                req = output_queues[request.output_index].queue.get(block=False)
+            except:
+                time.sleep(0.001)
+                continue
+            output_ids = req.output_ids[cursor:]
+            finished = True if output_ids[-1] is None else False
+            if finished:
+                output_ids = output_ids[:-1]
+            if output_ids[-1] in self.eos_token_id:
+                output_ids = output_ids[:-1]
+            output_text = tokenizer.decode(output_ids)
+            yield {"text": output_text, "token_count": len(output_ids)}
+            if finished:
+                break
+            cursor += len(output_ids)
+
+
+    async def async_stream_generate(self, 
+                                    request: Request, 
+                                    input_queue,
                                     output_queue):
 
         tokenizer = self.tokenizer
@@ -1560,7 +1662,7 @@ class LLM():
             try:
                 req = output_queue.get(block=False)
             except:
-                await asyncio.sleep(0.01)
+                await asyncio.sleep(0.001)
                 continue
             output_ids = req.output_ids[cursor:]
             finished = True if output_ids[-1] is None else False

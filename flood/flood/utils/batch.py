@@ -171,7 +171,7 @@ class Batch:
     @staticmethod
     def prefill_batching(reqs,
                          slots,
-                         fix_slots,
+                         fix_slots=None,
                          device=torch.device(0),
                          cache_size=None,
                          buffer_size=0,
