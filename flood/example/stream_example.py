@@ -8,7 +8,7 @@ import random
 import torch.multiprocessing as mp
 
 from flood.facade.llm import LLM
-from flood.utils.request import Request as FloodRequest
+from flood.utils.request import Request
 
 random.seed(7)
 
@@ -22,6 +22,10 @@ if __name__ == '__main__':
                  n_proc=1,
                  schedule_mode='timely',
                  eos_token_id=None,
+                 kernels=('sa',),
+                 spec_algo = 'lookahead',
+                 spec_branch_length=8,
+                 max_spec_branch_count=8,
                  debug=False,
                  logger='stream.log')
 
@@ -29,6 +33,6 @@ if __name__ == '__main__':
     input_queue, chunk_queue, working_queue, output_queues = worker.initialize()
     worker.launch(input_queue, chunk_queue, working_queue, output_queues)
 
-    request = FloodRequest('rid', input_text='hi!', output_length=1000)
-    for seg in worker.async_stream_generate(request, input_queue, output_queues):
+    request = Request('rid', input_text='hi!', output_length=200)
+    for seg in worker.stream_generate(request, input_queue, output_queues):
         print(seg, end='', flush=True)
