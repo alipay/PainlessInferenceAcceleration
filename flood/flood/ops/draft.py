@@ -173,8 +173,9 @@ def update_draft_table(tokens,
         num_stages=1
     )
 
+
 @triton.jit
-def retrieve_draft_table_kernel(
+def deprecated_retrieve_draft_table_kernel(
         output_tokens,
         tokens,
         freq_table,
@@ -233,6 +234,67 @@ def retrieve_draft_table_kernel(
                     output_tokens + bid * (l + 1) + 1 + idx * BRANCH_LENGTH + indices,
                     draft_branch)
                 idx += 1
+
+
+@triton.jit
+def retrieve_draft_table_kernel(
+        output_tokens,
+        tokens,
+        freq_table,
+        draft_table,
+        stride,
+        vocab,
+        BRANCH_COUNT: tl.constexpr,
+        BRANCH_LENGTH: tl.constexpr,
+        RETRIEVE_COUNT: tl.constexpr,
+        SIZE: tl.constexpr
+):
+    bid = tl.program_id(0)
+    indices = tl.arange(0, BRANCH_LENGTH)
+
+    p0 = tl.load(tokens + bid * 2)
+    p1 = tl.load(tokens + bid * 2 + 1)
+    uid = p0.to(tl.int64) * vocab + p1
+    bucket_idx = uid % (SIZE - BRANCH_COUNT)
+    
+    hit = False
+    max_retry = 8
+    bucket_ptr = freq_table + bucket_idx
+    draft_base = draft_table + (bucket_idx + indices) * stride
+    output_base = output_tokens + bid * (RETRIEVE_COUNT * BRANCH_LENGTH + 1) + 1
+
+    for i in range(max_retry):
+        if not hit:
+            threshold = tl.exp2(1.0 * max_retry - 1.0 * i - 2)  # [64, 0.5]
+            freqs = tl.load(bucket_ptr + indices)
+            valid = freqs >= threshold
+            
+            cumsum = tl.cumsum(valid, axis=0)
+            selected = valid & (cumsum <= RETRIEVE_COUNT)
+            hit_count = tl.sum(selected)
+            
+            if hit_count >= RETRIEVE_COUNT:
+                pos_mask = selected[:, None] & (tl.arange(0, BRANCH_LENGTH)[None, :] < BRANCH_LENGTH)
+                pos_idx = (cumsum - 1)[:, None] * BRANCH_LENGTH + tl.arange(0, BRANCH_LENGTH)[None, :]
+                draft_data = tl.load(draft_base[:, None] + tl.arange(0, BRANCH_LENGTH)[None, :], 
+                                   mask=pos_mask, other=0)
+                tl.store(output_base + pos_idx, draft_data, mask=pos_mask)
+                
+                hit = True
+    
+    if not hit: # fallback
+        freqs = tl.load(bucket_ptr + indices)
+        valid = freqs >= 0.5
+        cumsum = tl.cumsum(valid, axis=0)
+        selected = valid & (cumsum <= RETRIEVE_COUNT)
+        
+        pos_mask = selected[:, None] & (tl.arange(0, BRANCH_LENGTH)[None, :] < BRANCH_LENGTH)
+        pos_idx = (cumsum - 1)[:, None] * BRANCH_LENGTH + tl.arange(0, BRANCH_LENGTH)[None, :]
+        draft_data = tl.load(draft_base[:, None] + tl.arange(0, BRANCH_LENGTH)[None, :], 
+                          mask=pos_mask, other=0)
+        tl.store(output_base + pos_idx, draft_data, mask=pos_mask)
+    
+    tl.store(output_tokens + bid * (RETRIEVE_COUNT * BRANCH_LENGTH + 1), p1)
 
 
 def retrieve_draft_table(tokens, 
