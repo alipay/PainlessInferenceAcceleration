@@ -1407,7 +1407,7 @@ class LLM():
                     elif req.input_length + len(req.output_ids) >= req.size_of_segs():
                         waits.append(req)
                     else:
-                        if (len(req.output_ids) - 1) % 10 == 0:
+                        if self.spec_algo is not None or (len(req.output_ids) - 1) % 10 == 0:
                             output_queues[req.output_index].queue.put(req)
                         working_queue.put(req)
 
