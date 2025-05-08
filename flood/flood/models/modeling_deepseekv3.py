@@ -54,8 +54,8 @@ class DeepseekV3MLP(torch.nn.Module):
                                                     name='down_proj')
 
     def flood_patch_func(self, kwargs=None):
-        if self.layer_idx == 0:
-            print('patch MLP')
+        # if self.layer_idx == 0:
+        #     print('patch MLP')
 
         self.gate_up_proj = self.gate_proj.merge([self.gate_proj, self.up_proj])
         self.down_proj.patch()
@@ -150,12 +150,6 @@ class MoEGate(torch.nn.Module):
         self.e_score_correction_bias = torch.nn.Parameter(
                 torch.empty((self.n_routed_experts))
             )
-        self.reset_parameters()
-
-    def reset_parameters(self) -> None:
-        import torch.nn.init as init
-
-        init.kaiming_uniform_(self.weight, a=math.sqrt(5))
 
     def forward(self, hidden_states):
         num_tokens, h = hidden_states.shape
@@ -212,8 +206,8 @@ class DeepseekV3MoE(torch.nn.Module):
         self.ep_size = 1
         self.experts_per_rank = config.n_routed_experts
         self.ep_rank = 0
-        self.experts = torch.nn.ModuleList(
-            [
+        self.experts = torch.nn.Sequential(
+            *[
                 DeepseekV3MLP(
                     config, intermediate_size=config.moe_intermediate_size
                 )
@@ -461,10 +455,10 @@ class DeepseekV3Model(PreTrainedModel):
         self.padding_idx = config.pad_token_id
         self.vocab_size = config.vocab_size
 
-        rank = int(os.environ.get('RANK', '0'))
-        world_size = int(os.environ.get('WORLD_SIZE', '1'))
+        self.rank = int(os.environ.get('FLOOD_RANK', '0'))
+        self.world_size = int(os.environ.get('FLOOD_WORLD_SIZE', '1'))
 
-        if rank == 0:
+        if self.rank == 0:
             self.embed_tokens = AutoEmbedding.from_pretrained(config, 
                                                                 config.vocab_size, 
                                                                 config.hidden_size, 
@@ -474,9 +468,9 @@ class DeepseekV3Model(PreTrainedModel):
 
         n_layer = config.num_hidden_layers
         layers = []
-        local_size = n_layer // world_size
+        local_size = n_layer // self.world_size
         for i in range(n_layer):
-            layer_idx = i if i // local_size == rank else None
+            layer_idx = i if i // local_size == self.rank else None
             layers.append(DeepseekV3DecoderLayer(config, layer_idx=layer_idx))
         self.layers = torch.nn.ModuleList(layers)
 
