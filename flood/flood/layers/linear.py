@@ -90,7 +90,7 @@ class AutoLinear():
                                         bias=bias,
                                         device=device,
                                         input_scale=input_scale,
-                                        weight_scale=weight_scale,
+                                        weight_scale_inv=weight_scale,
                                         weight_dtype=weight_dtype,
                                         bias_dtype=bias_dtype,
                                         config=config)
@@ -105,7 +105,10 @@ class AutoLinear():
 
         # hack for deepseek_v3
         if config.model_type == 'deepseek_v3':
-            return 'tb_fp8'
+            if layer_name == 'lm_head':
+                return None
+            else:
+                return 'tb_fp8'
 
         conf = config
         if hasattr(config, '_asdict'):
@@ -766,7 +769,7 @@ class DynamicTbW8A8Fp8Linear(torch.nn.Module):
                  bias=None,
                  dtype=None,
                  input_scale=None,
-                 weight_scale=None,
+                 weight_scale_inv=None,
                  device=None,
                  weight_dtype=None,
                  bias_dtype=None,
@@ -777,7 +780,7 @@ class DynamicTbW8A8Fp8Linear(torch.nn.Module):
         self.weight = weight
         self.bias = bias
         self.input_scale = input_scale
-        self.weight_scale = weight_scale
+        self.weight_scale_inv = weight_scale_inv
         self.device = device
         self.weight_dtype = torch.float8_e4m3fn
         self.bias_dtype = bias_dtype or dtype
@@ -801,19 +804,19 @@ class DynamicTbW8A8Fp8Linear(torch.nn.Module):
             data = torch.empty(out_features, dtype=self.bias_dtype)
             self.bias = Parameter(data, requires_grad=False)
 
-        assert weight_scale is None or isinstance(weight_scale, Parameter)
-        if weight_scale is None:
+        assert weight_scale_inv is None or isinstance(weight_scale_inv, Parameter)
+        if weight_scale_inv is None:
             block_size = 128
-            weight_scale = Parameter(torch.empty(( (out_features-1)//block_size + 1, (in_features-1)//block_size + 1), dtype=torch.float32),
+            weight_scale_inv = Parameter(torch.empty(( (out_features-1)//block_size + 1, (in_features-1)//block_size + 1), dtype=torch.float32),
                                      requires_grad=False)
 
-        self.weight_scale = weight_scale
+        self.weight_scale_inv = weight_scale_inv
 
 
     def forward(self, x):
         x_q, x_scale = tile_quant(x)
 
-        output = fp8_tb_gemm(x_q, x_scale, self.weight, self.weight_scale, x.dtype)
+        output = fp8_tb_gemm(x_q, x_scale, self.weight, self.weight_scale_inv, x.dtype)
         if self.bias is not None:
             output += self.bias
         return output
@@ -836,7 +839,7 @@ class DynamicTbW8A8Fp8Linear(torch.nn.Module):
             device = weight.device
             weights.append(weight.view(torch.int8))
             biases.append(None if linear.bias is None else linear.bias.data)
-            scales.append(linear.weight_scale.data)
+            scales.append(linear.weight_scale_inv.data)
 
         assert min(in_features) == max(in_features)
 
@@ -853,7 +856,7 @@ class DynamicTbW8A8Fp8Linear(torch.nn.Module):
                                     out_features,
                                     weight=weight,
                                     bias=bias,
-                                    weight_scale=scale,
+                                    weight_scale_inv=scale,
                                     device=device,
                                     weight_dtype=None,
                                     bias_dtype=None,

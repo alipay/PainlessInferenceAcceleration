@@ -5,7 +5,7 @@ Copyright (c) Ant Financial Service Group and its affiliates.
 
 import os
 
-os.environ['TOKENIZERS_PARALLELISM'] = 'false'
+# os.environ['TOKENIZERS_PARALLELISM'] = 'false'
 # os.environ['CUDA_LAUNCH_BLOCKING']='1'
 
 import random
@@ -29,9 +29,7 @@ if __name__ == '__main__':
     # model_path = '/mntnlp/nanxiao/model'
     # model_path = '/mntnlp/nanxiao/deepseekv3'
     # model_path = '/agent/nanxiao/models/Qwen2.5-32B-Instruct'
-    model_path = '/agent/jingyue/moe_lite_linear/v3_convert'
-
-
+    model_path = '/mnt/nas_acr89/jingyue/deepseekv3'
     tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
     
     prompts = ['杭州在哪里']
@@ -50,8 +48,8 @@ if __name__ == '__main__':
 
 
     worker = LLM(model_path,
-                 n_stage=1,  # gpus
-                 n_proc=1,
+                 n_stage=2,  # gpus
+                 n_proc=3,
                  chunk_size=1024,
                 #  model_dtype=torch.float8_e4m3fn,
                  max_concurrency=1024,
@@ -60,7 +58,8 @@ if __name__ == '__main__':
                  tune_alloc_size=False,
                  eos_token_id=None,
                  debug=True,
-                 kernels=('sa',),
+                 kernels=('mla',),
+                #  spec_algo = 'lookahead',
                  logger='example.log')
 
     # start process
