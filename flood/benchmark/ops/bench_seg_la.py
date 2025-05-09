@@ -3,10 +3,13 @@ import random
 import math 
 import torch 
 from flood.utils.benchmark import benchmark_func
+from flood.utils.benchmark import *
 
 from flood.ops.seg_la import seg_la_fwd
 
 from fla.ops.simple_gla import chunk_simple_gla
+from fla.ops.simple_gla.fused_recurrent import fused_recurrent_simple_gla
+
 
 class Meta:
     def __init__(self) -> None:
@@ -150,8 +153,8 @@ def get_seg_attn_meta(qls, kls, mask=None):
 def test_seg_attn(mode='prefill', even=True, decouple=False):
     device = torch.device('cuda:0')
     dtype = torch.bfloat16
-    qo_head = 16
-    kv_head = 16
+    qo_head = 32
+    kv_head = 32
     dim = 128
     masks = None
     mask_size = 16
@@ -159,15 +162,17 @@ def test_seg_attn(mode='prefill', even=True, decouple=False):
     if mode == 'prefill':
         bs = 1
         if even:
-            qls = [1024]*bs
+            qls = [4096]*bs
         else:
             qls = [1024+63]*bs
         kls = qls
+        kls_fa = qls
 
     elif mode == 'decode':
         bs = 64
         qls = [1] * bs
         kls = qls
+        kls_fa = [2048] * bs
     elif mode == 'mix':
         bs = 40
         qls = [(1024 - bs +1)] + [1] * (bs-1)
@@ -203,6 +208,8 @@ def test_seg_attn(mode='prefill', even=True, decouple=False):
     qs = []
     ks = []
     vs = []
+    ks_fa = []
+    vs_fa = []
     flops = 0.0  # act as softmax attn
     for i, ql in enumerate(qls):
         kvl = kls[i]
@@ -212,6 +219,11 @@ def test_seg_attn(mode='prefill', even=True, decouple=False):
         qs.append(q)
         ks.append(k)
         vs.append(v)
+        kvl_fa = kls_fa[i]
+        k_fa = torch.randn(kvl_fa, kv_head, dim, dtype=dtype, device=device)
+        v_fa = torch.randn(kvl_fa, kv_head, dim, dtype=dtype, device=device)
+        ks_fa.append(k_fa)
+        vs_fa.append(v_fa)
 
         flops += (ql * ql + ql * (
                     kvl - ql) * 2) * qo_head * dim * 2
@@ -219,6 +231,8 @@ def test_seg_attn(mode='prefill', even=True, decouple=False):
     q = torch.cat(qs, 0)
     k = torch.cat(ks, 0)
     v = torch.cat(vs, 0)
+    k_fa = torch.cat(ks_fa, 0)
+    v_fa = torch.cat(vs_fa, 0)
     s = torch.randn(bs, kv_head, dim, dim, dtype=dtype, device=device)
     s_scales = torch.ones((bs,), device=device, dtype=dtype)
 
@@ -229,14 +243,27 @@ def test_seg_attn(mode='prefill', even=True, decouple=False):
     seg_attn_meta = get_seg_attn_meta(qls, kls, mask=masks)
     seg_attn_meta.s_scales = s_scales
 
-    org_output, state_ref = chunk_simple_gla(q.view(bs, qls[0], qo_head, dim), 
-                                    k.view(bs, kls[0], kv_head, dim), 
-                                    v.view(bs, kls[0], kv_head, dim),
-                                    decay_scales.view(1,1,-1).expand(bs, qls[0], qo_head),
-                                    initial_state=s,
-                                    output_final_state=True)
-    org_output = torch.reshape(org_output, (bs*qls[0], qo_head, dim))
+    flash_attn_meta = get_flash_attn_meta(qls, kls_fa, mask=masks)
+    flash_attn = flash_attn_2
 
+
+    if mode == 'prefill':
+        org_output, state_ref = chunk_simple_gla(q.view(bs, qls[0], qo_head, dim), 
+                                        k.view(bs, kls[0], kv_head, dim), 
+                                        v.view(bs, kls[0], kv_head, dim),
+                                        decay_scales.view(1,1,-1).expand(bs, qls[0], qo_head),
+                                        initial_state=s,
+                                        output_final_state=True)
+        org_output = torch.reshape(org_output, (bs*qls[0], qo_head, dim))
+    elif mode == 'decode':
+        org_output, state_ref = fused_recurrent_simple_gla(q.view(bs, qls[0], qo_head, dim), 
+                                k.view(bs, kls[0], kv_head, dim), 
+                                v.view(bs, kls[0], kv_head, dim),
+                                decay_scales.view(1,1,-1).expand(bs, qls[0], qo_head),
+                                initial_state=s,
+                                output_final_state=True)
+        org_output = torch.reshape(org_output, (bs*qls[0], qo_head, dim))
+    print(f'{state_ref.shape=}')
     torch.cuda.synchronize()
 
     opt_output = seg_la_fwd(q, k, v, s, decay_scales, seg_attn_meta, decouple=decouple)
@@ -259,13 +286,18 @@ def test_seg_attn(mode='prefill', even=True, decouple=False):
 
     print(f"\n{desc} err:{err:.4f} output_rate:{rate:.4f} state_rate:{state_rate:.4f} flops:{flops:.4f}")
     n_repeat = 1000
-    benchmark_func(chunk_simple_gla, q.view(bs, qls[0], qo_head, dim),  k.view(bs, kls[0], kv_head, dim), v.view(bs, kls[0], kv_head, dim), decay_scales.view(1,1,-1).expand(bs, qls[0], qo_head), initial_state=s, output_final_state=True, ref_flops=flops, n_repeat=n_repeat)
+    benchmark_func(flash_attn, q, k_fa, v_fa, flash_attn_meta, ref_flops=flops, n_repeat=n_repeat)
+
+    if mode == 'prefill':
+        benchmark_func(chunk_simple_gla, q.view(bs, qls[0], qo_head, dim),  k.view(bs, kls[0], kv_head, dim), v.view(bs, kls[0], kv_head, dim), decay_scales.view(1,1,-1).expand(bs, qls[0], qo_head), initial_state=s, output_final_state=True, ref_flops=flops, n_repeat=n_repeat)
+    elif mode == 'decode':
+        benchmark_func(fused_recurrent_simple_gla, q.view(bs, qls[0], qo_head, dim),  k.view(bs, kls[0], kv_head, dim), v.view(bs, kls[0], kv_head, dim), decay_scales.view(1,1,-1).expand(bs, qls[0], qo_head), initial_state=s, output_final_state=True, ref_flops=flops, n_repeat=n_repeat)
 
     benchmark_func(seg_la_fwd, q, k, v, s, decay_scales, seg_attn_meta, decouple=decouple, ref_flops=flops, n_repeat=n_repeat)
-
+    
 
 if __name__ == '__main__':
-    for mode in ['prefill','decode']:
+    for mode in ['prefill']:
         for even in [True]:
-            for decouple in [True]:
+            for decouple in [True, False]:
                 test_seg_attn(mode=mode, even=even, decouple=decouple)
