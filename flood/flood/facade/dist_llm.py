@@ -102,7 +102,7 @@ class DistLLM(LLM):
             print(f'node:{self.rank} device:{idx} layer:{x}')
         return indices
 
-    def get_cache_size(self, n_stage, max_rate, token_size):
+    def get_cache_size(self, n_stage, max_rate, token_size, device_list):
         frees = []
         totals = []
         usages = []
@@ -138,7 +138,7 @@ class DistLLM(LLM):
         return cache
 
     def pingpong_schedule(self, input_queue, chunk_quene, working_queue,
-                          output_queues, tasks, slots, counts, state, allocate_fail_count, fail_sample_count,
+                          output_queues, tasks, slots, fix_slots, counts, state, allocate_fail_count, fail_sample_count,
                           gbs, task_id):
         print(
             f"schedule:pingpong rank:{self.rank} task:{task_id} pid:{os.getpid()} ts:{time.time() % 1000:.3f}")
@@ -299,7 +299,6 @@ class DistLLM(LLM):
                 batch = Batch.prefill_batching(reqs, slots,
                                                device=input_device,
                                                min_rate=self.alloc_early_exit_rate,
-                                               allocate_rate=self.slot_first_alloc_rate,
                                                fully_alloc_under=self.slot_fully_alloc_under,
                                                cache_size=self.cache_size,
                                                embeddings=embs)
