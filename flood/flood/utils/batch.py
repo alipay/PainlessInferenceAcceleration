@@ -740,8 +740,8 @@ class Batch:
         dist.send(self.cache_indices, dst, group=group)
         if self.max_seg > 1:
             dist.send(self.k_segs, dst, group=group)
-        if self.logits_indices is not None:
-            dist.send(self.logits_indices, dst, group=group)
+        if self.logit_indices is not None:
+            dist.send(self.logit_indices, dst, group=group)
         if self.mask is not None:
             dist.send(self.mask, dst, group=group)
             dist.send(self.draft_offsets, dst, group=group)
@@ -781,7 +781,7 @@ class Batch:
 
         if light:
             return
-
+        dtype = torch.float16 if dtype == 0 else torch.bfloat16
         token_count = self.token_count
         batch_size = self.batch_size
 
@@ -803,7 +803,7 @@ class Batch:
             self.k_segs = torch.empty([batch_size], device=device,
                                      dtype=torch.int32)
         if self.logit_counts is not None:
-            self.logits_indices = torch.empty([sum(self.logit_counts)], device=device,
+            self.logit_indices = torch.empty([sum(self.logit_counts)], device=device,
                                          dtype=torch.int32)
         if mask_shape is not None:
             self.mask = torch.empty(mask_shape, device=device,
@@ -828,7 +828,7 @@ class Batch:
         if self.max_seg > 1:
             dist.recv(self.k_segs, src=src, group=group)
         if self.logit_counts is not None:
-            dist.recv(self.logits_indices, src=src, group=group)
+            dist.recv(self.logit_indices, src=src, group=group)
         if mask_shape is not None:
             dist.recv(self.mask, src=src, group=group)
             dist.recv(self.draft_offsets, src=src, group=group)
