@@ -243,6 +243,7 @@ class BailingMoeLinearAttention(torch.nn.Module):
         self.use_linear_silu = config.use_linear_silu
         self.use_low_rank = config.use_low_rank
         self.num_layers = config.num_hidden_layers
+        self.linear_attn_norm_group_size = getattr(config, 'linear_attn_norm_group_size', None)
 
         qkv_dim = (self.num_heads + 2 * self.num_key_value_heads) * self.head_dim
         self.query_key_value = AutoLinear.from_pretrained(self.hidden_size, 
@@ -257,7 +258,7 @@ class BailingMoeLinearAttention(torch.nn.Module):
                                             name='dense')
 
         self.g_proj = torch.nn.Linear(self.hidden_size, self.num_heads * self.head_dim, bias=False)
-        if hasattr(config, 'linear_attn_norm_group_size'):
+        if self.linear_attn_norm_group_size is not None:
             self.g_norm = RMSGroupNorm(hidden_size=self.num_heads * self.head_dim,
                                     linear_attn_norm_group_size=config.linear_attn_norm_group_size,
                                     eps=config.rms_norm_eps)
@@ -325,8 +326,8 @@ class BailingMoeLinearAttention(torch.nn.Module):
                                      self.decay_scales,
                                      batch_meta_info, 
                                      past_key_value)
-
-        # attn_output = attn_output.view(q_len, self.intermediate_size)  
+        
+        attn_output = attn_output.view(q_len, self.intermediate_size)  
         attn_output = self.g_norm(attn_output)
         g = self.g_proj(hidden_states)
         attn_output = attn_output * torch.nn.functional.sigmoid(g)
