@@ -29,10 +29,13 @@ if __name__ == '__main__':
     # model_path = '/mntnlp/nanxiao/model'
     # model_path = '/mntnlp/nanxiao/deepseekv3'
     # model_path = '/agent/nanxiao/models/Qwen2.5-32B-Instruct'
-    model_path = '/mnt/nas_acr89/jingyue/deepseekv3'
+    # model_path = '/mnt/nas_acr89/jingyue/deepseekv3'
+    # model_path = '/mntnlp/common_base_model/Qwen__Qwen2.5-14B-Instruct'
+    model_path = '/mnt/nas_acr89/jingyue/moe_lite_linear_iter_0011500'
+    # model_path = '/mnt/nas_acr89/jingyue/moe_lite_linear'
     tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
     
-    prompts = ['杭州在哪里']
+    prompts = ['1 + 1 = ?', '西湖在哪里？', 'tell me a joke', '你是谁？']
     reqs = []
     for i, prompt in enumerate(prompts):
         messages = [
@@ -44,12 +47,13 @@ if __name__ == '__main__':
             tokenize=False,
             add_generation_prompt=True,
         )
-        reqs.append(Request(i, input_text=text, output_length=128))
+        # text = prompt
+        reqs.append(Request(i, input_text=text, output_length=2048))
 
 
     worker = LLM(model_path,
-                 n_stage=2,  # gpus
-                 n_proc=3,
+                 n_stage=1,  # gpus
+                 n_proc=1,
                  chunk_size=1024,
                 #  model_dtype=torch.float8_e4m3fn,
                  max_concurrency=1024,
@@ -57,8 +61,8 @@ if __name__ == '__main__':
                  slot_fully_alloc_under=1024,
                  tune_alloc_size=False,
                  eos_token_id=None,
-                 debug=True,
-                 kernels=('mla',),
+                 debug=False,
+                 kernels=('sa',),
                 #  spec_algo = 'lookahead',
                  logger='example.log')
 
@@ -68,10 +72,11 @@ if __name__ == '__main__':
 
     # do benchmark
     for i, req in enumerate(worker.request_stream_generate(reqs,
-                                                input_queue,
-                                                output_queues,
-                                                print_count=0)):
-        print('\n\n')
-        print(f'prompt-{i}: ', req.input_text)
-        print(f'answer-{i}: ', req.output_text)
-    time.sleep(1.0)
+                                                   input_queue,
+                                                   output_queues,
+                                                   print_count=0)):
+        if i <= 4:
+            print('\n\n')
+            print(f'prompt-{i}: ', req.input_text.strip('\n'))
+            print(f'answer-{i}: ', req.output_text.strip('\n'))
+        time.sleep(1.0)

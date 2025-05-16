@@ -14,7 +14,7 @@ from transformers.cache_utils import Cache
 from transformers.modeling_utils import PreTrainedModel, PretrainedConfig
 
 from flood.ops.activation import silu_and_mul
-from flood.ops.norm import RMSNorm
+from flood.ops.norm import RMSNorm, RMSGroupNorm
 from flood.utils.batch import Batch
 from flood.layers.linear import AutoLinear
 from flood.layers.rope import AutoRope
@@ -257,7 +257,12 @@ class BailingMoeLinearAttention(torch.nn.Module):
                                             name='dense')
 
         self.g_proj = torch.nn.Linear(self.hidden_size, self.num_heads * self.head_dim, bias=False)
-        self.g_norm = RMSNorm(hidden_size=self.num_heads * self.head_dim, eps=config.rms_norm_eps)
+        if hasattr(config, 'linear_attn_norm_group_size'):
+            self.g_norm = RMSGroupNorm(hidden_size=self.num_heads * self.head_dim,
+                                    linear_attn_norm_group_size=config.linear_attn_norm_group_size,
+                                    eps=config.rms_norm_eps)
+        else:
+            self.g_norm = RMSNorm(hidden_size=self.num_heads * self.head_dim, eps=config.rms_norm_eps)
 
         self.rope = AutoRope.from_pretrained(config)
         self.attention =  None
@@ -321,7 +326,7 @@ class BailingMoeLinearAttention(torch.nn.Module):
                                      batch_meta_info, 
                                      past_key_value)
 
-        attn_output = attn_output.view(q_len, self.intermediate_size)  
+        # attn_output = attn_output.view(q_len, self.intermediate_size)  
         attn_output = self.g_norm(attn_output)
         g = self.g_proj(hidden_states)
         attn_output = attn_output * torch.nn.functional.sigmoid(g)
