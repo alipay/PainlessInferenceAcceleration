@@ -268,7 +268,7 @@ class Batch:
                 else:  # targeted
                     _, pos, ids = req.iterate_target()
                     ids = ids[:req.todo]
-                    position_ids = req.input_length + pos
+                    position_id = req.input_length + pos
                 input_ids.extend(ids)
             else:  # complelte req
                 assert req.done == 0

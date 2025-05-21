@@ -92,6 +92,8 @@ class Sampler(torch.nn.Module):
             ppls = -torch.log_softmax(logits, dim=-1)
             index = 0
             for i, sampling in enumerate(batch_meta_info.samplings):
+                if logit_counts is not None and logit_counts[i] == 0:
+                    continue 
 
                 req = batch_meta_info.reqs[i]
                 ql = batch_meta_info.qls[i]
@@ -121,7 +123,7 @@ class Sampler(torch.nn.Module):
                             vs[j] += ppl[j]
                         req.output_ids.append(vs)
                         index += 1
-                elif isinstance(sampling.target_ids, list):
+                elif isinstance(sampling.target_ids[0], int):
                     ppl = ppls[index, sampling.target_ids].tolist()  # i->index
                     req.output_ids.append(ppl)
                     index += 1
