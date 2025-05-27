@@ -78,6 +78,8 @@ class Sampler(torch.nn.Module):
                                                    top_p, min_p,
                                                    max_top_k).tolist()
             for i, req in enumerate(reqs):
+                if logit_counts is not None and logit_counts[i] == 0:
+                    continue
                 req.output_ids.append(next_token_id_list[i])
             return 
 
