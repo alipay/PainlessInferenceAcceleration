@@ -112,11 +112,12 @@ class Sampler(torch.nn.Module):
                         idx, _, target_ids = req.iterate_target()
                         target_ids = target_ids[:ql]
                         indices = [(j + index) * voc + target_ids[j] for j in
-                                range(ql)]
+                                range(1, ql)]
                         ppl = sum(ppls.view(-1)[indices].tolist())
                         vs = req.output_ids[0]
                         vs[idx] += ppl
-                        index += len(indices)
+                        vs[idx] /= len(target_ids)
+                        index += len(target_ids)
                     else:  # prefill
                         vs = [0.0]*len(req.target_ids)
                         first_token_ids = [x[0] for x in req.target_ids]

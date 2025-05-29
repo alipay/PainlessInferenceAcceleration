@@ -250,7 +250,7 @@ class Batch:
             if targeted:
                 pos = req.iterate_target()[1]
                 cache_indices.extend(range(cache_offset + req.input_length + pos, cache_offset + req.input_length + pos + ql))
-                logit_indices.extend(range(sum_ql-ql, sum_ql))
+                logit_indices.extend(range(sum_ql-ql-1, sum_ql-1))
                 logit_counts.append(ql)
             else:
                 # chunked 
