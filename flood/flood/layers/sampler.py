@@ -111,12 +111,11 @@ class Sampler(torch.nn.Module):
                     if req.done >= req.input_length:  # options
                         idx, _, target_ids = req.iterate_target()
                         target_ids = target_ids[:ql]
-                        indices = [(j + index) * voc + target_ids[j] for j in
-                                range(1, ql)]
+                        indices = [(j + index) * voc + target_ids[j+1] for j in
+                                range(ql-1)]
                         ppl = sum(ppls.view(-1)[indices].tolist())
                         vs = req.output_ids[0]
                         vs[idx] += ppl
-                        vs[idx] /= len(target_ids)
                         index += len(target_ids)
                     else:  # prefill
                         vs = [0.0]*len(req.target_ids)
