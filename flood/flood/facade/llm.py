@@ -853,6 +853,9 @@ class LLM():
                                     output_queue.put(req)
                                     Batch.recycle(slots, req.segs, fix_slots, req.fix_size_slot_index)
                                     counts.value -= 1
+                                    if isinstance(req.target_ids[0], list):
+                                        for i, target_id in enumerate(req.target_ids):
+                                            req.output_ids[0][i] /= len(target_id)
                         elif len(req.output_ids) >= 1:
                             output_queue.put(req)
                             Batch.recycle(slots, req.segs, fix_slots, req.fix_size_slot_index)
