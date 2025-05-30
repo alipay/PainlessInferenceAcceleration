@@ -78,6 +78,8 @@ class Sampler(torch.nn.Module):
                                                    top_p, min_p,
                                                    max_top_k).tolist()
             for i, req in enumerate(reqs):
+                if logit_counts is not None and logit_counts[i] == 0:
+                    continue
                 req.output_ids.append(next_token_id_list[i])
             return 
 
@@ -109,12 +111,12 @@ class Sampler(torch.nn.Module):
                     if req.done >= req.input_length:  # options
                         idx, _, target_ids = req.iterate_target()
                         target_ids = target_ids[:ql]
-                        indices = [(j + index) * voc + target_ids[j] for j in
-                                range(ql)]
+                        indices = [(j + index) * voc + target_ids[j+1] for j in
+                                range(ql-1)]
                         ppl = sum(ppls.view(-1)[indices].tolist())
                         vs = req.output_ids[0]
                         vs[idx] += ppl
-                        index += len(indices)
+                        index += len(target_ids)
                     else:  # prefill
                         vs = [0.0]*len(req.target_ids)
                         first_token_ids = [x[0] for x in req.target_ids]
