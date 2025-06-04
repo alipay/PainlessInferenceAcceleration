@@ -54,7 +54,8 @@ os.environ["NCCL_CHECKS_DISABLE"] = "1"
 if __name__ == '__main__':
     mp.set_start_method('spawn', force=True)
     # model_path = '/mntnlp/common_base_model/Llama-3.1-8B-Instruct'
-    model_path = '/mntnlp/nanxiao/deepseekv3'
+    # model_path = '/mntnlp/nanxiao/deepseekv3'
+    model_path = '/mnt/nas_acr89/jingyue/ling-moe-lite-chat'
 
     WORLD_SIZE = int(os.environ['FLOOD_WORLD_SIZE'])
     RANK = int(os.environ['FLOOD_RANK'])
@@ -65,23 +66,20 @@ if __name__ == '__main__':
     pred_path = 'tmp.jsonl'
 
     reqs = [Request(0,
-                    input_text='<role>HUMAN</role>hello! what is your'
-                               ' name?<role>ASSISTANT</role>',
+                    input_text='<role>HUMAN</role>西湖在哪里？<role>ASSISTANT</role>',
                     output_length=1000)]
 
     print('start init LLM')
     worker = DistLLM(model_path,
                     #  cache_dtype=torch.bfloat16,
-                     n_stage=1,  # gpu count
-                     n_proc=1,  # process count
+                     n_stage=2,  # gpu count
+                     n_proc=3,  # process count
                      cache_size=0.9,
                     #  eos_token_id=(),
                      debug=True,
-                     kernels=('mla',),
+                     kernels=('sa',),
                      batch_size_round_frac=0.0,  # 0.585
                      min_decode_rate=0.8,  # 0.8
-                     output_file_name=pred_path,
-                     output_file_mode='w+',
                      logger='dist.log')
     print('finish init LLM')
 

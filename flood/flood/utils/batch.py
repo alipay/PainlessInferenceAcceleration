@@ -700,6 +700,7 @@ class Batch:
         mask_shape = None if self.mask is None else self.mask.shape 
         draft_offfets_shape = None if self.draft_offsets is None else self.draft_offsets.shape
         device = hidden_states.device
+        torch.cuda.set_device(device)
         comm_device = None
         objects = [
             [self.reqs, 
@@ -755,6 +756,7 @@ class Batch:
         objects = [None]
         device = 'cuda:0'
         comm_device = None
+        torch.cuda.set_device(device)
         dist.recv_object_list(objects, src=src, group=group, device=comm_device)
         objects = objects[0]
 
@@ -787,7 +789,7 @@ class Batch:
 
         self.input_ids = torch.empty([token_count], device=device,
                                      dtype=torch.int32)
-        self.position_ids = torch.empty([token_count], device=device,
+        self.position_ids = torch.empty([batch_size], device=device,
                                         dtype=torch.int32)
         self.q_offsets = torch.empty([batch_size + 1], device=device,
                                      dtype=torch.int32)
