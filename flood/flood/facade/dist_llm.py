@@ -129,12 +129,24 @@ class DistLLM(LLM):
             else:
                 device = next(layer.parameters()).device
             devices.append(device)
+        
+        if self.model_type =='DeepseekV3ForCausalLM':
+            dims = [self.model.config.kv_lora_rank+self.model.config.qk_rope_head_dim]  
+        else:
+            dims = [self.kv_heads*self.head_dim]*2
+        if self.fix_size_indices is  None:
+            fix_size_dim = None
+        else:
+            fix_size_dim = self.conf['num_attention_heads']*self.head_dim**2
         cache = SegmentCache(max_token,
-                             num_layers=self.n_layer,
-                            #  num_key_value_heads=self.kv_heads,
-                            #  head_dim=self.head_dim,
-                             dtype=cache_dtype,
-                             devices=devices)
+                            num_layers=self.n_layer,
+                            dims=dims,
+                            max_concurrency=self.max_concurrency,
+                            fix_size_dim=fix_size_dim,
+                            dtype=cache_dtype,
+                            devices=devices,
+                            fix_size_indices=self.fix_size_indices,
+                            )
         return cache
 
     def pingpong_schedule(self, input_queue, chunk_quene, working_queue,
