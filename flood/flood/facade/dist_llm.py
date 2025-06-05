@@ -162,17 +162,22 @@ class DistLLM(LLM):
 
         sync_layers = self.get_sync_layers(tasks, self.device_list)
         device_list = self.device_list
+        batching_stream = torch.cuda.Stream(device=0)
         streams = [torch.cuda.Stream(device=idx) for idx in range(self.n_stage)]
         queue_timeout = self.queue_timeout
         chunk_size = self.chunk_size
         output_queue = output_queues[0].queue
+        fully_alloc_under = self.slot_fully_alloc_under
 
         fe = None
         if self.embedding_dir is not None:
             fe = safe_open(self.embedding_dir, framework="pt", device='cuda:0')
+        input_lengths = []  # input_length of finished reqs
+        output_lengths = []  #  output_length of finished reqs
         fails = []
         chunks = []
         waits = []
+        options = []
         step = 0
         input_device = torch.device('cpu')
         while True:
@@ -205,8 +210,8 @@ class DistLLM(LLM):
                 continue
 
             # both empty, wait
-            input_empty = input_queue.empty() and fail_sample_count.value == 10 ** self.n_proc
-            working_empty = working_queue.empty() and len(waits) == 0
+            input_empty = input_queue.empty() and fail_sample_count.value == 10 ** self.n_proc and len(chunks) == 0 and len(options) == 0
+            working_empty = working_queue.empty() and len(waits) == 0 and counts.value == 0  # TODO: CHECK counts.value
             if input_empty and working_empty:
                 time.sleep(0.001)
                 continue
@@ -215,19 +220,13 @@ class DistLLM(LLM):
             ts = time.time()
             step += 1
 
-            if task_id == 0 and input_empty:
-                if self.batch_size_step is None:
-                    gbs.value = min(max(2 ** int(
-                        math.log2(max(counts.value, 0) / self.n_proc + 1) + 1),
-                                        self.min_batch_size),
-                                    self.max_batch_size)
-                else:
-                    gbs.value = min(max(int(max(counts.value,
-                                                0) / self.n_proc / self.batch_size_step + 1) * self.batch_size_step,
-                                        self.min_batch_size),
-                                    self.max_batch_size)
+            if task_id == 0:
+                gbs.value = self.opt_batch_size(counts.value, self.n_proc)
 
-            if task_id != 0 and input_empty and counts.value <= self.min_batch_size:
+            hungry = counts.value <= self.n_proc * self.min_batch_size
+
+            if (task_id != 0 and input_empty and
+                    counts.value <= self.min_batch_size and self.spec_algo is None):
                 time.sleep(0.001)
                 continue
 
@@ -261,6 +260,27 @@ class DistLLM(LLM):
                             update_chunks.append(req)
                     chunks = update_chunks
 
+                if len(options) > 0:
+                    update_options = []
+                    for req in options:
+                        # prefill must have be done 
+                        gap = req.done - req.input_length 
+                        assert gap >= 0
+                        target = req.iterate_target()[2]
+                        assert target is not None
+                        n_token = len(target)
+                        if n_tokens < chunk_size:
+                            if n_tokens + n_token <= chunk_size:
+                                n_tokens += n_token
+                                req.todo = n_token
+                            else:
+                                todo = chunk_size - n_tokens
+                                n_tokens += todo
+                                req.todo = todo
+                            reqs.append(req)
+                        else:
+                            update_options.append(req)
+                    options = update_options
                 if n_tokens < chunk_size and len(fails) > 0:
                     update_fails = []
                     for req in fails:
@@ -288,6 +308,8 @@ class DistLLM(LLM):
                         except:
                             break
                         # assert req.done == 0
+                        if self.spec_algo == 'lookahead' and hungry:
+                            self.spec.update_state(req.input_ids)
                         n_token = req.input_length
                         if n_tokens + n_token <= chunk_size:
                             n_tokens += n_token
@@ -308,11 +330,14 @@ class DistLLM(LLM):
                     time.sleep(0.001)
                     continue
 
+                if len(output_lengths) >= 512 and self.tune_alloc_size:
+                    fully_alloc_under = sorted(output_lengths)[int(0.9*len(output_lengths))]
+
                 batch = Batch.prefill_batching(reqs, slots,
                                                fix_slots=fix_slots,
                                                device=input_device,
                                                min_rate=self.alloc_early_exit_rate,
-                                               fully_alloc_under=self.slot_fully_alloc_under,
+                                               fully_alloc_under=fully_alloc_under,
                                                cache_size=self.cache_size,
                                                buffer_size=self.spec_buf,
                                                embeddings=embs)
@@ -341,44 +366,55 @@ class DistLLM(LLM):
                     LLM.update_digit(fail_sample_count, task_id + 1, len(fails) + len(chunks))
 
                     if allocate_fail_count.value >= self.max_slot_alloc_fail_count:
-                        if self.batch_size_step is None:
-                            gbs_value = min(max(2 ** int(math.log2(
-                                counts.value / self.n_proc) + self.batch_size_round_frac),
-                                                self.min_batch_size),
-                                            self.max_batch_size)
+                        gbs.value = self.opt_batch_size(counts.value, self.n_proc)
+                        if input_queue.qsize() < 16 and state.value > 32:
+                            state.value -= 32
                         else:
-                            gbs_value = min(max(int(
-                                counts.value / self.n_proc / self.batch_size_step +
-                                self.batch_size_round_frac) * self.batch_size_step,
-                                                self.min_batch_size),
-                                            self.max_batch_size)
-                        state.value = min(
-                            int(self.min_decode_rate * counts.value),
-                            gbs_value * self.n_proc)
-                        gbs.value = gbs_value
+                            state.value = min(
+                                int(self.min_decode_rate * counts.value),
+                                gbs.value * self.n_proc)
                         allocate_fail_count.value = 0
                     continue
             else:
                 # working is full, do decoding 
                 reqs = []
-                # dbs = min(( (counts.value-1) // self.n_proc // 16 + 1)*16, dbs)
                 update_waits = []
+                n_suc = 0
+                n_fail = 0
                 for req in waits:
                     if len(reqs) < dbs:
-                        assert req.input_length + len(req.output_ids) >= \
-                               req.segs[1] - req.segs[0]
-                        slot_size = ((req.input_length + req.output_length - 1) // 16 + 1) * 16
-                        segs = Batch.extend_slot(slots, req.segs, (
-                        req.segs[0], req.segs[0] + slot_size, req.segs[2]))
+                        size_of_segs = req.size_of_segs()
+                        assert req.input_length + len(
+                            req.output_ids) == size_of_segs + 1
+                        slot_size = req.input_length + req.output_length + self.spec_buf
+                        extend_length = min(slot_size - size_of_segs, self.max_extend_size)
+                        slot_size = ((extend_length - 1) // 128 + 1) * 128
+                        segs = Batch.extend_slot(slots, 
+                                                 req.segs, 
+                                                 extend_length,
+                                                 contiguous='sa' not in self.kernels)
                         if segs is not None:
                             # print(f'extend success! from {req.slot} to {slot}')
+                            n_suc += 1
                             req.segs = segs
                             reqs.append(req)
                         else:
-                            # print(f'extend failed! {req.slot}')
+                            # print(f'extend {req.segs} failed!')
+                            if 'sa' in self.kernels:  # no segment available
+                                allocate_fail_count.value += 1
+
+                                if allocate_fail_count.value >= self.max_slot_alloc_fail_count:
+                                    gbs.value = self.opt_batch_size(counts.value//2, self.n_proc)
+                                    state.value = min(
+                                        int(self.min_decode_rate * counts.value),
+                                        gbs.value * self.n_proc)
+                                    allocate_fail_count.value = 0
+                            n_fail += 1
                             update_waits.append(req)
                     else:
                         update_waits.insert(0, req)
+                if len(waits) > 0:
+                    print(f'extend slot: suc:{n_suc} fail:{n_fail}')
                 waits = update_waits
 
                 while True:
@@ -395,13 +431,29 @@ class DistLLM(LLM):
                     time.sleep(0.001)
                     continue
 
-                batch = Batch.decoding_batching(reqs, device=input_device)
-                task_type = 'decode'
+                if self.spec_algo == 'lookahead' and hungry:
+                    min_buf = min([x.size_of_segs() - x.input_length - len(x.output_ids) for x in reqs])
+                    if min_buf >= self.spec_branch_length:
+                        max_retrieve_count = min(min_buf//self.spec_branch_length, self.max_spec_branch_count)
+                        retrieve_count = min(max(64*self.n_proc//max(self.spec_branch_length*counts.value,1), 1), max_retrieve_count)
+                        with torch.cuda.stream(batching_stream):
+                            batch = Batch.lookahead_batching(reqs,
+                                                            self.spec,
+                                                            device=input_device,
+                                                            retrieve_count=retrieve_count)
+                            batching_stream.synchronize()
+                        task_type = 'spec'
+                    else:
+                        batch = Batch.decoding_batching(reqs, device=input_device)
+                        task_type = 'decode'  
+                else:
+                    batch = Batch.decoding_batching(reqs, device=input_device)
+                    task_type = 'decode'
 
             te = time.time()
             batching_time = te - ts
-
-            ts = time.time()
+            step += 1
+            ts = te
             hidden_states = self.model.forward(input_ids=batch.input_ids,
                                                     position_ids=batch.position_ids,
                                                     past_key_values=self.cache,
@@ -411,7 +463,7 @@ class DistLLM(LLM):
                                                     streams=streams)
             te = time.time()
             forward_time = te - ts
-            ts = time.time()
+            ts = te
             if self.rank < self.world_size - 1:
                 batch.send(hidden_states, dst=self.rank + 1, group=group)
 
@@ -431,18 +483,55 @@ class DistLLM(LLM):
                          # reduce pickle cost
                         if task_type == 'prefill':
                             req.input_id = []
+                        if req.target_ids is None:
+                             # remove token_ids after eos
+                            if task_type == 'spec':
+                                for j in range(max(-self.spec_branch_length-1,-len(req.output_ids)),-1):
+                                    if req.output_ids[j] in self.eos_token_id:
+                                        req.output_ids = req.output_ids[:j+1]
+                                        break
+                            if len(req.output_ids) >= req.output_length or req.output_ids[-1] in self.eos_token_id:
+                                output_queue.put(req)
+                                input_lengths.append(req.input_length)
+                                output_lengths.append(len(req.output_ids))
 
-                        if len(req.output_ids) >= req.output_length or req.output_ids[-1] in self.eos_token_id:
-                            output_queue.put(req)
-                            Batch.recycle(slots, req.segs, fix_slots=fix_slots, fix_size_slot_index=req.fix_size_slot_index)
-                            counts.value -= 1
-                        elif req.input_length + len(
-                                req.output_ids) >= req.size_of_segs():
-                            print(
-                                f'{req.input_length=} {len(req.output_ids)=} {req.output_length=} {req.segs=}')
-                            waits.append(req)
+                                if len(input_lengths) >= 2048:
+                                    input_lengths = input_lengths[-1024:]
+                                    output_lengths = output_lengths[-1024:]
+                                Batch.recycle(slots, req.segs, fix_slots=fix_slots, fix_size_slot_index=req.fix_size_slot_index)
+                                if self.spec_algo == 'lookahead':
+                                    self.spec.update_state(req.output_ids)
+                                counts.value -= 1
+                            elif req.input_length + len(
+                                    req.output_ids) >= req.size_of_segs():
+                                print(
+                                    f'{req.input_length=} {len(req.output_ids)=} {req.output_length=} {req.segs=}')
+                                waits.append(req)
+                            else:
+                                working_queue.put(req)
                         else:
-                            working_queue.put(req)
+                            if isinstance(req.target_ids, list):
+                                if req.todo == 0: # not chunked
+                                    req.done = req.input_length 
+                                    options.append(req)
+                                else:  # chunked
+                                    if req.done + req.todo < req.input_length + sum([len(x) for x in req.target_ids]):  # unfinished
+                                        req.done += req.todo
+                                        req.todo = 0
+                                        options.append(req)
+                                    else:
+                                        output_queue.put(req)
+                                        Batch.recycle(slots, req.segs, fix_slots, req.fix_size_slot_index)
+                                        counts.value -= 1
+                                        if isinstance(req.target_ids[0], list):
+                                            for i, target_id in enumerate(req.target_ids):
+                                                req.output_ids[0][i] /= len(target_id)
+                            elif len(req.output_ids) >= 1:
+                                output_queue.put(req)
+                                Batch.recycle(slots, req.segs, fix_slots, req.fix_size_slot_index)
+                                counts.value -= 1
+                            else:
+                                working_queue.put(req)
                 LLM.update_digit(fail_sample_count, task_id + 1, len(fails) + len(chunks))
                 te = time.time()
                 remote_time = te - ts
@@ -451,12 +540,19 @@ class DistLLM(LLM):
                     ips = input_queue.qsize()
                     wks = working_queue.qsize()
                     fail_str = f'{str(fail_sample_count.value)[1:]}'
-                    bs_str = f'{batch.token_count}/{batch.batch_size}' if mode == 0 else f'{dbs}/{batch.batch_size}'
-                    times = f'{batching_time * 1000:.1f}/{forward_time * 1000:.1f}/{remote_time * 1000:.1f}'
-                    task_type = 'prefill' if mode == 0 else 'decode'
+                    tokens = batch.token_count
+                    bs_str = f'{batch.batch_size}/{tokens}'
+                    times = (f'{batching_time * 1000:.1f}/'
+                            f'{forward_time * 1000:.1f}/{remote_time * 1000:.1f}')
+                    mean_input_length = sum(input_lengths)/max(len(input_lengths),1)
+                    mean_output_length = sum(output_lengths)/max(len(output_lengths),1)
                     print(
-                        f'task:{task_id} pid:{os.getpid():<6} step:{step:<4} task_type:{task_type:<7} ' \
+                        f'task:{task_id} step:{step:<4} '
+                        f'task_type:{task_type:<7} ' \
                         f'bs:{bs_str:<7} ' \
                         f'counts:{counts.value:<4} state:{state.value:<2} ' \
-                        f'ips:{ips} fail:{fail_str}/{len(fails):<2} chunk:{len(chunks):<2} wks:{wks:<4} ' \
-                        f'waits:{len(waits):<4} time:{times:<13}')
+                        f'ips:{ips} fail:{fail_str}/{len(fails):<2} '
+                        f'chunk:{len(chunks):<2} wks:{wks:<4} ' \
+                        f'waits:{len(waits):<4} ' \
+                        f'length:{mean_input_length:.0f}/{mean_output_length:.0f}/{fully_alloc_under} ' \
+                        f'time:{times:<13}')
