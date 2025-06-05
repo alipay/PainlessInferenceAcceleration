@@ -739,6 +739,8 @@ class Batch:
         dist.send(self.q_lengths, dst, group=group)
         dist.send(self.k_lengths, dst, group=group)
         dist.send(self.cache_indices, dst, group=group)
+        dist.send(self.s_offsets, dst, group=group)
+        dist.send(self.s_scales, dst, group=group)
         if self.max_seg > 1:
             dist.send(self.k_segs, dst, group=group)
         if self.logit_indices is not None:
@@ -801,6 +803,10 @@ class Batch:
                                      dtype=torch.int32)
         self.cache_indices = torch.empty([token_count], device=device,
                                          dtype=torch.int32)
+        self.s_offsets = torch.empty([batch_size], device=device,
+                                     dtype=torch.int32)
+        self.s_scales = torch.empty([batch_size], device=device,
+                                     dtype=torch.float32)
         if self.max_seg > 1:
             self.k_segs = torch.empty([batch_size], device=device,
                                      dtype=torch.int32)
@@ -827,6 +833,8 @@ class Batch:
         dist.recv(self.q_lengths, src=src, group=group)
         dist.recv(self.k_lengths, src=src, group=group)
         dist.recv(self.cache_indices, src=src, group=group)
+        dist.recv(self.s_offsets, src=src, group=group)
+        dist.recv(self.s_scales, src=src, group=group)
         if self.max_seg > 1:
             dist.recv(self.k_segs, src=src, group=group)
         if self.logit_counts is not None:

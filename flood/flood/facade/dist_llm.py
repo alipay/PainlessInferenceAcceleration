@@ -309,10 +309,12 @@ class DistLLM(LLM):
                     continue
 
                 batch = Batch.prefill_batching(reqs, slots,
+                                               fix_slots=fix_slots,
                                                device=input_device,
                                                min_rate=self.alloc_early_exit_rate,
                                                fully_alloc_under=self.slot_fully_alloc_under,
                                                cache_size=self.cache_size,
+                                               buffer_size=self.spec_buf,
                                                embeddings=embs)
 
                 if batch.batch_size > 0:
@@ -432,7 +434,7 @@ class DistLLM(LLM):
 
                         if len(req.output_ids) >= req.output_length or req.output_ids[-1] in self.eos_token_id:
                             output_queue.put(req)
-                            Batch.recycle(slots, req.segs)
+                            Batch.recycle(slots, req.segs, fix_slots=fix_slots, fix_size_slot_index=req.fix_size_slot_index)
                             counts.value -= 1
                         elif req.input_length + len(
                                 req.output_ids) >= req.size_of_segs():
