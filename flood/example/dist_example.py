@@ -8,8 +8,10 @@ import os
 import random
 import time
 
-import torch.multiprocessing as mp
 import torch
+from transformers import AutoTokenizer
+import torch.multiprocessing as mp
+
 from flood.facade.dist_llm import DistLLM
 from flood.utils.request import Request
 
@@ -54,7 +56,10 @@ os.environ["NCCL_CHECKS_DISABLE"] = "1"
 if __name__ == '__main__':
     mp.set_start_method('spawn', force=True)
     # model_path = '/mntnlp/common_base_model/Llama-3.1-8B-Instruct'
-    model_path = '/mntnlp/nanxiao/deepseekv3'
+    # model_path = '/mntnlp/nanxiao/deepseekv3'
+    # model_path = '/mnt/nas_acr89/jingyue/ling-moe-lite-chat'
+    model_path = '/mnt/nas_acr89/jingyue/moe_lite_linear'
+    tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
 
     WORLD_SIZE = int(os.environ['FLOOD_WORLD_SIZE'])
     RANK = int(os.environ['FLOOD_RANK'])
@@ -64,24 +69,35 @@ if __name__ == '__main__':
 
     pred_path = 'tmp.jsonl'
 
-    reqs = [Request(0,
-                    input_text='<role>HUMAN</role>hello! what is your'
-                               ' name?<role>ASSISTANT</role>',
-                    output_length=1000)]
+    # prompts = ['1 + 1 = ?', '西湖在哪里？', 'tell me a joke', '你是谁？']
+    prompts = ['西湖在哪里？']
+
+    reqs = []
+    for i, prompt in enumerate(prompts):
+        messages = [
+                    # {"role": "system","content": "You are Qwen, created by Alibaba Cloud. You are a helpful assistant."},
+                    {"role": "user", "content": prompt}
+                ]
+        text = tokenizer.apply_chat_template(
+            messages,
+            tokenize=False,
+            add_generation_prompt=True,
+        )
+        # text = prompt
+        reqs.append(Request(i, input_text=text, output_length=4096))
 
     print('start init LLM')
     worker = DistLLM(model_path,
                     #  cache_dtype=torch.bfloat16,
-                     n_stage=1,  # gpu count
-                     n_proc=1,  # process count
+                     n_stage=2,  # gpu count
+                     n_proc=3,  # process count
                      cache_size=0.9,
                     #  eos_token_id=(),
                      debug=True,
-                     kernels=('mla',),
-                     batch_size_round_frac=0.0,  # 0.585
-                     min_decode_rate=0.8,  # 0.8
-                     output_file_name=pred_path,
-                     output_file_mode='w+',
+                     max_concurrency=1024,
+                     kernels=('sa',),
+                     slot_fully_alloc_under=4096,
+                     tune_alloc_size=False,
                      logger='dist.log')
     print('finish init LLM')
 
