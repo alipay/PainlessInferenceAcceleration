@@ -449,6 +449,32 @@ def grouped_topk(hidden_states: torch.Tensor,
     return topk_weights.to(torch.float32), topk_ids.to(torch.int32)
 
 
+def sigmoid_topk(
+        hidden_states: torch.Tensor,
+        gating_output: torch.Tensor,
+        topk: int,
+        renormalize: bool,
+        expert_bias: Optional[torch.Tensor] = None
+):
+    assert hidden_states.shape[0] == gating_output.shape[0], (
+        "Number of tokens mismatch")
+
+    gating_output = torch.sigmoid(gating_output)
+    if expert_bias is not None:
+        tmp_scores = gating_output + expert_bias
+        _, topk_ids = torch.topk(tmp_scores, k=topk, dim=-1)
+        topk_weights = torch.gather(gating_output, dim=-1, index=topk_ids).type_as(gating_output)
+    else:
+        topk_weights, topk_ids = torch.topk(gating_output, k=topk, dim=-1)
+    
+    # del token_expert_indicies  # Not used. Will be used in the future.
+    
+    if renormalize:
+        topk_weights = topk_weights / topk_weights.sum(dim=-1, keepdim=True)
+
+    return topk_weights, topk_ids
+
+
 def get_config_dtype_str(dtype: torch.dtype,
                          use_int8_w8a16: Optional[bool] = False,
                          use_fp8_w8a8: Optional[bool] = False):
@@ -614,6 +640,7 @@ def fused_moe(
         w2_scale: Optional[torch.Tensor] = None,
         a1_scale: Optional[torch.Tensor] = None,
         a2_scale: Optional[torch.Tensor] = None,
+        expert_bias: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
     """
     This function computes a Mixture of Experts (MoE) layer using two sets of
@@ -660,7 +687,7 @@ def fused_moe(
                                             renormalize)
     else:
         topk_weights, topk_ids = custom_routing_function(
-            hidden_states, gating_output, topk, renormalize)
+            hidden_states, gating_output, topk, renormalize, expert_bias)
 
     return fused_experts(hidden_states,
                          w1,
@@ -691,7 +718,7 @@ class AutoExperts():
             dtype = torch.float8_e4m3fn
         if isinstance(module_list, torch.nn.ModuleList):
             if dtype is None:
-                return NativeExperts(module_list)
+                return NativeExperts(module_list, config)
             elif dtype == torch.float8_e4m3fn:
                 return Fp8Experts(module_list)
             else:
@@ -708,9 +735,15 @@ class AutoExperts():
 
 
 class NativeExperts(torch.nn.ModuleList):
-    def __init__(self, modules) -> None:
+    def __init__(self, modules, config) -> None:
         super().__init__(modules)
-
+        self.expert_bias = None
+        self.custom_routing_function = None
+        if hasattr(config, 'use_expert_bias'):
+            self.expert_bias = torch.nn.Parameter(torch.empty(config.num_experts))
+        if getattr(config, 'gate_score_function', None) == 'sigmoid':
+            self.custom_routing_function = sigmoid_topk
+            
     def _flood_patch_func(self):
         w1 = []
         w2 = []
@@ -729,14 +762,16 @@ class NativeExperts(torch.nn.ModuleList):
                          self.w2,
                          router_logits,
                          top_k,
+                         custom_routing_function=self.custom_routing_function,
                          renormalize=renormalize,
                          inplace=True,
                          use_fp8_w8a8=False,
                          w1_scale=None,
                          w2_scale=None,
                          a1_scale=None,
-                         a2_scale=None)
-
+                         a2_scale=None,
+                         expert_bias=self.expert_bias,
+                        )
 
 class Fp8Experts(torch.nn.ModuleList):
     def __init__(self, modules) -> None:
