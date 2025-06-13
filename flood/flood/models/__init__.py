@@ -2,6 +2,8 @@
 from flood.models.modeling_llama import LlamaForCausalLM
 from flood.models.modeling_bailing import BailingForCausalLM
 from flood.models.modeling_bailing_moe import BailingMoeForCausalLM
+from flood.models.modeling_bailing_moe_v2 import BailingMoeV2ForCausalLM
+
 from flood.models.modeling_bailing_moe_linear import BailingMoeLinearForCausalLM
 from flood.models.modeling_qwen2 import Qwen2ForCausalLM
 from flood.models.modeling_deepseek import DeepseekForCausalLM
@@ -12,6 +14,7 @@ model_class_map = {
     "LlamaForCausalLM": LlamaForCausalLM,
     "BailingForCausalLM": BailingForCausalLM,
     "BailingMoeForCausalLM": BailingMoeForCausalLM,
+    "BailingMoeV2ForCausalLM": BailingMoeV2ForCausalLM,
     "BailingMoeLinearForCausalLM": BailingMoeLinearForCausalLM,
     "Qwen2ForCausalLM": Qwen2ForCausalLM,
     "DeepseekForCausalLM": DeepseekForCausalLM,
@@ -31,5 +34,6 @@ model_attr_map = {
     "DEFAULT": ModelAttr(),
     "BailingForCausalLM": ModelAttr(emb_name='model.word_embeddings'),
     "BailingMoeForCausalLM": ModelAttr(emb_name='model.word_embeddings'),
+    "BailingMoeV2ForCausalLM": ModelAttr(emb_name='model.word_embeddings'),
     "BailingMoeLinearForCausalLM": ModelAttr(emb_name='model.word_embeddings'),
 }

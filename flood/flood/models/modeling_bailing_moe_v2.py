@@ -102,7 +102,11 @@ class BailingMoeV2MoE(torch.nn.Module):
                                      self.num_experts,
                                      bias=False)
 
-        im_sz = config.f * config.num_shared_experts
+        if getattr(config, 'use_expert_bias', False):
+            self.gate.expert_bias = torch.nn.Parameter(torch.empty(self.num_experts))
+        else:
+            self.gate.expert_bias = None
+        im_sz = config.moe_intermediate_size * config.num_shared_experts
         share_conf = copy.deepcopy(config)
         share_conf.intermediate_size = im_sz
         self.shared_experts = BailingMoeV2MLP(config=share_conf, layer_idx=-1)
@@ -122,7 +126,8 @@ class BailingMoeV2MoE(torch.nn.Module):
         final_hidden_states = self.experts(hidden_states,
                                         router_logits,
                                         self.top_k,
-                                        renormalize=self.norm_topk_prob
+                                        renormalize=self.norm_topk_prob,
+                                        expert_bias=self.gate.expert_bias
                                         )
         final_hidden_states = final_hidden_states + shared_output
 
@@ -157,8 +162,8 @@ class BailingMoeV2Attention(torch.nn.Module):
                                                  bias=config.use_qkv_bias, 
                                                  config=config, 
                                                  name='query_key_value')
-        self.query_layernorm = RMSNorm(self.head_dim, eps=config.rms_norm_eps)
-        self.key_layernorm = RMSNorm(self.head_dim, eps=config.rms_norm_eps)
+        self.q_norm = RMSNorm(self.head_dim, eps=config.rms_norm_eps)
+        self.k_norm = RMSNorm(self.head_dim, eps=config.rms_norm_eps)
         self.dense = AutoLinear.from_pretrained(self.intermediate_size, 
                                                  self.hidden_size, 
                                                  bias=config.use_bias, 
@@ -207,8 +212,8 @@ class BailingMoeV2Attention(torch.nn.Module):
                                                             self.num_key_value_heads], 
                                                             dim=-2)
         if self.use_qk_norm:
-            query_states = self.query_layernorm(query_states)
-            key_states = self.key_layernorm(key_states)
+            query_states = self.q_norm(query_states)
+            key_states = self.k_norm(key_states)
         batch_meta_info = kwargs['batch_meta_info']
 
         q_offsets = (batch_meta_info.q_offsets if batch_meta_info.draft_offsets is None
@@ -234,14 +239,22 @@ class BailingMoeV2DecoderLayer(torch.nn.Module):
         self.hidden_size = config.hidden_size
         self.n_layer = config.num_hidden_layers
         self.layer_idx = layer_idx
+        self.first_k_dense_replace = config.first_k_dense_replace
 
         # use layer_idx==None to indicate that the layer does not 
         # initialized on the current node
         if self.layer_idx is not None:
             self.attention = BailingMoeV2Attention(config, layer_idx=layer_idx)
-            self.mlp = BailingMoeV2MoE(config, layer_idx=layer_idx)
+            if self.layer_idx >= self.first_k_dense_replace:
+                self.mlp = BailingMoeV2MoE(config, layer_idx=layer_idx) 
+            else:
+                self.mlp = BailingMoeV2MLP(config, layer_idx=layer_idx)
             self.input_layernorm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
             self.post_attention_layernorm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
+
+    def flood_patch_func(self, kwargs=None):
+        if isinstance(self.mlp, BailingMoeV2MLP):
+            self.mlp._flood_patch_func()
 
     def forward(
         self,

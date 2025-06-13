@@ -51,3 +51,4 @@ def test_fused_moe(
 
 test_fused_moe(1, 128, 1288, 8, 2, torch.bfloat16)
 test_fused_moe(33, 1024, 511, 64, 6, torch.bfloat16)
+test_fused_moe(1024, 512, 1024, 256, 8, torch.bfloat16)
