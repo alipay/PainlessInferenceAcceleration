@@ -85,9 +85,12 @@ class BailingMoeV2MoE(torch.nn.Module):
         self.num_experts = config.num_experts
         self.top_k = config.num_experts_per_tok
         self.norm_topk_prob = self.config.norm_topk_prob
-
+        self.num_expert_group = config.n_group
+        self.topk_group = config.topk_group
+        self.router_scale_factor = config.moe_router_topk_scaling_factor
         exp_conf = copy.deepcopy(config)
         exp_conf.intermediate_size = config.moe_intermediate_size
+
 
         modules = torch.nn.ModuleList([BailingMoeV2MLP(exp_conf, layer_idx=-1)
                                         for _ in range(self.num_experts)])
@@ -95,7 +98,10 @@ class BailingMoeV2MoE(torch.nn.Module):
                                                     hidden_size=exp_conf.hidden_size,
                                                     intermediate_size=exp_conf.intermediate_size,
                                                     num_expert=self.num_experts,
-                                                    config=config
+                                                    scoring_func='sigmoid',
+                                                    num_expert_group=self.num_expert_group,
+                                                    topk_group=self.topk_group,
+                                                    config=config,
                                                     )
 
         self.gate = torch.nn.Linear(config.hidden_size,
@@ -127,7 +133,8 @@ class BailingMoeV2MoE(torch.nn.Module):
                                         router_logits,
                                         self.top_k,
                                         renormalize=self.norm_topk_prob,
-                                        expert_bias=self.gate.expert_bias
+                                        e_score_correction_bias=self.gate.expert_bias,
+                                        router_scale_factor=self.router_scale_factor
                                         )
         final_hidden_states = final_hidden_states + shared_output
 
