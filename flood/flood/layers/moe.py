@@ -5,6 +5,7 @@
 
 
 import functools
+from types import NoneType
 from typing import Any, Callable, Dict, Optional, Tuple, List
 
 import torch
@@ -487,14 +488,32 @@ def grouped_topk(hidden_states: torch.Tensor,
                  topk: int,
                  renormalize: bool,
                  num_expert_group: int = 0,
-                 topk_group: int = 0):
+                 topk_group: int = 0,
+                 scoring_func: str = "softmax",
+                 e_score_correction_bias: Optional[torch.Tensor] = None,
+                 router_scale_factor: Optional[float] = None,
+    ):
     assert hidden_states.shape[0] == gating_output.shape[0], (
         "Number of tokens mismatch")
 
-    scores = torch.softmax(gating_output, dim=-1)
+    if scoring_func == "softmax":
+        scores = torch.softmax(gating_output, dim=-1)
+    elif scoring_func == "sigmoid":
+        scores = gating_output.sigmoid()
+    else:
+        raise ValueError(f"Unsupported scoring function: {scoring_func}")
+
     num_token = scores.shape[0]
-    group_scores = scores.view(num_token, num_expert_group,
-                               -1).max(dim=-1).values  # [n, n_group]
+    if e_score_correction_bias is not None:
+        # Store original scores before applying correction bias. We use biased
+        # scores for expert selection but original scores for routing weights
+        original_scores = scores
+        scores = scores + e_score_correction_bias.unsqueeze(0)
+        group_scores = (scores.view(num_token, num_expert_group,
+                                    -1).topk(2, dim=-1)[0].sum(dim=-1))
+    else:
+        group_scores = scores.view(num_token, num_expert_group,
+                                   -1).max(dim=-1).values  # [n, n_group]
     group_idx = torch.topk(group_scores, k=topk_group, dim=-1,
                            sorted=False)[1]  # [n, top_k_group]
     group_mask = torch.zeros_like(group_scores)  # [n, n_group]
@@ -503,40 +522,23 @@ def grouped_topk(hidden_states: torch.Tensor,
         num_token, num_expert_group,
         scores.shape[-1] // num_expert_group).reshape(num_token, -1)  # [n, e]
     tmp_scores = scores.masked_fill(~score_mask.bool(), 0.0)  # [n, e]
-    topk_weights, topk_ids = torch.topk(tmp_scores,
-                                        k=topk,
-                                        dim=-1,
-                                        sorted=False)
+    if e_score_correction_bias is not None:
+        topk_ids = torch.topk(tmp_scores, k=topk, dim=-1, sorted=False)[1]
+        # Use original unbiased scores for the routing weights
+        topk_weights = original_scores.gather(1, topk_ids)
+    else:
+        topk_weights, topk_ids = torch.topk(tmp_scores,
+                                            k=topk,
+                                            dim=-1,
+                                            sorted=False)
 
     if renormalize:
         topk_weights = topk_weights / topk_weights.sum(dim=-1, keepdim=True)
+    if router_scale_factor is not None:
+        topk_weights = topk_weights * router_scale_factor
 
     return topk_weights.to(torch.float32), topk_ids.to(torch.int32)
 
-
-def sigmoid_topk(
-        hidden_states: torch.Tensor,
-        gating_output: torch.Tensor,
-        topk: int,
-        renormalize: bool,
-        expert_bias: Optional[torch.Tensor] = None,
-        router_scale_factor: float = 1.0 
-):
-    assert hidden_states.shape[0] == gating_output.shape[0], (
-        "Number of tokens mismatch")
-
-    gating_output = torch.sigmoid(gating_output)
-    if expert_bias is not None:
-        tmp_scores = gating_output + expert_bias
-        _, topk_ids = torch.topk(tmp_scores, k=topk, dim=-1)
-        topk_weights = torch.gather(gating_output, dim=-1, index=topk_ids).type_as(gating_output)
-    else:
-        topk_weights, topk_ids = torch.topk(gating_output, k=topk, dim=-1)
-    
-    if renormalize:
-        topk_weights = topk_weights / (topk_weights.sum(dim=-1, keepdim=True) + 1e-20)
-    
-    return topk_weights, topk_ids
 
 
 def get_config_dtype_str(dtype: torch.dtype,
@@ -712,11 +714,12 @@ def fused_moe(
         w2_scale: Optional[torch.Tensor] = None,
         a1_scale: Optional[torch.Tensor] = None,
         a2_scale: Optional[torch.Tensor] = None,
-        expert_bias: Optional[torch.Tensor] = None,
-        router_scale_factor: float = 1.0,
-        block_shape: Optional[List[int]] = None,
         b1: Optional[torch.Tensor] = None,
         b2: Optional[torch.Tensor] = None,
+        block_shape: Optional[List[int]] = None,
+        scoring_func: str = 'softmax',
+        e_score_correction_bias: Optional[torch.Tensor] = None,
+        router_scale_factor: Optional[float] = None,
 ) -> torch.Tensor:
     """
     This function computes a Mixture of Experts (MoE) layer using two sets of
@@ -740,12 +743,25 @@ def fused_moe(
         note: Deepseekv2 model uses grouped_topk
     - use_fp8_w8a8 (bool): If True, use fp8 arithmetic to compute the inner
         products for w1 and w2. Defaults to False.
-    - use_int8_w8a16 (bool): If True, use fp8 arithmetic to compute the inner
-        products for w1 and w2. Defaults to False.
+    - use_int8_w8a16 (bool): If True, use matmul of int8 weight and bf16/fp16
+        activation to compute the inner products for w1 and w2.
+        Defaults to False.
     - w1_scale (Optional[torch.Tensor]): Optional scale to be used for
         w1.
     - w2_scale (Optional[torch.Tensor]): Optional scale to be used for
         w2.
+    - a1_scale (Optional[torch.Tensor]): Optional scale to be used for
+        a1.
+    - a2_scale (Optional[torch.Tensor]): Optional scale to be used for
+        a2.
+    - block_shape: (Optional[list[int]]): Optional block size for block-wise
+        quantization.
+    - scoring_func (str): The scoring function used for routing. Typically 
+        'softmax' or other alternatives like 'topk'. Defaults to 'softmax'.
+    - e_score_correction_bias (Optional[torch.Tensor]): Optional bias tensor 
+        applied to the expert scores before routing. 
+    - router_scale_factor (Optional[float]): Scaling factor applied to the expert 
+        scores before routing. Defaults to 1.0.
 
     Returns:
     - torch.Tensor: The output tensor after applying the MoE layer.
@@ -757,15 +773,14 @@ def fused_moe(
         assert num_expert_group is not None and topk_group is not None
         topk_weights, topk_ids = grouped_topk(hidden_states, gating_output,
                                               topk, renormalize,
-                                              num_expert_group, topk_group)
+                                              num_expert_group, topk_group, 
+                                              scoring_func, e_score_correction_bias, router_scale_factor)
     elif custom_routing_function is None:
         topk_weights, topk_ids = fused_topk(hidden_states, gating_output, topk,
                                             renormalize)
     else:
         topk_weights, topk_ids = custom_routing_function(
-            hidden_states, gating_output, topk, renormalize, expert_bias, router_scale_factor)
-
-    topk_weights = topk_weights * router_scale_factor
+            hidden_states, gating_output, topk, renormalize)
 
     return fused_experts(hidden_states,
                          w1,
@@ -792,6 +807,9 @@ class AutoExperts():
                         hidden_size,
                         intermediate_size,
                         num_expert,
+                        scoring_func='softmax',
+                        num_expert_group=None,
+                        topk_group=None,
                         config=None
                         ):
         dtype = None
@@ -799,7 +817,7 @@ class AutoExperts():
             dtype = torch.float8_e4m3fn
         if isinstance(module_list, torch.nn.ModuleList):
             if dtype is None:
-                return NativeExperts(module_list, config)
+                return NativeExperts(module_list, scoring_func, num_expert_group, topk_group, config)
             elif dtype == torch.float8_e4m3fn:
                 return Fp8Experts(module_list)
             else:
@@ -816,16 +834,13 @@ class AutoExperts():
 
 
 class NativeExperts(torch.nn.ModuleList):
-    def __init__(self, modules, config) -> None:
+    def __init__(self, modules, scoring_func, num_expert_group, topk_group, config) -> None:
         super().__init__(modules)
-        self.custom_routing_function = None
+        self.scoring_func = scoring_func
+        self.use_grouped_topk = (num_expert_group is not None) and (topk_group is not None)
+        self.num_expert_group = num_expert_group
+        self.topk_group = topk_group
 
-        if getattr(config, 'gate_score_function', None) == 'sigmoid':
-            self.custom_routing_function = sigmoid_topk
-        if hasattr(config, 'moe_router_topk_scaling_factor'):
-            self.router_scale_factor = config.moe_router_topk_scaling_factor
-        else:
-            self.router_scale_factor = 1.0
     def _flood_patch_func(self):
         w1 = []
         w2 = []
@@ -838,22 +853,25 @@ class NativeExperts(torch.nn.ModuleList):
         self.w2 = torch.stack(w2, 0)
         self._modules.clear()
 
-    def forward(self, hidden_states, router_logits, top_k, renormalize=True, expert_bias=None):
+    def forward(self, hidden_states, router_logits, top_k, renormalize=True, e_score_correction_bias=None, router_scale_factor=None):
         return fused_moe(hidden_states,
                          self.w1,
                          self.w2,
                          router_logits,
                          top_k,
-                         custom_routing_function=self.custom_routing_function,
                          renormalize=renormalize,
                          inplace=True,
+                         use_grouped_topk=self.use_grouped_topk,
+                         num_expert_group=self.num_expert_group,
+                         topk_group=self.topk_group,
                          use_fp8_w8a8=False,
                          w1_scale=None,
                          w2_scale=None,
                          a1_scale=None,
                          a2_scale=None,
-                         expert_bias=expert_bias,
-                         router_scale_factor=self.router_scale_factor
+                         scoring_func=self.scoring_func,
+                         e_score_correction_bias=e_score_correction_bias,
+                         router_scale_factor=router_scale_factor
                         )
 
 class Fp8Experts(torch.nn.ModuleList):
