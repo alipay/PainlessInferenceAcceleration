@@ -36,13 +36,17 @@ class NativeRope(torch.nn.Module):
         self.rope_theta = config.rope_theta
         self.rope_scale = config.rope_scaling if hasattr(config,
                                                          'rope_scaling') and config.rope_scaling is not None else 1.0
+        partial_rotary_factor = config.partial_rotary_factor if hasattr(config, 'partial_rotary_factor') else 1.0
+        head_dim = getattr(config, "head_dim", None) or config.hidden_size // config.num_attention_heads
+        self.rotaty_dim = int(head_dim * partial_rotary_factor)
+
 
     def __call__(self,
                  q: torch.Tensor,
                  k: torch.Tensor,
                  indptr: torch.Tensor,
                  offsets: torch.Tensor):
-        flood_cuda.apply_rope_inplace(q, k, indptr, offsets, False,
+        flood_cuda.apply_rope_inplace(q, k, indptr, offsets, self.rotaty_dim, False,
                                       self.rope_scale, self.rope_theta)
         return q, k
 

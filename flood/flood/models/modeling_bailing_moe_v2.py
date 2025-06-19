@@ -260,7 +260,7 @@ class BailingMoeV2DecoderLayer(torch.nn.Module):
             self.post_attention_layernorm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
 
     def flood_patch_func(self, kwargs=None):
-        if isinstance(self.mlp, BailingMoeV2MLP):
+        if self.layer_idx is not None and isinstance(self.mlp, BailingMoeV2MLP):
             self.mlp._flood_patch_func()
 
     def forward(
