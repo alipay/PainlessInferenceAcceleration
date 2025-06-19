@@ -59,37 +59,44 @@ __device__ __forceinline__ vec_t<float, vec_size> vec_apply_yarn_rope(
 
 template <uint32_t vec_size, uint32_t bdx, typename T>
 __device__ __forceinline__ vec_t<float, vec_size> vec_apply_llama_rope(
-    const T* x, const vec_t<float, vec_size>& freq, int32_t offset) {
-  constexpr uint32_t head_dim = vec_size * bdx;
+    const T* x, const vec_t<float, vec_size>& freq, int32_t offset,
+    const uint32_t rotary_dim = vec_size * bdx) {
   vec_t<float, vec_size> permuted_vec, vec;
   vec.cast_load(x + threadIdx.x * vec_size);
-  permuted_vec.cast_load(x + ((threadIdx.x * vec_size < head_dim / 2)
-                                  ? threadIdx.x * vec_size + head_dim / 2
-                                  : threadIdx.x * vec_size - head_dim / 2));
+
+  if (threadIdx.x * vec_size < rotary_dim) {
+    permuted_vec.cast_load(x + ((threadIdx.x * vec_size < rotary_dim / 2)
+                                    ? threadIdx.x * vec_size + rotary_dim / 2
+                                    : threadIdx.x * vec_size - rotary_dim / 2));
 #pragma unroll
-  for (uint32_t i = 0; i < vec_size; ++i) {
-    float embed = float(offset) * freq[i];
-    float cos, sin;
-    __sincosf(embed, &sin, &cos);
-    vec[i] = vec[i] * cos +
-             ((threadIdx.x * vec_size < head_dim / 2) ? -permuted_vec[i] : permuted_vec[i]) * sin;
+    for (uint32_t i = 0; i < vec_size; ++i) {
+      float embed = float(offset) * freq[i];
+      float cos, sin;
+      __sincosf(embed, &sin, &cos);
+      vec[i] =
+          vec[i] * cos +
+          ((threadIdx.x * vec_size < rotary_dim / 2) ? -permuted_vec[i] : permuted_vec[i]) * sin;
+    }
   }
   return vec;
 }
 
 template <uint32_t vec_size, uint32_t bdx, typename T>
 __device__ __forceinline__ vec_t<float, vec_size> vec_apply_llama_rope_interleave(
-    const T* x, const vec_t<float, vec_size>& freq, int32_t offset) {
+    const T* x, const vec_t<float, vec_size>& freq, int32_t offset,
+    const uint32_t rotary_dim = vec_size * bdx) {
   vec_t<float, vec_size> vec, vec_before;
   vec.cast_load(x + threadIdx.x * vec_size);
-  vec_before = vec;
 
+  if (threadIdx.x * vec_size < rotary_dim) {
+    vec_before = vec;
 #pragma unroll
-  for (uint32_t i = 0; i < vec_size; ++i) {
-    float embed = float(offset) * freq[i];
-    float cos, sin;
-    __sincosf(embed, &sin, &cos);
-    vec[i] = vec[i] * cos + ((i % 2 == 0) ? -vec_before[i ^ 1] : vec_before[i ^ 1]) * sin;
+    for (uint32_t i = 0; i < vec_size; ++i) {
+      float embed = float(offset) * freq[i];
+      float cos, sin;
+      __sincosf(embed, &sin, &cos);
+      vec[i] = vec[i] * cos + ((i % 2 == 0) ? -vec_before[i ^ 1] : vec_before[i ^ 1]) * sin;
+    }
   }
   return vec;
 }
@@ -102,24 +109,26 @@ template <bool interleave, uint32_t head_dim, uint32_t vec_size, uint32_t bdx, t
 __global__ void BatchQKApplyRotaryKernel(
     DType* q, DType* k, DType* q_rope, DType* k_rope, IdType* __restrict__ indptr,
     IdType* __restrict__ offsets, uint32_t batch_size, uint32_t num_qo_heads, uint32_t num_kv_heads,
-    size_t q_stride_n, size_t q_stride_h, size_t k_stride_n, size_t k_stride_h,
+    uint32_t rotary_dim, size_t q_stride_n, size_t q_stride_h, size_t k_stride_n, size_t k_stride_h,
     size_t q_rope_stride_n, size_t q_rope_stride_h, size_t k_rope_stride_n, size_t k_rope_stride_h,
     float smooth_a, float smooth_b, float rope_rcp_scale, float rope_rcp_theta) {
   uint32_t bx = blockIdx.x, tx = threadIdx.x, ty = threadIdx.y;
   const uint32_t bdy = blockDim.y;
   vec_t<float, vec_size> freq;
+  if (tx * vec_size < rotary_dim) {
 #pragma unroll
-  for (uint32_t i = 0; i < vec_size; ++i) {
-    if constexpr (interleave) {
-      freq[i] = __powf(rope_rcp_theta, float(2 * ((tx * vec_size + i) / 2)) / float(head_dim));
-    } else {
-      freq[i] = __powf(rope_rcp_theta,
-                       float(2 * ((tx * vec_size + i) % (head_dim / 2))) / float(head_dim));
-    }
+    for (uint32_t i = 0; i < vec_size; ++i) {
+      if constexpr (interleave) {
+        freq[i] = __powf(rope_rcp_theta, float(2 * ((tx * vec_size + i) / 2)) / float(rotary_dim));
+      } else {
+        freq[i] = __powf(rope_rcp_theta,
+                         float(2 * ((tx * vec_size + i) % (rotary_dim / 2))) / float(rotary_dim));
+      }
 
-    float smooth = freq[i] * smooth_a + smooth_b;
-    smooth = max(0.0f, min(1.0f, smooth));  // clamp to [0, 1]
-    freq[i] = (1 - smooth) * (freq[i] * rope_rcp_scale) + smooth * freq[i];
+      float smooth = freq[i] * smooth_a + smooth_b;
+      smooth = max(0.0f, min(1.0f, smooth));  // clamp to [0, 1]
+      freq[i] = (1 - smooth) * (freq[i] * rope_rcp_scale) + smooth * freq[i];
+    }
   }
 
   if (bx < batch_size * num_qo_heads) {
@@ -138,10 +147,11 @@ __global__ void BatchQKApplyRotaryKernel(
             q_rope + get_elem_offset_impl(indptr[batch_idx] + i * bdy + ty, qo_head_idx, 0,
                                           q_rope_stride_n, q_rope_stride_h);
         if constexpr (interleave) {
-          q_vec =
-              vec_apply_llama_rope_interleave<vec_size, bdx>(q_ptr, freq, offset + i * bdy + ty);
+          q_vec = vec_apply_llama_rope_interleave<vec_size, bdx>(q_ptr, freq, offset + i * bdy + ty,
+                                                                 rotary_dim);
         } else {
-          q_vec = vec_apply_llama_rope<vec_size, bdx>(q_ptr, freq, offset + i * bdy + ty);
+          q_vec =
+              vec_apply_llama_rope<vec_size, bdx>(q_ptr, freq, offset + i * bdy + ty, rotary_dim);
         }
         q_vec.cast_store(q_rope_ptr + tx * vec_size);
       }
@@ -162,10 +172,11 @@ __global__ void BatchQKApplyRotaryKernel(
             k_rope + get_elem_offset_impl(indptr[batch_idx] + i * bdy + ty, kv_head_idx, 0,
                                           k_rope_stride_n, k_rope_stride_h);
         if constexpr (interleave) {
-          k_vec =
-              vec_apply_llama_rope_interleave<vec_size, bdx>(k_ptr, freq, offset + i * bdy + ty);
+          k_vec = vec_apply_llama_rope_interleave<vec_size, bdx>(k_ptr, freq, offset + i * bdy + ty,
+                                                                 rotary_dim);
         } else {
-          k_vec = vec_apply_llama_rope<vec_size, bdx>(k_ptr, freq, offset + i * bdy + ty);
+          k_vec =
+              vec_apply_llama_rope<vec_size, bdx>(k_ptr, freq, offset + i * bdy + ty, rotary_dim);
         }
         k_vec.cast_store(k_rope_ptr + tx * vec_size);
       }
@@ -174,15 +185,16 @@ __global__ void BatchQKApplyRotaryKernel(
 }
 
 
+
 template <typename DType, typename IdType>
 void BatchQKApplyRotary(DType* q, DType* k, DType* q_rope, DType* k_rope,
                         IdType* __restrict__ indptr, IdType* __restrict__ offsets,
                         uint32_t batch_size, uint32_t num_qo_heads, uint32_t num_kv_heads,
-                        uint32_t head_dim, size_t q_stride_n, size_t q_stride_h,
-                        size_t k_stride_n, size_t k_stride_h, size_t q_rope_stride_n,
-                        size_t q_rope_stride_h, size_t k_rope_stride_n,
-                        size_t k_rope_stride_h, bool interleave, float rope_scale,
-                        float rope_theta, cudaStream_t stream = nullptr){
+                        uint32_t rotary_dim, uint32_t head_dim, size_t q_stride_n,
+                        size_t q_stride_h, size_t k_stride_n, size_t k_stride_h, 
+                        size_t q_rope_stride_n, size_t q_rope_stride_h, 
+                        size_t k_rope_stride_n, size_t k_rope_stride_h, bool interleave,
+                        float rope_scale, float rope_theta, cudaStream_t stream = nullptr){
         
     float rope_rcp_scale = 1.0f / rope_scale;
     float rope_rcp_theta = 1.0f / rope_theta;
@@ -211,6 +223,7 @@ void BatchQKApplyRotary(DType* q, DType* k, DType* q_rope, DType* k_rope,
                                     batch_size,
                                     num_qo_heads,
                                     num_kv_heads,
+                                    rotary_dim,
                                     q_stride_n,
                                     q_stride_h,
                                     k_stride_n,
@@ -226,8 +239,8 @@ void BatchQKApplyRotary(DType* q, DType* k, DType* q_rope, DType* k_rope,
 }
 
 
-void apply_rope(torch::Tensor q, torch::Tensor k, torch::Tensor q_rope, torch::Tensor k_rope,
-                torch::Tensor indptr, torch::Tensor offsets, bool interleave, float rope_scale,
+void apply_rope(torch::Tensor q, torch::Tensor k, torch::Tensor q_rope, torch::Tensor k_rope, torch::Tensor indptr,
+                torch::Tensor offsets, uint32_t rotary_dim, bool interleave, float rope_scale,
                 float rope_theta) {
 
     auto device = q.device();
@@ -252,7 +265,7 @@ void apply_rope(torch::Tensor q, torch::Tensor k, torch::Tensor q_rope, torch::T
         static_cast<flood_type*>(q.data_ptr()), static_cast<flood_type*>(k.data_ptr()),
         static_cast<flood_type*>(q_rope.data_ptr()), static_cast<flood_type*>(k_rope.data_ptr()),
         static_cast<int32_t*>(indptr.data_ptr()), static_cast<int32_t*>(offsets.data_ptr()),
-        batch_size, num_qo_heads, num_kv_heads, head_dim, q_stride_n, q_stride_h, k_stride_n,
+        batch_size, num_qo_heads, num_kv_heads, rotary_dim, head_dim, q_stride_n, q_stride_h, k_stride_n,
         k_stride_h, q_rope_stride_n, q_rope_stride_h, k_rope_stride_n, k_rope_stride_h, interleave,
         rope_scale, rope_theta, torch_current_stream);
     });
@@ -266,23 +279,25 @@ template <bool interleave, uint32_t head_dim, uint32_t vec_size, uint32_t bdx, t
 __global__ void BatchQKApplyRotaryInPlaceKernel(
     DType* __restrict__ q, DType* __restrict__ k, IdType* __restrict__ indptr,
     IdType* __restrict__ offsets, uint32_t batch_size, uint32_t num_qo_heads, uint32_t num_kv_heads,
-    size_t q_stride_n, size_t q_stride_h, size_t k_stride_n, size_t k_stride_h, float smooth_a,
-    float smooth_b, float rope_rcp_scale, float rope_rcp_theta) {
+    uint32_t rotary_dim, size_t q_stride_n, size_t q_stride_h, size_t k_stride_n, size_t k_stride_h, 
+    float smooth_a, float smooth_b, float rope_rcp_scale, float rope_rcp_theta) {
   uint32_t bx = blockIdx.x, tx = threadIdx.x, ty = threadIdx.y;
   const uint32_t bdy = blockDim.y;
   vec_t<float, vec_size> freq;
+  if (tx * vec_size < rotary_dim) {
 #pragma unroll
-  for (uint32_t i = 0; i < vec_size; ++i) {
-    if constexpr (interleave) {
-      freq[i] = __powf(rope_rcp_theta, float(2 * ((tx * vec_size + i) / 2)) / float(head_dim));
-    } else {
-      freq[i] = __powf(rope_rcp_theta,
-                       float(2 * ((tx * vec_size + i) % (head_dim / 2))) / float(head_dim));
-    }
+    for (uint32_t i = 0; i < vec_size; ++i) {
+      if constexpr (interleave) {
+        freq[i] = __powf(rope_rcp_theta, float(2 * ((tx * vec_size + i) / 2)) / float(rotary_dim));
+      } else {
+        freq[i] = __powf(rope_rcp_theta,
+                         float(2 * ((tx * vec_size + i) % (rotary_dim / 2))) / float(rotary_dim));
+      }
 
-    float smooth = freq[i] * smooth_a + smooth_b;
-    smooth = max(0.0f, min(1.0f, smooth));  // clamp to [0, 1]
-    freq[i] = (1 - smooth) * (freq[i] * rope_rcp_scale) + smooth * freq[i];
+      float smooth = freq[i] * smooth_a + smooth_b;
+      smooth = max(0.0f, min(1.0f, smooth));  // clamp to [0, 1]
+      freq[i] = (1 - smooth) * (freq[i] * rope_rcp_scale) + smooth * freq[i];
+    }
   }
 
   if (bx < batch_size * num_qo_heads) {
@@ -299,9 +314,9 @@ __global__ void BatchQKApplyRotaryInPlaceKernel(
                                                 q_stride_n, q_stride_h);
         if constexpr (interleave) {
           q_vec =
-              vec_apply_llama_rope_interleave<vec_size, bdx>(q_ptr, freq, offset + i * bdy + ty);
+              vec_apply_llama_rope_interleave<vec_size, bdx>(q_ptr, freq, offset + i * bdy + ty, rotary_dim);
         } else {
-          q_vec = vec_apply_llama_rope<vec_size, bdx>(q_ptr, freq, offset + i * bdy + ty);
+          q_vec = vec_apply_llama_rope<vec_size, bdx>(q_ptr, freq, offset + i * bdy + ty, rotary_dim);
         }
         q_vec.cast_store(q_ptr + tx * vec_size);
       }
@@ -320,9 +335,9 @@ __global__ void BatchQKApplyRotaryInPlaceKernel(
                                                 k_stride_n, k_stride_h);
         if constexpr (interleave) {
           k_vec =
-              vec_apply_llama_rope_interleave<vec_size, bdx>(k_ptr, freq, offset + i * bdy + ty);
+              vec_apply_llama_rope_interleave<vec_size, bdx>(k_ptr, freq, offset + i * bdy + ty, rotary_dim);
         } else {
-          k_vec = vec_apply_llama_rope<vec_size, bdx>(k_ptr, freq, offset + i * bdy + ty);
+          k_vec = vec_apply_llama_rope<vec_size, bdx>(k_ptr, freq, offset + i * bdy + ty, rotary_dim);
         }
         k_vec.cast_store(k_ptr + tx * vec_size);
       }
@@ -337,7 +352,7 @@ template <bool interleave, uint32_t head_dim, uint32_t vec_size, uint32_t bdx, t
 __global__ void BatchQKApplyYarnRotaryInPlaceKernel(
     DType* __restrict__ q, DType* __restrict__ k, IdType* __restrict__ indptr,
     IdType* __restrict__ offsets, uint32_t batch_size, uint32_t num_qo_heads, uint32_t num_kv_heads,
-    size_t q_stride_n, size_t q_stride_h, size_t k_stride_n, size_t k_stride_h, float low,
+    uint32_t rotary_dim, size_t q_stride_n, size_t q_stride_h, size_t k_stride_n, size_t k_stride_h, float low,
     float high, float rope_rcp_scale, float rope_rcp_theta, float attention_factor) {
   uint32_t bx = blockIdx.x, tx = threadIdx.x, ty = threadIdx.y;
   const uint32_t bdy = blockDim.y;
@@ -396,9 +411,9 @@ __global__ void BatchQKApplyYarnRotaryInPlaceKernel(
                                                 k_stride_n, k_stride_h);
         if constexpr (interleave) {
           k_vec =
-              vec_apply_llama_rope_interleave<vec_size, bdx>(k_ptr, freq, offset + i * bdy + ty);
+              vec_apply_llama_rope_interleave<vec_size, bdx>(k_ptr, freq, offset + i * bdy + ty, rotary_dim);
         } else {
-          k_vec = vec_apply_llama_rope<vec_size, bdx>(k_ptr, freq, offset + i * bdy + ty);
+          k_vec = vec_apply_llama_rope<vec_size, bdx>(k_ptr, freq, offset + i * bdy + ty, rotary_dim);
         }
         k_vec.cast_store(k_ptr + tx * vec_size);
       }
@@ -413,10 +428,10 @@ template <typename DType, typename IdType>
 void BatchQKApplyRotaryInPlace(DType* __restrict__ q, DType* __restrict__ k,
                                       IdType* __restrict__ indptr, IdType* __restrict__ offsets,
                                       uint32_t batch_size, uint32_t num_qo_heads,
-                                      uint32_t num_kv_heads, uint32_t head_dim, size_t q_stride_n,
-                                      size_t q_stride_h, size_t k_stride_n, size_t k_stride_h,
-                                      bool interleave, float rope_scale, float rope_theta,
-                                      cudaStream_t stream = nullptr) {
+                                      uint32_t num_kv_heads, uint32_t rotary_dim, uint32_t head_dim, 
+                                      size_t q_stride_n, size_t q_stride_h, size_t k_stride_n, 
+                                      size_t k_stride_h, bool interleave, float rope_scale,
+                                      float rope_theta, cudaStream_t stream = nullptr) {
 
     float rope_rcp_scale = 1.0f / rope_scale;
     float rope_rcp_theta = 1.0f / rope_theta;
@@ -445,6 +460,7 @@ void BatchQKApplyRotaryInPlace(DType* __restrict__ q, DType* __restrict__ k,
                                       batch_size,
                                       num_qo_heads,
                                       num_kv_heads,
+                                      rotary_dim,
                                       q_stride_n,
                                       q_stride_h,
                                       k_stride_n,
@@ -463,8 +479,8 @@ template <typename DType, typename IdType>
 void BatchQKApplyLlama31RotaryInPlace(
     DType* __restrict__ q, DType* __restrict__ k, IdType* __restrict__ indptr,
     IdType* __restrict__ offsets, uint32_t batch_size, uint32_t num_qo_heads, uint32_t num_kv_heads,
-    uint32_t head_dim, size_t q_stride_n, size_t q_stride_h, size_t k_stride_n, size_t k_stride_h,
-    bool interleave, float rope_scale, float rope_theta, float low_freq_factor,
+    uint32_t rotary_dim, uint32_t head_dim, size_t q_stride_n, size_t q_stride_h, size_t k_stride_n, 
+    size_t k_stride_h, bool interleave, float rope_scale, float rope_theta, float low_freq_factor,
     float high_freq_factor, float old_context_length, cudaStream_t stream = nullptr) {
   float rope_rcp_scale = 1.0f / rope_scale;
   float rope_rcp_theta = 1.0f / rope_theta;
@@ -491,6 +507,7 @@ void BatchQKApplyLlama31RotaryInPlace(
                                  batch_size,
                                  num_qo_heads,
                                  num_kv_heads,
+                                 rotary_dim,
                                  q_stride_n,
                                  q_stride_h,
                                  k_stride_n,
@@ -508,7 +525,7 @@ template <typename DType, typename IdType>
 void BatchQKApplyYarnRotaryInPlace(DType* __restrict__ q, DType* __restrict__ k,
                                       IdType* __restrict__ indptr, IdType* __restrict__ offsets,
                                       uint32_t batch_size, uint32_t num_qo_heads,
-                                      uint32_t num_kv_heads, uint32_t head_dim, size_t q_stride_n,
+                                      uint32_t num_kv_heads, uint32_t rotary_dim, uint32_t head_dim, size_t q_stride_n,
                                       size_t q_stride_h, size_t k_stride_n, size_t k_stride_h,
                                       bool interleave, float rope_scale, float rope_theta, float low, float high, float attention_factor,
                                       cudaStream_t stream = nullptr) {
@@ -540,6 +557,7 @@ void BatchQKApplyYarnRotaryInPlace(DType* __restrict__ q, DType* __restrict__ k,
                                       batch_size,
                                       num_qo_heads,
                                       num_kv_heads,
+                                      rotary_dim,
                                       q_stride_n,
                                       q_stride_h,
                                       k_stride_n,
@@ -554,7 +572,7 @@ void BatchQKApplyYarnRotaryInPlace(DType* __restrict__ q, DType* __restrict__ k,
 }
 
 void apply_rope_inplace(torch::Tensor q, torch::Tensor k, torch::Tensor indptr,
-                        torch::Tensor offsets, bool interleave, float rope_scale,
+                        torch::Tensor offsets, uint32_t rotary_dim, bool interleave, float rope_scale,
                         float rope_theta) {
 
   auto device = q.device();
@@ -576,13 +594,13 @@ void apply_rope_inplace(torch::Tensor q, torch::Tensor k, torch::Tensor indptr,
     BatchQKApplyRotaryInPlace(
         static_cast<flood_type*>(q.data_ptr()), static_cast<flood_type*>(k.data_ptr()),
         static_cast<int32_t*>(indptr.data_ptr()), static_cast<int32_t*>(offsets.data_ptr()),
-        batch_size, num_qo_heads, num_kv_heads, head_dim, q_stride_n, q_stride_h, k_stride_n,
+        batch_size, num_qo_heads, num_kv_heads, rotary_dim, head_dim, q_stride_n, q_stride_h, k_stride_n,
         k_stride_h, interleave, rope_scale, rope_theta, torch_current_stream);
   });
 }
 
 void apply_llama31_rope_inplace(torch::Tensor q, torch::Tensor k, torch::Tensor indptr,
-                                torch::Tensor offsets, bool interleave, float rope_scale,
+                                torch::Tensor offsets, uint32_t rotary_dim, bool interleave, float rope_scale,
                                 float rope_theta, float low_freq_factor, float high_freq_factor,
                                 float old_context_length) {
 
@@ -604,14 +622,14 @@ void apply_llama31_rope_inplace(torch::Tensor q, torch::Tensor k, torch::Tensor 
     BatchQKApplyLlama31RotaryInPlace(
         static_cast<flood_type*>(q.data_ptr()), static_cast<flood_type*>(k.data_ptr()),
         static_cast<int32_t*>(indptr.data_ptr()), static_cast<int32_t*>(offsets.data_ptr()),
-        batch_size, num_qo_heads, num_kv_heads, head_dim, q_stride_n, q_stride_h, k_stride_n,
+        batch_size, num_qo_heads, num_kv_heads, rotary_dim, head_dim, q_stride_n, q_stride_h, k_stride_n,
         k_stride_h, interleave, rope_scale, rope_theta, low_freq_factor, high_freq_factor,
         old_context_length, torch_current_stream);
   });
 }
 
 void apply_yarn_rope_inplace(torch::Tensor q, torch::Tensor k, torch::Tensor indptr,
-                        torch::Tensor offsets, bool interleave, float rope_scale,
+                        torch::Tensor offsets, uint32_t rotary_dim, bool interleave, float rope_scale,
                         float rope_theta, float low, float high, float attention_factor) {
 
   auto device = q.device();
@@ -633,7 +651,7 @@ void apply_yarn_rope_inplace(torch::Tensor q, torch::Tensor k, torch::Tensor ind
     BatchQKApplyYarnRotaryInPlace(
         static_cast<flood_type*>(q.data_ptr()), static_cast<flood_type*>(k.data_ptr()),
         static_cast<int32_t*>(indptr.data_ptr()), static_cast<int32_t*>(offsets.data_ptr()),
-        batch_size, num_qo_heads, num_kv_heads, head_dim, q_stride_n, q_stride_h, k_stride_n,
+        batch_size, num_qo_heads, num_kv_heads, rotary_dim, head_dim, q_stride_n, q_stride_h, k_stride_n,
         k_stride_h, interleave, rope_scale, rope_theta, low, high, attention_factor, torch_current_stream);
   });
 }
