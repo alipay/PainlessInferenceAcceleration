@@ -499,7 +499,7 @@ def grouped_topk(hidden_states: torch.Tensor,
     if scoring_func == "softmax":
         scores = torch.softmax(gating_output, dim=-1)
     elif scoring_func == "sigmoid":
-        scores = gating_output.sigmoid()
+        scores = torch.sigmoid(gating_output)
     else:
         raise ValueError(f"Unsupported scoring function: {scoring_func}")
 
@@ -533,9 +533,8 @@ def grouped_topk(hidden_states: torch.Tensor,
                                             sorted=False)
 
     if renormalize:
-        topk_weights = topk_weights / topk_weights.sum(dim=-1, keepdim=True)
-    if router_scale_factor is not None:
-        topk_weights = topk_weights * router_scale_factor
+        topk_weights = topk_weights / (topk_weights.sum(dim=-1, keepdim=True) + 1e-20)
+
 
     return topk_weights.to(torch.float32), topk_ids.to(torch.int32)
 
@@ -691,7 +690,6 @@ def fused_experts(hidden_states: torch.Tensor,
         torch.sum(intermediate_cache3.view(*intermediate_cache3.shape),
                   dim=1,
                   out=out_hidden_states[begin_chunk_idx:end_chunk_idx])
-        # out_hidden_states[begin_chunk_idx:end_chunk_idx] = torch.sum(intermediate_cache3.view(*intermediate_cache3.shape), dim=1)
     return out_hidden_states
 
 
@@ -781,7 +779,8 @@ def fused_moe(
     else:
         topk_weights, topk_ids = custom_routing_function(
             hidden_states, gating_output, topk, renormalize)
-
+    if router_scale_factor is not None:
+        topk_weights = topk_weights * router_scale_factor
     return fused_experts(hidden_states,
                          w1,
                          w2,
