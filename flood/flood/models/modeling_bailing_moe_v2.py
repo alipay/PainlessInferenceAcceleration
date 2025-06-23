@@ -109,7 +109,7 @@ class BailingMoeV2MoE(torch.nn.Module):
                                      bias=False)
 
         if getattr(config, 'use_expert_bias', False):
-            self.gate.expert_bias = torch.nn.Parameter(torch.empty(self.num_experts))
+            self.gate.expert_bias = torch.nn.Parameter(torch.zeros(self.num_experts))
         else:
             self.gate.expert_bias = None
         im_sz = config.moe_intermediate_size * config.num_shared_experts
@@ -169,8 +169,9 @@ class BailingMoeV2Attention(torch.nn.Module):
                                                  bias=config.use_qkv_bias, 
                                                  config=config, 
                                                  name='query_key_value')
-        self.q_norm = RMSNorm(self.head_dim, eps=config.rms_norm_eps)
-        self.k_norm = RMSNorm(self.head_dim, eps=config.rms_norm_eps)
+        if self.use_qk_norm:
+            self.q_norm = RMSNorm(self.head_dim, eps=config.rms_norm_eps)
+            self.k_norm = RMSNorm(self.head_dim, eps=config.rms_norm_eps)
         self.dense = AutoLinear.from_pretrained(self.intermediate_size, 
                                                  self.hidden_size, 
                                                  bias=config.use_bias, 
@@ -307,7 +308,7 @@ class BailingMoeV2Model(PreTrainedModel):
 
     config_class = BailingMoeV2Config
     base_model_prefix = "model"
-    _no_split_modules = ["BailingMoeDecoderLayer"]
+    _no_split_modules = ["BailingMoeV2DecoderLayer"]
 
     def __init__(self, config: PretrainedConfig):
         super().__init__(config)

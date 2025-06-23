@@ -27,6 +27,7 @@ class BailingMoeV2Config(PretrainedConfig):
         initializer_range=0.02,
         max_position_embeddings=16384,
         rope_theta=10000.0,
+        partial_rotary_factor=1.0,
         use_cache=True,
         use_sliding_window=False,
         sliding_window=4096,
@@ -36,12 +37,14 @@ class BailingMoeV2Config(PretrainedConfig):
         num_experts=16,
         num_shared_experts=0,
         num_experts_per_tok=2,
+        n_group=8,
+        topk_group=4,
+        moe_router_topk_scaling_factor=2.5,
         norm_topk_prob=True,
         moe_intermediate_size=None,
         first_k_dense_replace=0,
         head_dim=None,
         use_expert_bias=False,
-        gate_score_function="softmax",
         output_router_logits=False,
         **kwargs,
     ):
@@ -69,16 +72,19 @@ class BailingMoeV2Config(PretrainedConfig):
         self.max_window_layers = max_window_layers
         self.head_dim = head_dim
         self.rope_scaling = rope_scaling
+        self.partial_rotary_factor = partial_rotary_factor
 
         # MoE configs
         self.num_experts = num_experts
         self.num_shared_experts = num_shared_experts
         self.num_experts_per_tok = num_experts_per_tok
         self.norm_topk_prob = norm_topk_prob
+        self.n_group = n_group
+        self.topk_group = topk_group
         self.moe_intermediate_size = moe_intermediate_size
         self.first_k_dense_replace = first_k_dense_replace
         self.use_expert_bias = use_expert_bias
-        self.gate_score_function = gate_score_function
         self.output_router_logits = output_router_logits
+        self.moe_router_topk_scaling_factor = moe_router_topk_scaling_factor
 
         super().__init__(pad_token_id=pad_token_id, tie_word_embeddings=tie_word_embeddings, **kwargs)

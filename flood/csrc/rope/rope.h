@@ -4,19 +4,19 @@
 #include <torch/extension.h>
 
 void apply_rope(torch::Tensor q, torch::Tensor k, torch::Tensor q_rope, torch::Tensor k_rope, torch::Tensor indptr,
-                torch::Tensor offsets, uint32_t rotary_dim, bool interleave, float rope_scale,
+                torch::Tensor offsets, int64_t rotary_dim, bool interleave, float rope_scale,
                 float rope_theta);
 
 
 void apply_rope_inplace(torch::Tensor q, torch::Tensor k, torch::Tensor indptr, torch::Tensor offsets,
-                        uint32_t rotary_dim, bool interleave, float rope_scale, float rope_theta);
+                        int64_t rotary_dim, bool interleave, float rope_scale, float rope_theta);
 
 void apply_llama31_rope_inplace(torch::Tensor q, torch::Tensor k, torch::Tensor indptr,
-                                torch::Tensor offsets, uint32_t rotary_dim, bool interleave, float rope_scale,
+                                torch::Tensor offsets, int64_t rotary_dim, bool interleave, float rope_scale,
                                 float rope_theta, float low_freq_factor, float high_freq_factor,
                                 float old_context_length);
 
 void apply_yarn_rope_inplace(torch::Tensor q, torch::Tensor k, torch::Tensor indptr,
-                             torch::Tensor offsets, uint32_t rotary_dim, bool interleave, float rope_scale, float rope_theta,
+                             torch::Tensor offsets, int64_t rotary_dim, bool interleave, float rope_scale, float rope_theta,
                              float low, float high, float attention_factor);
 
