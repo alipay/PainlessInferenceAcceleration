@@ -64,6 +64,7 @@ def update_cache(
                             key_states.size(0),
                             key_states.size(1) * key_states.size(2),
                             key_states.stride(0) // 8,
+                            value_states.stride(0) // 8,
                             k_out.stride(0) // 8
                             )
 
