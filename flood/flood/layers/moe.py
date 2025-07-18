@@ -491,7 +491,7 @@ def grouped_topk(hidden_states: torch.Tensor,
                  topk_group: int = 0,
                  scoring_func: str = "softmax",
                  e_score_correction_bias: Optional[torch.Tensor] = None,
-                 router_scale_factor: Optional[float] = None,
+                 routed_scaling_factor: Optional[float] = None,
     ):
     assert hidden_states.shape[0] == gating_output.shape[0], (
         "Number of tokens mismatch")
@@ -717,7 +717,7 @@ def fused_moe(
         block_shape: Optional[List[int]] = None,
         scoring_func: str = 'softmax',
         e_score_correction_bias: Optional[torch.Tensor] = None,
-        router_scale_factor: Optional[float] = None,
+        routed_scaling_factor: Optional[float] = None,
 ) -> torch.Tensor:
     """
     This function computes a Mixture of Experts (MoE) layer using two sets of
@@ -758,7 +758,7 @@ def fused_moe(
         'softmax' or other alternatives like 'topk'. Defaults to 'softmax'.
     - e_score_correction_bias (Optional[torch.Tensor]): Optional bias tensor 
         applied to the expert scores before routing. 
-    - router_scale_factor (Optional[float]): Scaling factor applied to the expert 
+    - routed_scaling_factor (Optional[float]): Scaling factor applied to the expert 
         scores before routing. Defaults to 1.0.
 
     Returns:
@@ -772,15 +772,15 @@ def fused_moe(
         topk_weights, topk_ids = grouped_topk(hidden_states, gating_output,
                                               topk, renormalize,
                                               num_expert_group, topk_group, 
-                                              scoring_func, e_score_correction_bias, router_scale_factor)
+                                              scoring_func, e_score_correction_bias, routed_scaling_factor)
     elif custom_routing_function is None:
         topk_weights, topk_ids = fused_topk(hidden_states, gating_output, topk,
                                             renormalize)
     else:
         topk_weights, topk_ids = custom_routing_function(
             hidden_states, gating_output, topk, renormalize)
-    if router_scale_factor is not None:
-        topk_weights = topk_weights * router_scale_factor
+    if routed_scaling_factor is not None:
+        topk_weights = topk_weights * routed_scaling_factor
     return fused_experts(hidden_states,
                          w1,
                          w2,
@@ -852,7 +852,7 @@ class NativeExperts(torch.nn.ModuleList):
         self.w2 = torch.stack(w2, 0)
         self._modules.clear()
 
-    def forward(self, hidden_states, router_logits, top_k, renormalize=True, e_score_correction_bias=None, router_scale_factor=None):
+    def forward(self, hidden_states, router_logits, top_k, renormalize=True, e_score_correction_bias=None, routed_scaling_factor=None):
         return fused_moe(hidden_states,
                          self.w1,
                          self.w2,
@@ -870,7 +870,7 @@ class NativeExperts(torch.nn.ModuleList):
                          a2_scale=None,
                          scoring_func=self.scoring_func,
                          e_score_correction_bias=e_score_correction_bias,
-                         router_scale_factor=router_scale_factor
+                         routed_scaling_factor=routed_scaling_factor
                         )
 
 class Fp8Experts(torch.nn.ModuleList):
