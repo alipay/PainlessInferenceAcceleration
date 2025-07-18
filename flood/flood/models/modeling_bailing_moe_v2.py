@@ -87,7 +87,7 @@ class BailingMoeV2MoE(torch.nn.Module):
         self.norm_topk_prob = self.config.norm_topk_prob
         self.num_expert_group = config.n_group
         self.topk_group = config.topk_group
-        self.router_scale_factor = config.moe_router_topk_scaling_factor
+        self.routed_scaling_factor = config.routed_scaling_factor
         exp_conf = copy.deepcopy(config)
         exp_conf.intermediate_size = config.moe_intermediate_size
 
@@ -134,7 +134,7 @@ class BailingMoeV2MoE(torch.nn.Module):
                                         self.top_k,
                                         renormalize=self.norm_topk_prob,
                                         e_score_correction_bias=self.gate.expert_bias,
-                                        router_scale_factor=self.router_scale_factor
+                                        routed_scaling_factor=self.routed_scaling_factor
                                         )
         final_hidden_states = final_hidden_states + shared_output
 
