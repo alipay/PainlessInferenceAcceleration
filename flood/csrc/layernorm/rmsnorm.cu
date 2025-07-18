@@ -38,7 +38,7 @@ Modified by Chen Liang
 
 template<typename T>
 __global__ void RMSNormkernel(
-    const T* __restrict input, const T* __restrict gamma, T* output, const float layernorm_eps, int m, int n)
+    const T* __restrict input, const T* __restrict gamma, T* output, const float layernorm_eps, int m, int n, int input_stride, int output_stride)
 {
     // layernorm module in the T5 style No bias and no subtraction of mean.
     const int tid = threadIdx.x;
@@ -50,7 +50,7 @@ __global__ void RMSNormkernel(
     for (int i = tid; i < n; i += blockDim.x) {
         // float diff = to_float(__ldg(&input[blockIdx.x * n + i]));
         // float diff = (float)(ldg(&input[blockIdx.x * n + i]));
-        float diff = flood_cast<float>(input[blockIdx.x * n + i]);
+        float diff = flood_cast<float>(input[blockIdx.x * input_stride + blockIdx.y * n + i]);
         local_var_sum += diff * diff;
     }
 
@@ -65,8 +65,8 @@ __global__ void RMSNormkernel(
     __syncthreads();
 
     for (int i = tid; i < n; i += blockDim.x) {
-        float x = flood_cast<float>(input[blockIdx.x * n + i]);
-        output[blockIdx.x * n + i] =flood_cast<T>(x * s_variance) * gamma[i];
+        float x = flood_cast<float>(input[blockIdx.x * input_stride + blockIdx.y * n + i]);
+        output[blockIdx.x * output_stride + blockIdx.y * n + i] =flood_cast<T>(x * s_variance) * gamma[i];
         // output[blockIdx.x * n + i] =
         //     flood_cast<T>((flood_cast<float>(input[blockIdx.x * n + i]) * s_variance) * flood_cast<float>(gamma[i]));
     }
@@ -80,16 +80,19 @@ void RMSNorm(T*           out,
              // const T*     beta,
              const float  layernorm_eps,
              const int    m,
-             const int    n)
+             const int    n,
+             const int    k,
+             const int    input_stride,
+             const int    output_stride)
 {
-    dim3 grid(m);
+    dim3 grid(m, k);
     dim3 block(min(n, 1024));
 
     // block.x = block.x / (4 / sizeof(T));  // if using half, only need half of block.x
     const cudaStream_t stream = at::cuda::getCurrentCUDAStream(); 
 
     /* should pay attention to the rsqrt precision*/
-    RMSNormkernel<T><<<grid, block, 0, stream>>>(input, gamma, out, layernorm_eps, m, n);  // For gpt-3
+    RMSNormkernel<T><<<grid, block, 0, stream>>>(input, gamma, out, layernorm_eps, m, n, input_stride, output_stride);  // For gpt-3
 }
 
 template void RMSNorm(half*           out,
@@ -98,7 +101,10 @@ template void RMSNorm(half*           out,
                       // const half*     beta,
                       const float  layernorm_eps,
                       const int    m,
-                      const int    n);
+                      const int    n,
+                      const int    k,
+                      const int    input_stride,
+                      const int    output_stride);
 
 template void RMSNorm(__nv_bfloat16*           out,
                       const __nv_bfloat16*     input,
@@ -106,7 +112,10 @@ template void RMSNorm(__nv_bfloat16*           out,
                       // const half*     beta,
                       const float  layernorm_eps,
                       const int    m,
-                      const int    n);
+                      const int    n,
+                      const int    k,
+                      const int    input_stride,
+                      const int    output_stride);
 
 // template void RMSNorm(float*           out,
 //                               const float*     input,
@@ -127,7 +136,10 @@ void rmsnorm(
     // int m = _input.size(0) * _input.size(1);
     // int n = _input.size(2);
     int n = _input.size(-1);
-    int m = _input.numel() / n;
+    int m = _input.size(0);
+    int k = _input.numel() / (m * n);
+    int input_stride = _input.stride(0);
+    int output_stride = _out.stride(0);
     const at::cuda::OptionalCUDAGuard device_guard(device_of(_input));
 
     // auto input = reinterpret_cast<half*>(_input.data_ptr<at::Half>());
@@ -140,7 +152,10 @@ void rmsnorm(
                     static_cast<flood_type*>(_gamma.data_ptr()), 
                     eps, 
                     m, 
-                    n);
+                    n,
+                    k,
+                    input_stride,
+                    output_stride);
         // return true;
     });
 }

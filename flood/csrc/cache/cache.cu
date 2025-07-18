@@ -14,17 +14,18 @@
 
 #include "cuda_type_utils.h"
 
-__global__ void update_cache_kernel(uint4* k_out,  uint4* v_out,  uint4* key_states, uint4* value_states,  int* indices, int input_stride, int output_stride) {
+__global__ void update_cache_kernel(uint4* k_out,  uint4* v_out,  uint4* key_states, uint4* value_states,  int* indices, int input_k_stride, int input_v_stride, int output_stride) {
     
     int token_id = blockIdx.x;
     int tid = threadIdx.x;
 
     long slot_id = (long) indices[token_id];
 
-    int offset = token_id * input_stride +  tid;
+    int k_offset = token_id * input_k_stride +  tid;
+    int v_offset = token_id * input_v_stride + tid;
 
-    k_out[slot_id * output_stride + tid] = key_states[offset];
-    v_out[slot_id * output_stride + tid] = value_states[offset];
+    k_out[slot_id * output_stride + tid] = key_states[k_offset];
+    v_out[slot_id * output_stride + tid] = value_states[v_offset];
 
 }
 
@@ -35,7 +36,8 @@ void update_cache(torch::Tensor& k_out,
                   torch::Tensor& indices, 
                   int tok, 
                   int dim, 
-                  int input_stride,
+                  int input_k_stride,
+                  int input_v_stride,
                   int output_stride) 
 {
 
@@ -51,7 +53,8 @@ void update_cache(torch::Tensor& k_out,
                                              static_cast<uint4*>(key_states.data_ptr()), 
                                              static_cast<uint4*>(value_states.data_ptr()), 
                                              static_cast<int32_t*>(indices.data_ptr()), 
-                                             input_stride,
+                                             input_k_stride,
+                                             input_v_stride,
                                              output_stride);
 }
 
