@@ -55,10 +55,7 @@ os.environ["NCCL_CHECKS_DISABLE"] = "1"
 
 if __name__ == '__main__':
     mp.set_start_method('spawn', force=True)
-    # model_path = '/mntnlp/common_base_model/Llama-3.1-8B-Instruct'
-    # model_path = '/mntnlp/nanxiao/deepseekv3'
-    # model_path = '/mnt/nas_acr89/jingyue/ling-moe-lite-chat'
-    model_path = '/mnt/nas_acr89/jingyue/moe_lite_linear'
+    model_path = '/mntnlp/common_base_model/Llama-3.1-8B-Instruct'
     tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
 
     WORLD_SIZE = int(os.environ['FLOOD_WORLD_SIZE'])
@@ -69,13 +66,12 @@ if __name__ == '__main__':
 
     pred_path = 'tmp.jsonl'
 
-    # prompts = ['1 + 1 = ?', '西湖在哪里？', 'tell me a joke', '你是谁？']
-    prompts = ['西湖在哪里？']
+    prompts = ['1 + 1 = ?', 'tell me a joke']
 
     reqs = []
     for i, prompt in enumerate(prompts):
         messages = [
-                    # {"role": "system","content": "You are Qwen, created by Alibaba Cloud. You are a helpful assistant."},
+                    {"role": "system","content": " You are a helpful assistant."},
                     {"role": "user", "content": prompt}
                 ]
         text = tokenizer.apply_chat_template(
@@ -83,7 +79,6 @@ if __name__ == '__main__':
             tokenize=False,
             add_generation_prompt=True,
         )
-        # text = prompt
         reqs.append(Request(i, input_text=text, output_length=4096))
 
     print('start init LLM')
