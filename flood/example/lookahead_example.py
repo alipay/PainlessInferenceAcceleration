@@ -25,18 +25,7 @@ random.seed(7)
 if __name__ == '__main__':
     mp.set_start_method('spawn', force=True)
 
-    # model_path = '/mntnlp/common_base_model/Llama-3.1-8B-Instruct'
     model_path = '/mntnlp/common_base_model/Qwen__Qwen2.5-7B-Instruct'
-    # model_path = '/mntnlp/common_base_model/Qwen__Qwen2.5-14B-Instruct'
-    # model_path = '/mntnlp/nanxiao/model'
-    # model_path = '/mntnlp/nanxiao/deepseekv3'
-    # model_path = '/agent/nanxiao/models/Qwen2.5-32B-Instruct'
-
-    # prompts = [
-    # '介绍一下杭州',
-    # # '鲁迅有哪些作品？',
-    # # 'Consider a sequence of real numbers \( a_1, a_2, a_3, \ldots \) defined as follows: \( a_1 = 1 \)\n For \( n \geq 1 \), \( a_{n+1} = \\frac{a_n + 2}{a_n + 1} \).\nDetermine the value of \( a_{2024} \)'
-    # ]
 
     prompts = []
     for line in open('/ossfs/workspace/tmp/lookahead.jsonl'):

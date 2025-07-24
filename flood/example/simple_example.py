@@ -24,22 +24,14 @@ random.seed(7)
 if __name__ == '__main__':
     mp.set_start_method('spawn', force=True)
 
-    # model_path = '/mntnlp/common_base_model/Llama-3.1-8B-Instruct'
-    # model_path = '/mntnlp/common_base_model/Qwen__Qwen2.5-7B-Instruct'
-    # model_path = '/mntnlp/nanxiao/model'
-    # model_path = '/mntnlp/nanxiao/deepseekv3'
-    # model_path = '/agent/nanxiao/models/Qwen2.5-32B-Instruct'
-    # model_path = '/mnt/nas_acr89/jingyue/deepseekv3'
-    # model_path = '/mntnlp/common_base_model/Qwen__Qwen2.5-14B-Instruct'
-    model_path = '/mnt/nas_acr89/jingyue/moe_lite_linear_iter_0011500'
-    # model_path = '/mnt/nas_acr89/jingyue/moe_lite_linear'
+    model_path = '/mntnlp/common_base_model/Llama-3.1-8B-Instruct'
     tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
     
-    prompts = ['1 + 1 = ?', '西湖在哪里？', 'tell me a joke', '你是谁？']
+    prompts = ['tell me a joke']
     reqs = []
     for i, prompt in enumerate(prompts):
         messages = [
-                    # {"role": "system","content": "You are Qwen, created by Alibaba Cloud. You are a helpful assistant."},
+                    {"role": "system","content": "You are a helpful assistant."},
                     {"role": "user", "content": prompt}
                 ]
         text = tokenizer.apply_chat_template(
@@ -47,8 +39,7 @@ if __name__ == '__main__':
             tokenize=False,
             add_generation_prompt=True,
         )
-        # text = prompt
-        reqs.append(Request(i, input_text=text, output_length=2048))
+        reqs.append(Request(i, input_text=text, output_length=100))
 
 
     worker = LLM(model_path,
@@ -58,7 +49,7 @@ if __name__ == '__main__':
                 #  model_dtype=torch.float8_e4m3fn,
                  max_concurrency=1024,
                  cache_size=16000,
-                 slot_fully_alloc_under=1024,
+                 slot_fully_alloc_under=10240,
                  tune_alloc_size=False,
                  eos_token_id=None,
                  debug=False,
