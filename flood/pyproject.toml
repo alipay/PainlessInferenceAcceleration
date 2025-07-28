@@ -1,4 +1,3 @@
 [build-system]
-# XXX: If your project needs other packages to build properly, add them to this list.
 requires = ["setuptools >= 64", "torch >= 2.5"]
 build-backend = "setuptools.build_meta"
