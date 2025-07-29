@@ -8,6 +8,7 @@ from flood.models.modeling_bailing_moe_linear import BailingMoeLinearForCausalLM
 from flood.models.modeling_qwen2 import Qwen2ForCausalLM
 from flood.models.modeling_deepseek import DeepseekForCausalLM
 from flood.models.modeling_deepseekv3 import DeepseekV3ForCausalLM
+from flood.models.modeling_qwen3 import Qwen3ForCausalLM
 
 
 model_class_map = {
@@ -18,7 +19,8 @@ model_class_map = {
     "BailingMoeLinearForCausalLM": BailingMoeLinearForCausalLM,
     "Qwen2ForCausalLM": Qwen2ForCausalLM,
     "DeepseekForCausalLM": DeepseekForCausalLM,
-    "DeepseekV3ForCausalLM": DeepseekV3ForCausalLM
+    "DeepseekV3ForCausalLM": DeepseekV3ForCausalLM,
+    "Qwen3ForCausalLM": Qwen3ForCausalLM
 }
 
 

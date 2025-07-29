@@ -24,7 +24,8 @@ random.seed(7)
 if __name__ == '__main__':
     mp.set_start_method('spawn', force=True)
 
-    model_path = '/mntnlp/common_base_model/Llama-3.1-8B-Instruct'
+    # model_path = '/mntnlp/common_base_model/Llama-3.1-8B-Instruct'
+    model_path = '/mnt/nas_acr89/jingyue/Qwen3-0.6B-FP8_812d1c0c76a9b09a'
     tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
     
     prompts = ['tell me a joke']
@@ -39,6 +40,7 @@ if __name__ == '__main__':
             tokenize=False,
             add_generation_prompt=True,
         )
+        # text = prompt
         reqs.append(Request(i, input_text=text, output_length=100))
 
 
@@ -46,7 +48,7 @@ if __name__ == '__main__':
                  n_stage=1,  # gpus
                  n_proc=1,
                  chunk_size=1024,
-                #  model_dtype=torch.float8_e4m3fn,
+                #  model_dtype=torch.bfloat16,
                  max_concurrency=1024,
                  cache_size=16000,
                  slot_fully_alloc_under=10240,
