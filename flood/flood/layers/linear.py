@@ -8,7 +8,7 @@ import torch.nn.functional as F
 from torch.nn import Parameter
 
 from flood.ops.quantization import scaled_fp8_quant, static_int8_quant, dynamic_int8_quant
-from flood.ops.quantization import tile_quant, per_token_block_quant_fp8
+from flood.ops.quantization import tile_quant, per_token_group_quant_fp8
 from flood.ops.gemm import  dynamic_int8_gemm_nt,static_int8_gemm_nt,fp8_tb_gemm, w8a8_block_fp8_matmul
 
 
@@ -931,7 +931,7 @@ class DynamicBlockW8A8Fp8Linear(torch.nn.Module):
         self.weight_scale_inv = weight_scale_inv
 
     def forward(self, x):
-        x_q, x_scale = per_token_block_quant_fp8(x, block_size=self.block_size[0])
+        x_q, x_scale = per_token_group_quant_fp8(x, group_size=self.block_size[0])
         output = w8a8_block_fp8_matmul(x_q, self.weight, x_scale, self.weight_scale_inv, self.block_size, x.dtype)
         if self.bias is not None:
             output += self.bias

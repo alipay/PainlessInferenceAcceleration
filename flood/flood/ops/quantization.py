@@ -196,12 +196,12 @@ def tile_quant_kernel(x_ptr, y_ptr, s_ptr, M, N, BLOCK_SIZE: tl.constexpr, K: tl
 
 
 @triton.jit
-def _per_token_block_quant_fp8(
+def _per_token_group_quant_fp8(
     # Pointers to inputs and output
     y_ptr,
     y_q_ptr,
     y_s_ptr,
-    block_size,
+    group_size,
     # Num columns of y
     y_num_columns,
     y_row_stride,
@@ -218,7 +218,7 @@ def _per_token_block_quant_fp8(
     quantization on a tensor.
     This function converts the tensor values into float8 values.
     """
-    groups_per_row = y_num_columns // block_size
+    groups_per_row = y_num_columns // group_size
 
     # Map the program id to the row of X and Y it should compute.
     g_id = tl.program_id(0)
@@ -227,15 +227,15 @@ def _per_token_block_quant_fp8(
 
     # Ensure offset calculations use int64 to prevent overflow
     y_ptr_offset = (row.to(tl.int64) * y_row_stride) + (row_g_id.to(tl.int64) *
-                                                        block_size)
+                                                        group_size)
     y_ptr += y_ptr_offset
 
-    y_q_ptr_offset = g_id.to(tl.int64) * block_size
+    y_q_ptr_offset = g_id.to(tl.int64) * group_size
     y_q_ptr += y_q_ptr_offset
     y_s_ptr += g_id
 
     cols = tl.arange(0, BLOCK)  # N <= BLOCK
-    mask = cols < block_size
+    mask = cols < group_size
 
     y = tl.load(y_ptr + cols, mask=mask, other=0.0).to(tl.float32)
     # Quant
@@ -248,9 +248,9 @@ def _per_token_block_quant_fp8(
     tl.store(y_s_ptr, y_s)
 
 # Adapted from https://github.com/vllm-project/vllm/blob/a2480251ec92ba2a849464dde48db8a2b7f6ef81/vllm/model_executor/layers/quantization/utils/fp8_utils.py
-def per_token_block_quant_fp8(
+def per_token_group_quant_fp8(
     x: torch.Tensor,
-    block_size: int,
+    group_size: int,
     eps: float = 1e-10,
     dtype: Optional[torch.dtype] = None,
     out_q: Optional[torch.Tensor] = None,
@@ -260,7 +260,7 @@ def per_token_block_quant_fp8(
     quantized tensor along with the scaling factor used for quantization.
     Args:
         x: The input tensor with ndim >= 2.
-        block_size: The block size used for quantization.
+        group_size: The group size used for quantization.
         eps: The minimum to avoid dividing zero.
         dtype: The dype of output tensor. Note that only `torch.float8_e4m3fn`
         is supported for now.
@@ -270,9 +270,9 @@ def per_token_block_quant_fp8(
         scaling factor.
     """
     dtype = torch.float8_e4m3fn if dtype is None else dtype
-    assert (x.shape[-1] % block_size == 0), (
+    assert (x.shape[-1] % group_size == 0), (
         f"the last dimension of `x` {x.shape[-1]} must be divisible "
-        f"by `block_size` {block_size}")
+        f"by `group_size` {group_size}")
     assert x.stride(-1) == 1, "`x` groups must be contiguous"
 
     finfo = torch.finfo(dtype)
@@ -284,9 +284,9 @@ def per_token_block_quant_fp8(
     if x_q is None:
         x_q = torch.empty_like(x, device=x.device, dtype=dtype)
 
-    M = x.numel() // block_size
-    N = block_size
-    shape = x.shape[:-1] + (x.shape[-1] // block_size, )
+    M = x.numel() // group_size
+    N = group_size
+    shape = x.shape[:-1] + (x.shape[-1] // group_size, )
     x_s = torch.empty(shape, device=x.device, dtype=torch.float32)
 
     BLOCK = triton.next_power_of_2(N)
@@ -294,11 +294,11 @@ def per_token_block_quant_fp8(
     num_warps = min(max(BLOCK // 256, 1), 8)
     num_stages = 1
     
-    _per_token_block_quant_fp8[(M, )](
+    _per_token_group_quant_fp8[(M, )](
         x,
         x_q,
         x_s,
-        block_size,
+        group_size,
         x.shape[1],
         x.stride(0),
         eps,
@@ -369,3 +369,19 @@ def scaled_fp8_quant(
 
 
 
+def moe_kernel_quantize_input(
+    A: torch.Tensor,
+    A_scale: Optional[torch.Tensor],
+    quant_dtype: Union[None, torch.dtype, str],
+    per_act_token_quant: bool,
+    block_shape: Optional[list[int]] = None,
+) -> tuple[torch.Tensor, Optional[torch.Tensor]]:
+    if quant_dtype == torch.float8_e4m3fn:
+        if block_shape is None:
+            return scaled_fp8_quant(A, A_scale)
+        else:
+            assert len(block_shape) == 2
+            _, block_k = block_shape[0], block_shape[1]
+            return per_token_group_quant_fp8(A, group_size=block_k)
+    else:
+        return A, A_scale
