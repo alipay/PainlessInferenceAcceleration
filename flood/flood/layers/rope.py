@@ -23,7 +23,7 @@ class AutoRope(torch.nn.Module):
         rope_type = config.rope_scaling.get(
             'rope_type') or config.rope_scaling.get('type')
         if rope_type == 'yarn':
-            if config.model_type == 'deepseek_v2':
+            if config.model_type == 'deepseek_v2' or config.model_type == 'deepseek_v3':
                 return DeepseekYarnRope(config)
             else:
                 return YarnRope(config)
@@ -61,9 +61,15 @@ class YarnRope(torch.nn.Module):
         self.rope_scale = config.rope_scaling.get('factor', 4.0)
         self.beta_slow = config.rope_scaling.get('beta_slow', 1.0)
         self.beta_fast = config.rope_scaling.get('beta_fast', 32.0)
+        self.mscale = config.rope_scaling.get('mscale', 1.0)
+        self.mscale_all_dim = config.rope_scaling.get('mscale_all_dim', 1.0)
         # self.head_dim = config.rope_scaling.get('beta_fast', 32.0)
+        # self.magnitude_scale = float(
+        #     0.1 * math.log(config.rope_scaling.get('factor', 4.0)) + 1.0)
         self.magnitude_scale = float(
-            0.1 * math.log(config.rope_scaling.get('factor', 4.0)) + 1.0)
+            self.yarn_get_mscale(self.rope_scale, float(self.mscale)) /
+            self.yarn_get_mscale(self.rope_scale, float(self.mscale_all_dim)))
+
         self.original_max_position_embeddings = config.rope_scaling.get(
             'original_max_position_embeddings', 16384)
         self.max_position_embeddings = config.max_position_embeddings
@@ -78,6 +84,10 @@ class YarnRope(torch.nn.Module):
         partial_rotary_factor = config.partial_rotary_factor if hasattr(config, 'partial_rotary_factor') else 1.0
         self.rotary_dim = int(head_dim * partial_rotary_factor)
 
+    def yarn_get_mscale(self, scale: float = 1, mscale: float = 1) -> float:
+        if scale <= 1:
+            return 1.0
+        return 0.1 * mscale * math.log(scale) + 1.0
 
     def _yarn_find_correction_dim(self,
                                   num_rotations: int,
@@ -108,7 +118,7 @@ class YarnRope(torch.nn.Module):
                  indptr: torch.Tensor,
                  offsets: torch.Tensor):
         flood_cuda.apply_yarn_rope_inplace(
-            q, k, indptr, offsets, self.rotary_dim, True, self.rope_scale, self.rope_theta,
+            q, k, indptr, offsets, self.rotary_dim, False, self.rope_scale, self.rope_theta,
             self.low, self.high, self.magnitude_scale)
         return q, k
 
@@ -160,9 +170,6 @@ class DeepseekYarnRope(torch.nn.Module):
         inv_freq_extrapolation = 1.0 / pos_freqs
         inv_freq_interpolation = 1.0 / (scaling_factor * pos_freqs)
 
-        # low, high = self._yarn_find_correction_range(self.beta_fast, self.beta_slow,
-        #                                        self.rotary_dim, self.rope_theta,
-        #                                        self.original_max_position_embeddings)
         # Get n-d rotational scaling corrected for extrapolation
         inv_freq_mask = (1 - self._yarn_linear_ramp_mask(
             self.low, self.high, self.rotary_dim // 2,
