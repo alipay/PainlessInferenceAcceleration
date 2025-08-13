@@ -160,12 +160,12 @@ class DeepseekYarnRope(torch.nn.Module):
         inv_freq_extrapolation = 1.0 / pos_freqs
         inv_freq_interpolation = 1.0 / (scaling_factor * pos_freqs)
 
-        low, high = self._yarn_find_correction_range(self.beta_fast, self.beta_slow,
-                                               self.rotary_dim, self.rope_theta,
-                                               self.original_max_position_embeddings)
+        # low, high = self._yarn_find_correction_range(self.beta_fast, self.beta_slow,
+        #                                        self.rotary_dim, self.rope_theta,
+        #                                        self.original_max_position_embeddings)
         # Get n-d rotational scaling corrected for extrapolation
         inv_freq_mask = (1 - self._yarn_linear_ramp_mask(
-            low, high, self.rotary_dim // 2,
+            self.low, self.high, self.rotary_dim // 2,
             dtype=torch.float))
         inv_freq = inv_freq_interpolation * (
             1 - inv_freq_mask) + inv_freq_extrapolation * inv_freq_mask
