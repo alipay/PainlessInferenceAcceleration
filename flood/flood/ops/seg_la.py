@@ -78,7 +78,7 @@ def seg_la_kernel(
                 offs_d[:, None] * HEAD_DIM + offs_s[None, :])
     )
 
-    state = tl.load(s_ptrs)
+    state = tl.load(s_ptrs).to(tl.float32)
     state = state*s_scale.to(state.dtype)  # s_scale is 0 or 1, cast is precision preserved
 
     if BLOCK > 1:
@@ -86,19 +86,19 @@ def seg_la_kernel(
             n = tl.multiple_of(n, BLOCK)
 
             if EVEN:
-                q = tl.load(q_ptrs + n * stride_q)
-                k = tl.load(k_ptrs + n * stride_k)
-                v = tl.load(v_ptrs + n * stride_k)
+                q = tl.load(q_ptrs + n * stride_q).to(tl.float32)
+                k = tl.load(k_ptrs + n * stride_k).to(tl.float32)
+                v = tl.load(v_ptrs + n * stride_k).to(tl.float32)
             else:
                 q = tl.load(q_ptrs + n * stride_q,
                             mask=(n + offs_m)[:, None] < q_length, 
-                            other=0.0)
+                            other=0.0).to(tl.float32)
                 k = tl.load(k_ptrs + n * stride_k,
                             mask=(n + offs_m)[:, None] < q_length, 
-                            other=0.0)
+                            other=0.0).to(tl.float32)
                 v = tl.load(v_ptrs + n * stride_k,
                             mask=(n + offs_m)[:, None] < q_length, 
-                            other=0.0)
+                            other=0.0).to(tl.float32)
 
             if DECOUPLE:
                 # only work with small scales
@@ -111,28 +111,27 @@ def seg_la_kernel(
                 decays = tl.where(b_offs >= 0, tl.exp(decay_scale*b_offs), 0)
                 inv_decays = tl.where(b_offs >= 0, tl.exp(-decay_scale*b_offs), 0)
 
-                q = q*inv_decays.to(q.dtype)[:,None]
-                k = k*decays.to(k.dtype)[:,None]
+                q = q*inv_decays[:,None]
+                k = k*decays[:,None]
                 qk = tl.dot(q, tl.trans(k)) * softmax_scale
                 qk = tl.where(offs_m[None,:] <= offs_m[:,None], qk, 0.0)
-                o = tl.dot(qk.to(v.dtype), v) 
+                o = tl.dot(qk, v)
 
                 block_decay_plus = tl.exp(decay_scale*b) * softmax_scale
                 o = tl.dot(q, state)*block_decay_plus + o
 
                 block_decay = tl.exp(decay_scale*b)
-                state = state * block_decay.to(state.dtype) + (tl.dot(tl.trans(k), v)).to(state.dtype)
-
+                state = state * block_decay + tl.dot(tl.trans(k), v)
             else:
 
                 qk = tl.dot(q, tl.trans(k)) * softmax_scale
                 decays = tl.exp(decay_scale*(offs_m[:,None] - offs_m[None,:]))
                 decays = tl.where(offs_m[None,:] <= offs_m[:,None], decays, 0.0)
                 qk *= decays
-                o = tl.dot(qk.to(v.dtype), v) 
+                o = tl.dot(qk, v) 
 
                 decay_arr = tl.exp(decay_scale*(offs_m[:,None]+1)) * softmax_scale
-                o = tl.dot(q*decay_arr.to(q.dtype), state, acc=o)
+                o = tl.dot(q*decay_arr, state, acc=o)
 
                 if EVEN:
                     b = BLOCK
@@ -140,28 +139,28 @@ def seg_la_kernel(
                     b = min(BLOCK, q_length - n)
                 b_offs = b-1-offs_m
                 b_offs = tl.where(b_offs >= 0, b_offs, 10000)
-                decays = tl.exp(decay_scale*b_offs).to(k.dtype)
-                block_decay = tl.exp(decay_scale*b).to(k.dtype)
-                state = state * block_decay + tl.dot(tl.trans(k*decays[:,None]), v).to(S.dtype.element_ty)
+                decays = tl.exp(decay_scale*b_offs)
+                block_decay = tl.exp(decay_scale*b)
+                state = state * block_decay + tl.dot(tl.trans(k*decays[:,None]), v.to(tl.float32))
 
             if EVEN:
-                tl.store(out_ptrs + n * stride_o, o)
+                tl.store(out_ptrs + n * stride_o, o.to(Out.dtype.element_ty))
             else:
-                tl.store(out_ptrs + n * stride_o, o, mask=(n + offs_m)[:, None] < q_length)
+                tl.store(out_ptrs + n * stride_o, o.to(Out.dtype.element_ty), mask=(n + offs_m)[:, None] < q_length)
 
-        tl.store(s_ptrs, state)
+        tl.store(s_ptrs, state.to(S.dtype.element_ty))
 
     else:
-        q = tl.load(q_ptrs)
-        k = tl.load(k_ptrs)
-        v = tl.load(v_ptrs)
-        state = state * tl.exp(decay_scale).to(state.dtype) + tl.trans(k) * v
+        q = tl.load(q_ptrs).to(tl.float32)
+        k = tl.load(k_ptrs).to(tl.float32)
+        v = tl.load(v_ptrs).to(tl.float32)
+        state = state * tl.exp(decay_scale) + tl.trans(k) * v
 
         o = tl.sum(tl.trans(q) * state, axis=0, keep_dims=True) * softmax_scale.to(q.dtype)
 
-        tl.store(out_ptrs, o)
+        tl.store(out_ptrs, o.to(Out.dtype.element_ty))
 
-        tl.store(s_ptrs, state)
+        tl.store(s_ptrs, state.to(S.dtype.element_ty))
 
 def seg_la_fwd(q, k, v, s, decay_scales, meta, softmax_scale=None, decouple=False):
     _, qo_heads, d = q.shape
