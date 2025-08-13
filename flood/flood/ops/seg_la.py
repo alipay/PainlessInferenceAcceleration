@@ -2,12 +2,13 @@
 """
 Copyright (c) Ant Financial Service Group and its affiliates.
 """
-
+from typing import Optional
 import math
 
 import torch
 import triton
 import triton.language as tl
+from dataclasses import dataclass
 
 
 """
@@ -162,7 +163,23 @@ def seg_la_kernel(
 
         tl.store(s_ptrs, state.to(S.dtype.element_ty))
 
-def seg_la_fwd(q, k, v, s, decay_scales, meta, softmax_scale=None, decouple=False):
+
+@dataclass
+class SegLaMeta:
+    batch_size: int  # requested number. len(num_prefills)
+    max_q_length: int  # max(seq_lens)
+    q_offsets: torch.Tensor  # query_start_loc
+    s_offsets: torch.Tensor  # slot_ids
+    q_lengths: torch.Tensor  # diff(query_start_loc)
+    s_scales: torch.Tensor  # num_prefills prefill = 0, decode = 1
+    s_offsets_stride: int = 0
+    q_offsets_stride: int = 0
+    s_scales_stride: int = 0
+    decay_scales_stride: int = 0
+    mask: Optional[torch.Tensor] = None  # Currently not supported
+
+
+def seg_la_fwd(q, k, v, s, decay_scales, meta:SegLaMeta, softmax_scale=None, decouple=False):
     _, qo_heads, d = q.shape
     _, kv_heads, _ = k.shape
     batch = meta.batch_size
