@@ -42,10 +42,10 @@ if __name__ == '__main__':
     "original_max_position_embeddings": 4096, "rope_type": "yarn", "type": "yarn"
     }
     conf = DeepseekV3Config(hidden_size=qo_head*dim, num_attention_heads=qo_head,rope_theta=rope_theta,max_position_embeddings=163840, rope_scaling=rope_scaling)
-    rotary_emb = DeepseekV3RotaryEmbedding(conf, device=device)
-    cos, sin = rotary_emb(q, position_ids)
-    cos_ref, sin_ref = cos[..., :32], sin[..., :32]
-    q_rope_ref, k_rope_ref = apply_rotary_pos_emb_interleave(q_rot, k_rot, cos, sin)
+    # rotary_emb = DeepseekV3RotaryEmbedding(conf, device=device)
+    # cos, sin = rotary_emb(q, position_ids)
+    # cos_ref, sin_ref = cos[..., :32], sin[..., :32]
+    # q_rope_ref, k_rope_ref = apply_rotary_pos_emb_interleave(q_rot, k_rot, cos, sin)
 
     indptr = torch.tensor(
         [i * ql for i in range(bs + 1)], dtype=torch.int32, device=device
@@ -75,16 +75,16 @@ if __name__ == '__main__':
     # q_vllm = q_vllm.view(bs, ql, qo_head, dim).transpose(1, 2)
     # k_vllm = k_vllm.view(bs, ql, 1, dim).transpose(1, 2)
 
-    ds_v3_roep = DeepseekYarnRope(conf)
+    ds_v3_rope = DeepseekYarnRope(conf)
 
-    cos_sin = ds_v3_roep.cos_sin_cache.to(q.device).index_select(0, positions)
+    cos_sin = ds_v3_rope.cos_sin_cache.to(q.device).index_select(0, positions)
     cos_ds, sin_ds = cos_sin.chunk(2, dim=-1)
     cos_ds = cos_ds.view(bs, ql, -1)
     sin_ds = sin_ds.view(bs, ql, -1)
     
-    q_ds, k_ds = ds_v3_roep(q_clone, k_clone, indptr, offsets)
-    q_ds = q_ds.view(bs, ql, qo_head, dim).transpose(1, 2)
-    k_ds = k_ds.view(bs, ql, 1, dim).transpose(1, 2)
+    q_ds, k_ds = ds_v3_rope(q_clone, k_clone, indptr, offsets)
+    q_ds = q_ds.view(bs, ql, qo_head, dim)
+    k_ds = k_ds.view(bs, ql, 1, dim)
 
 
     flood_yarn = YarnRope(conf)
@@ -92,6 +92,6 @@ if __name__ == '__main__':
     q_ker = q_ker.view(bs, ql, qo_head, dim).transpose(1, 2)
     k_ker = k_ker.view(bs, ql, 1, dim).transpose(1, 2)
 
-    torch.testing.assert_close(q_ds, q_ker, rtol=0.1, atol=0.1)
-    torch.testing.assert_close(k_ds, k_ker, rtol=0.1, atol=0.1)
+    torch.testing.assert_close(q_ds, q_ker, rtol=0.01, atol=0.01)
+    torch.testing.assert_close(k_ds, k_ker, rtol=0.01, atol=0.01)
     
