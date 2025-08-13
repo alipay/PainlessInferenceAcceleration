@@ -414,8 +414,8 @@ class LLM():
             #         break
             devices.append(device)
 
-        if self.model_type =='DeepseekV3ForCausalLM':
-            dims = [self.model.config.kv_lora_rank+self.model.config.qk_rope_head_dim]  
+        if self.model_type =='DeepseekV3ForCausalLM' or self.model_type =='DeepseekV2ForCausalLM':
+            dims = [self.model.config.kv_lora_rank+self.model.config.qk_rope_head_dim]
         else:
             dims = [self.kv_heads*self.head_dim]*2
         if self.fix_size_indices is  None:

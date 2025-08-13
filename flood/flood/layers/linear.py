@@ -124,7 +124,7 @@ class AutoLinear():
         if hasattr(conf, 'to_dict') and callable(conf.to_dict):
             conf = conf.to_dict()
         if 'weight_block_size' in conf:
-            if layer_name == 'lm_head':
+            if layer_name == 'lm_head' or layer_name == 'gate':
                 return None
             else:
                 return 'block_fp8'
