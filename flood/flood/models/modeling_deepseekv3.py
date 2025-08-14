@@ -189,7 +189,7 @@ class DeepseekV3Attention(torch.nn.Module):
 
         self.softmax_scale = self.q_head_dim ** (-0.5)
 
-        # self.rope = AutoRope.from_pretrained(config)
+        self.rope = AutoRope.from_pretrained(config)
         
         self.attention =  None
 
@@ -212,7 +212,15 @@ class DeepseekV3Attention(torch.nn.Module):
                                                        layer_idx=self.layer_idx, 
                                                        kernels=kernels,
                                                        softmax_scale=self.softmax_scale)
-
+        # dequant the weight
+        if self.kv_b_proj.weight.data.dtype == torch.float8_e4m3fn:     
+            scale_dtype = self.kv_b_proj.weight_scale_inv.dtype  
+            out_features, in_features = self.kv_b_proj.weight.data.shape
+            weight = self.kv_b_proj.weight.data.view(out_features//128, 128, in_features//128, 128)
+            weight_sacle_inv = self.kv_b_proj.weight_scale_inv.view(out_features//128, 1, in_features//128, 1)
+            dequant_weight = weight.to(scale_dtype) * weight_sacle_inv
+            self.kv_b_proj.weight.data = dequant_weight.view(out_features, in_features).contiguous().to(cache_dtype)
+            del self.kv_b_proj.weight_scale_inv
 
     def forward(
         self,
@@ -235,7 +243,7 @@ class DeepseekV3Attention(torch.nn.Module):
 
         kv = self.kv_a_proj_with_mqa(hidden_states)
         kv[:,:self.kv_lora_rank] = self.kv_a_layernorm(kv[:,:self.kv_lora_rank])
-        self.rope(q_pe, kv[:,None,self.kv_lora_rank:], batch_meta_info.q_offsets, batch_meta_info.position_ids)
+        q_pe, kv[:,self.kv_lora_rank:] = self.rope(q_pe, kv[:,None,self.kv_lora_rank:], batch_meta_info.q_offsets, batch_meta_info.position_ids)
         qa[:,:,self.kv_lora_rank:] = q_pe
 
         w = self.kv_b_proj.weight.data.view(128,2,128, self.kv_lora_rank).to(q_nope.dtype)
