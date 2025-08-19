@@ -227,7 +227,7 @@ class DeepseekV2Attention(torch.nn.Module):
 
         kv = self.kv_a_proj_with_mqa(hidden_states)
         kv[:,:self.kv_lora_rank] = self.kv_a_layernorm(kv[:,:self.kv_lora_rank])
-        q_pe, kv[:,self.kv_lora_rank:] = self.rope(q_pe, kv[:,None,self.kv_lora_rank:], batch_meta_info.q_offsets, batch_meta_info.position_ids)
+        self.rope(q_pe, kv[:,None,self.kv_lora_rank:], batch_meta_info.q_offsets, batch_meta_info.position_ids)
         qa[:,:,self.kv_lora_rank:] = q_pe
 
         w = self.kv_b_proj.weight.data.view(self.num_heads,2,128, self.kv_lora_rank).to(q_nope.dtype)

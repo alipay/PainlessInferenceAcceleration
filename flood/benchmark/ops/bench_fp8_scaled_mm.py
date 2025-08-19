@@ -2,9 +2,8 @@
 """
 Copyright (c) Ant Financial Service Group and its affiliates.
 """
-
-import flood_cuda
 import torch
+import flood_cuda
 from vllm import _custom_ops as ops
 
 from flood.utils.benchmark import benchmark_func

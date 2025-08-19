@@ -28,7 +28,8 @@ NVCC_FLAGS = ["-O3", "-std=c++17",
               '-U__CUDA_NO_HALF_CONVERSIONS__',
               '-U__CUDA_NO_HALF2_OPERATORS__',
               '-U__CUDA_NO_HALF2_CONVERSIONS__',
-              '-DSM90_MM'
+              '-DSM90_MM',
+              '-Wno-deprecated-declarations'
               ]
 
 

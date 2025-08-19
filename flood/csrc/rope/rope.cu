@@ -37,22 +37,52 @@ __host__ __device__ __forceinline__ size_t get_elem_offset_impl(size_t elem_idx,
   return elem_idx * stride_n + head_idx * stride_h + feat_idx;
 }
 
+#define DISPATCH_INTERLEAVE(interleave, INTERLEAVE, ...) \
+  if (interleave) {                                      \
+    const bool INTERLEAVE = true;                        \
+    __VA_ARGS__                                          \
+  } else {                                               \
+    const bool INTERLEAVE = false;                       \
+    __VA_ARGS__                                          \
+  }
+
+
 template <uint32_t vec_size, uint32_t bdx, typename T>
 __device__ __forceinline__ vec_t<float, vec_size> vec_apply_yarn_rope(
-    const T* x, const vec_t<float, vec_size>& freq, int32_t offset, float a_factor) {
-  constexpr uint32_t head_dim = vec_size * bdx;
+    const T* x, const vec_t<float, vec_size>& freq, int32_t offset,
+    float a_factor, const uint32_t rotary_dim = vec_size * bdx) {
   vec_t<float, vec_size> permuted_vec, vec;
   vec.cast_load(x + threadIdx.x * vec_size);
-  permuted_vec.cast_load(x + ((threadIdx.x * vec_size < head_dim / 2)
-                                  ? threadIdx.x * vec_size + head_dim / 2
-                                  : threadIdx.x * vec_size - head_dim / 2));
+  permuted_vec.cast_load(x + ((threadIdx.x * vec_size < rotary_dim / 2)
+                                  ? threadIdx.x * vec_size + rotary_dim / 2
+                                  : threadIdx.x * vec_size - rotary_dim / 2));
 #pragma unroll
   for (uint32_t i = 0; i < vec_size; ++i) {
     float embed = float(offset) * freq[i];
     float cos, sin;
     __sincosf(embed, &sin, &cos);
     vec[i] = vec[i] * cos * a_factor +
-             ((threadIdx.x * vec_size < head_dim / 2) ? -permuted_vec[i] : permuted_vec[i]) * sin * a_factor;
+             ((threadIdx.x * vec_size < rotary_dim / 2) ? -permuted_vec[i] : permuted_vec[i]) * sin * a_factor;
+  }
+  return vec;
+}
+
+template <uint32_t vec_size, uint32_t bdx, typename T>
+__device__ __forceinline__ vec_t<float, vec_size> vec_apply_yarn_rope_interleave(
+    const T* x, const vec_t<float, vec_size>& freq, int32_t offset,
+    float a_factor, const uint32_t rotary_dim = vec_size * bdx) {
+  vec_t<float, vec_size> vec, vec_before;
+  vec.cast_load(x + threadIdx.x * vec_size);
+
+  if (threadIdx.x * vec_size < rotary_dim) {
+    vec_before = vec;
+#pragma unroll
+    for (uint32_t i = 0; i < vec_size; ++i) {
+      float embed = float(offset) * freq[i];
+      float cos, sin;
+      __sincosf(embed, &sin, &cos);
+      vec[i] = vec[i] * cos * a_factor + ((i % 2 == 0) ? -vec_before[i ^ 1] : vec_before[i ^ 1]) * sin * a_factor;
+    }
   }
   return vec;
 }
@@ -360,10 +390,10 @@ __global__ void BatchQKApplyYarnRotaryInPlaceKernel(
 #pragma unroll
   for (uint32_t i = 0; i < vec_size; ++i) {
     if constexpr (interleave) {
-      freq[i] = __powf(rope_rcp_theta, float(2 * ((tx * vec_size + i) / 2)) / float(head_dim));
+      freq[i] = __powf(rope_rcp_theta, float(2 * ((tx * vec_size + i) / 2)) / float(rotary_dim));
     } else {
       freq[i] = __powf(rope_rcp_theta,
-                       float(2 * ((tx * vec_size + i) % (head_dim / 2))) / float(head_dim));
+                       float(2 * ((tx * vec_size + i) % (rotary_dim / 2))) / float(rotary_dim));
     }
 
     // float smooth = freq[i] * smooth_a + smooth_b;
@@ -371,7 +401,12 @@ __global__ void BatchQKApplyYarnRotaryInPlaceKernel(
     // freq[i] = (1 - smooth) * (freq[i] * rope_rcp_scale) + smooth * freq[i];
 
     if (low == high){high = high + 0.001;}
-    float extrapolation_factor = (float((tx * vec_size + i) % (head_dim / 2)) - low) / (high - low);
+    float extrapolation_factor;
+    if constexpr (interleave) {
+      extrapolation_factor = (float((tx * vec_size + i) / 2) - low) / (high - low);
+    } else {
+      extrapolation_factor = (float((tx * vec_size + i) % (rotary_dim / 2)) - low) / (high - low);
+    }
     extrapolation_factor  = 1 - max(0.0f, min(1.0f, extrapolation_factor));
     freq[i] = (1 - extrapolation_factor) * (freq[i] * rope_rcp_scale) + extrapolation_factor * freq[i];
   }
@@ -390,9 +425,9 @@ __global__ void BatchQKApplyYarnRotaryInPlaceKernel(
                                                 q_stride_n, q_stride_h);
         if constexpr (interleave) {
           q_vec =
-              vec_apply_llama_rope_interleave<vec_size, bdx>(q_ptr, freq, offset + i * bdy + ty);//nor support
+              vec_apply_yarn_rope_interleave<vec_size, bdx>(q_ptr, freq, offset + i * bdy + ty, attention_factor, rotary_dim);//nor support
         } else {
-          q_vec = vec_apply_yarn_rope<vec_size, bdx>(q_ptr, freq, offset + i * bdy + ty, attention_factor);
+          q_vec = vec_apply_yarn_rope<vec_size, bdx>(q_ptr, freq, offset + i * bdy + ty, attention_factor, rotary_dim);
         }
         q_vec.cast_store(q_ptr + tx * vec_size);
       }
@@ -411,9 +446,9 @@ __global__ void BatchQKApplyYarnRotaryInPlaceKernel(
                                                 k_stride_n, k_stride_h);
         if constexpr (interleave) {
           k_vec =
-              vec_apply_llama_rope_interleave<vec_size, bdx>(k_ptr, freq, offset + i * bdy + ty, rotary_dim);
+              vec_apply_yarn_rope_interleave<vec_size, bdx>(k_ptr, freq, offset + i * bdy + ty, attention_factor, rotary_dim);
         } else {
-          k_vec = vec_apply_llama_rope<vec_size, bdx>(k_ptr, freq, offset + i * bdy + ty, rotary_dim);
+          k_vec = vec_apply_yarn_rope<vec_size, bdx>(k_ptr, freq, offset + i * bdy + ty, attention_factor, rotary_dim);
         }
         k_vec.cast_store(k_ptr + tx * vec_size);
       }
@@ -536,39 +571,35 @@ void BatchQKApplyYarnRotaryInPlace(DType* __restrict__ q, DType* __restrict__ k,
     // float smooth_b = 0.f;
 
     HEADDIM_SWITCH(head_dim, HEAD_DIM, [&] {
-
-
-      constexpr uint32_t vec_size = std::max((uint32_t)(16 / sizeof(DType)), HEAD_DIM / 32);
-      // constexpr uint32_t vec_size = 16 / sizeof(DType);
-      constexpr uint32_t bdx = HEAD_DIM / vec_size;
-      uint32_t num_threads = std::max(128U, bdx);
-      // uint32_t num_threads = 128;
-      uint32_t bdy = num_threads / bdx;
-      dim3 nblks(batch_size * (num_qo_heads + num_kv_heads));
-      dim3 nthrs(bdx, bdy);
-
-      const bool INTERLEAVE = false; 
-
-      BatchQKApplyYarnRotaryInPlaceKernel<INTERLEAVE, HEAD_DIM, vec_size, bdx, DType, IdType>
-      <<<nblks, nthrs, 0, stream>>>(  q,
-                                      k,
-                                      indptr,
-                                      offsets,
-                                      batch_size,
-                                      num_qo_heads,
-                                      num_kv_heads,
-                                      rotary_dim,
-                                      q_stride_n,
-                                      q_stride_h,
-                                      k_stride_n,
-                                      k_stride_h,
-                                      low,
-                                      high,
-                                      rope_rcp_scale,
-                                      rope_rcp_theta,
-                                      attention_factor);
+      DISPATCH_INTERLEAVE(interleave, INTERLEAVE, {
+        constexpr uint32_t vec_size = std::max((uint32_t)(16 / sizeof(DType)), HEAD_DIM / 32);
+        // constexpr uint32_t vec_size = 16 / sizeof(DType);
+        constexpr uint32_t bdx = HEAD_DIM / vec_size;
+        uint32_t num_threads = std::max(128U, bdx);
+        // uint32_t num_threads = 128;
+        uint32_t bdy = num_threads / bdx;
+        dim3 nblks(batch_size * (num_qo_heads + num_kv_heads));
+        dim3 nthrs(bdx, bdy);
+        BatchQKApplyYarnRotaryInPlaceKernel<INTERLEAVE, HEAD_DIM, vec_size, bdx, DType, IdType>
+        <<<nblks, nthrs, 0, stream>>>(  q,
+                                        k,
+                                        indptr,
+                                        offsets,
+                                        batch_size,
+                                        num_qo_heads,
+                                        num_kv_heads,
+                                        rotary_dim,
+                                        q_stride_n,
+                                        q_stride_h,
+                                        k_stride_n,
+                                        k_stride_h,
+                                        low,
+                                        high,
+                                        rope_rcp_scale,
+                                        rope_rcp_theta,
+                                        attention_factor);
+      });
     });
-
 }
 
 void apply_rope_inplace(torch::Tensor q, torch::Tensor k, torch::Tensor indptr,
