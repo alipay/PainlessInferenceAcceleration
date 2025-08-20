@@ -216,10 +216,10 @@ __global__ void moe_sum_kernel(
 }
 
 
-void moe_align_block_size(torch::Tensor topk_ids, int64_t num_experts,
-                          int64_t block_size, torch::Tensor sorted_token_ids,
-                          torch::Tensor experts_ids,
-                          torch::Tensor num_tokens_post_pad) {
+void moe_align_block_size(torch::Tensor& topk_ids, int64_t num_experts,
+                          int64_t block_size, torch::Tensor& sorted_token_ids,
+                          torch::Tensor& experts_ids,
+                          torch::Tensor& num_tokens_post_pad) {
   const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
   int device_max_shared_mem;
