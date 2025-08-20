@@ -306,7 +306,7 @@ class DeepseekV2DecoderLayer(torch.nn.Module):
         return hidden_states
 
     def flood_patch_func(self, kwargs=None):
-        if isinstance(self.mlp, DeepseekV2MLP):
+        if self.layer_idx is not None and isinstance(self.mlp, DeepseekV2MLP):
             self.mlp._flood_patch_func()
 
 
