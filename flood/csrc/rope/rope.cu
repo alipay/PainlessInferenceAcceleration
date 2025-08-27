@@ -269,8 +269,8 @@ void BatchQKApplyRotary(DType* q, DType* k, DType* q_rope, DType* k_rope,
 }
 
 
-void apply_rope(torch::Tensor q, torch::Tensor k, torch::Tensor q_rope, torch::Tensor k_rope, torch::Tensor indptr,
-                torch::Tensor offsets, int64_t rotary_dim, bool interleave, float rope_scale,
+void apply_rope(torch::Tensor& q, torch::Tensor& k, torch::Tensor& q_rope, torch::Tensor& k_rope, torch::Tensor& indptr,
+                torch::Tensor& offsets, int64_t rotary_dim, bool interleave, float rope_scale,
                 float rope_theta) {
 
     auto device = q.device();
@@ -602,8 +602,8 @@ void BatchQKApplyYarnRotaryInPlace(DType* __restrict__ q, DType* __restrict__ k,
     });
 }
 
-void apply_rope_inplace(torch::Tensor q, torch::Tensor k, torch::Tensor indptr,
-                        torch::Tensor offsets, int64_t rotary_dim, bool interleave, float rope_scale,
+void apply_rope_inplace(torch::Tensor& q, torch::Tensor& k, torch::Tensor& indptr,
+                        torch::Tensor& offsets, int64_t rotary_dim, bool interleave, float rope_scale,
                         float rope_theta) {
 
   auto device = q.device();
@@ -630,8 +630,8 @@ void apply_rope_inplace(torch::Tensor q, torch::Tensor k, torch::Tensor indptr,
   });
 }
 
-void apply_llama31_rope_inplace(torch::Tensor q, torch::Tensor k, torch::Tensor indptr,
-                                torch::Tensor offsets, int64_t rotary_dim, bool interleave, float rope_scale,
+void apply_llama31_rope_inplace(torch::Tensor& q, torch::Tensor& k, torch::Tensor& indptr,
+                                torch::Tensor& offsets, int64_t rotary_dim, bool interleave, float rope_scale,
                                 float rope_theta, float low_freq_factor, float high_freq_factor,
                                 float old_context_length) {
 
@@ -659,8 +659,8 @@ void apply_llama31_rope_inplace(torch::Tensor q, torch::Tensor k, torch::Tensor 
   });
 }
 
-void apply_yarn_rope_inplace(torch::Tensor q, torch::Tensor k, torch::Tensor indptr,
-                        torch::Tensor offsets, int64_t rotary_dim, bool interleave, float rope_scale,
+void apply_yarn_rope_inplace(torch::Tensor& q, torch::Tensor& k, torch::Tensor& indptr,
+                        torch::Tensor& offsets, int64_t rotary_dim, bool interleave, float rope_scale,
                         float rope_theta, float low, float high, float attention_factor) {
 
   auto device = q.device();
