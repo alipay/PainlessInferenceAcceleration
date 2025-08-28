@@ -213,7 +213,7 @@ indptr: [bs+1]
 offsets: [bs]
 """
 def triton_qk_norm_and_rope_forward(
-    qkv, q_norm_weight, k_norm_weight, freqs, indptr, offsets,
+    qkv, q_norm_weight, k_norm_weight, freqs, indptr, offsets, max_seq_len,
     q_head=32, kv_head=4, rotary_dim=None, eps=1e-6, interleave=False
 ):
     num_tokens, Dim = qkv.shape
@@ -226,12 +226,11 @@ def triton_qk_norm_and_rope_forward(
     ko = torch.empty((num_tokens, kv_head, head_dim), dtype=dtype, device=device)
     vo = torch.empty((num_tokens, kv_head, head_dim), dtype=dtype, device=device)
 
-    max_seq_len = int((indptr[1:] - indptr[:-1]).max().item())
     bs = offsets.shape[0]
 
-    num_stages = 5
-    num_warps = 2
-    block_size = 1
+    num_stages = 3
+    num_warps = 8
+    block_size = 1 if max_seq_len < 4096 else 32
 
     grid = (bs, triton.cdiv(max_seq_len, block_size))
 
