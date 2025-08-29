@@ -2,9 +2,6 @@ import torch
 import triton
 import triton.language as tl
 
-import triton
-import triton.language as tl
-
 @triton.jit
 def qk_norm_and_half_rope_forward_kernel(
     qkv_ptr,
