@@ -4,6 +4,7 @@ Copyright (c) Ant Financial Service Group and its affiliates.
 """
 
 import torch
+from torch.autograd import forward_ad
 import flood_cuda
 
 import triton
@@ -45,7 +46,20 @@ class RMSGroupNorm(torch.nn.Module):
         x = x.to(orig_dtype)
         x = x.view(-1, self.hidden_size)
         return x * self.weight
-    
+
+class RMSGroupNormSigmoid(torch.nn.Module):
+    def __init__(self, hidden_size: int, num_norm_group: int, eps: float = 1e-6) -> None:
+        super().__init__()
+        self.weight = torch.nn.Parameter(torch.ones(hidden_size))
+        self.variance_epsilon = eps
+        self.hidden_size = hidden_size
+        self.num_norm_group = num_norm_group
+        self.per_group_hidden_size = hidden_size // num_norm_group
+
+    def forward(self,x: torch.Tensor, g: torch.Tensor) -> torch.Tensor:
+        return triton_rms_groupnorm_sigmoid(x, self.weight, g, self.variance_epsilon, self.per_group_hidden_size)
+
+
 @triton.jit
 def rms_groupnorm_sigmoid_kernel(
     x_ptr,

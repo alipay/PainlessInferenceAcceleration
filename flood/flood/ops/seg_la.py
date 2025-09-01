@@ -28,6 +28,7 @@ def seg_la_kernel(
         softmax_scale,
         stride_q,
         stride_k,
+        stride_v,
         stride_o,
         stride_s,
         s_offsets,
@@ -67,8 +68,8 @@ def seg_la_kernel(
                 offs_m[:, None] * stride_k + offs_d[None, :])
     )
     v_ptrs = (
-            V + q_offset * stride_k + hid * HEAD_DIM + sid * SPLIT_DIM +  (
-                offs_m[:, None] * stride_k + offs_s[None, :])
+            V + q_offset * stride_v + hid * HEAD_DIM + sid * SPLIT_DIM +  (
+                offs_m[:, None] * stride_v + offs_s[None, :])
     )
     out_ptrs = (
             Out + q_offset * stride_o + hid * HEAD_DIM + sid * SPLIT_DIM + (
@@ -235,6 +236,7 @@ def seg_la_fwd(q, k, v, s, decay_scales, meta:SegLaMeta, softmax_scale=None, dec
         softmax_scale,
         q.stride(0),
         k.stride(0),
+        v.stride(0),
         o.stride(0),
         s.stride(0),
         meta.s_offsets,

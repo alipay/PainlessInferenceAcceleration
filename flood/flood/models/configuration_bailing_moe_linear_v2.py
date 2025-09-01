@@ -3,8 +3,8 @@
 from transformers.configuration_utils import PretrainedConfig
 
 
-class BailingMoeLinearConfig(PretrainedConfig):
-    model_type = "bailing_moe_linear"
+class BailingMoeLinearV2Config(PretrainedConfig):
+    model_type = "bailing_moe_linear_v2"
 
     def __init__(
         self,
