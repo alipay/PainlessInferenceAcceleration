@@ -69,7 +69,8 @@ def rms_groupnorm_sigmoid_kernel(
     eps,
     M: tl.constexpr,
     N: tl.constexpr,
-    stride: tl.constexpr,
+    x_stride: tl.constexpr,
+    g_stride: tl.constexpr,
     group_size: tl.constexpr,
     BLOCK: tl.constexpr
 ):
@@ -82,9 +83,9 @@ def rms_groupnorm_sigmoid_kernel(
     g_mask = g_off < N
     mask = seq_mask[:, None] & g_mask[None, :]
 
-    x = tl.load(x_ptr + seq_off[:, None] * stride + g_off[None, :], mask=mask, other=0.0).to(tl.float32)
+    x = tl.load(x_ptr + seq_off[:, None] * x_stride + g_off[None, :], mask=mask, other=0.0).to(tl.float32)
     w = tl.load(weight_ptr + g_off)
-    g = tl.load(g_ptr + seq_off[:, None] * N + g_off[None, :] , mask=mask, other=0.0).to(tl.float32)
+    g = tl.load(g_ptr + seq_off[:, None] * g_stride + g_off[None, :] , mask=mask, other=0.0).to(tl.float32)
     rms = 1/tl.sqrt(tl.sum(x*x, 1) / group_size + eps)
     x *= rms[:, None]
     x = x.to(w.dtype) * w[None, :]
@@ -97,7 +98,8 @@ def triton_rms_groupnorm_sigmoid(x, weight, g, eps, group_size):
     dtype = x.dtype
     device = x.device
     M, N = x.shape
-    stride = x.stride(0)
+    x_stride = x.stride(0)
+    g_stride = g.stride(0)
 
     BLOCK = 32
     num_stages = 2
@@ -113,7 +115,8 @@ def triton_rms_groupnorm_sigmoid(x, weight, g, eps, group_size):
         eps,
         M,
         N,
-        stride,
+        x_stride,
+        g_stride,
         group_size,
         BLOCK,
         num_stages=num_stages,
