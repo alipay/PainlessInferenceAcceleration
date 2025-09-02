@@ -291,6 +291,14 @@ class BailingMoeV2LinearAttention(torch.nn.Module):
                                      self.num_key_value_heads, 
                                      self.head_dim)
 
+        self.query_key_value_gate = self.query_key_value.merge([self.query_key_value, self.g_proj])
+
+        self.query_key_value = None
+        delattr(self, 'query_key_value')
+
+        self.g_proj = None
+        delattr(self, 'g_proj')
+
         self.attention = AutoAttention.from_pretrained(cache_dtype, 
                                                        layer_idx=self.layer_idx, 
                                                        kernels= ['sla'],
@@ -299,6 +307,7 @@ class BailingMoeV2LinearAttention(torch.nn.Module):
         start = 2 ** (-(2 ** -(math.log2(self.num_key_value_heads) - 3)))
         exponents = torch.arange(1, self.num_key_value_heads + 1, dtype=torch.float32)
         self.decay_scales = -torch.pow(start, exponents) * (1 - self.layer_idx / (self.num_layers - 1) + 1e-5)
+        self.decay_scales = self.decay_scales.to(self.dense.weight.device)
 
     def forward(
         self,
@@ -310,8 +319,10 @@ class BailingMoeV2LinearAttention(torch.nn.Module):
     ) -> torch.Tensor:
 
         q_len = hidden_states.size(0)
-        qkv = self.query_key_value(hidden_states)
-
+        qkvg = self.query_key_value_gate(hidden_states)
+        qkv, g = qkvg.split([(self.num_heads + 2 * self.num_key_value_heads) * self.head_dim,
+                             self.num_heads * self.head_dim], 
+                            dim=-1)
         qkv = qkv.view(q_len, self.num_heads + 2 * self.num_key_value_heads, self.head_dim)
 
         query_states, key_states, value_states = qkv.split([self.num_heads, 
@@ -326,8 +337,6 @@ class BailingMoeV2LinearAttention(torch.nn.Module):
                   key_states, 
                   batch_meta_info.q_offsets if batch_meta_info.draft_offsets is None else batch_meta_info.draft_offsets, 
                   batch_meta_info.position_ids)
-        if self.decay_scales.device != query_states.device:
-            self.decay_scales = self.decay_scales.to(query_states.device)
         attn_output = self.attention(query_states, 
                                      key_states, 
                                      value_states, 
@@ -336,7 +345,6 @@ class BailingMoeV2LinearAttention(torch.nn.Module):
                                      past_key_value)
         
         attn_output = attn_output.view(q_len, self.intermediate_size)  
-        g = self.g_proj(hidden_states)
         attn_output = self.g_norm(attn_output, g)
         attn_output = self.dense(attn_output)
 
