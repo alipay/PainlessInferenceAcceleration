@@ -24,39 +24,14 @@ os.environ['TOKENIZERS_PARALLELISM'] = 'false'
 if __name__ == '__main__':
     mp.set_start_method('spawn', force=True)
 
-    # model_path = '/mntnlp/common_base_model/Llama-3.1-8B-Instruct'
-    # model_path = '/mntnlp/common_base_model/Qwen__Qwen2.5-7B-Instruct'
-    # model_path = '/agent/nanxiao/models/Qwen2.5-32B-Instruct'
+    model_path = '/mntnlp/common_base_model/Llama-3.1-8B-Instruct'
     # reqs = Reader.read_fix_dataset(model_path, max_count=1, output_length=100)
-    # model_path = '/agent/jingyue/moe_lite_linear/v3_convert'
-    model_path = '/mnt/nas_acr89/jingyue/bailing-moe-lite'  # bailingmoe
 
+    reqs = Reader.read_dummy_dataset(max_count=10000, input_length=128,
+                                     output_length=128, flunc=0.1)
 
-    reqs = Reader.read_dummy_dataset(max_count=1000, input_length=4096,
-                                     output_length=4096, flunc=0.1)
-
-    # data_path = '/mntnlp/nanxiao/dataset/sharegpt/ShareGPT_V3_unfiltered_cleaned_split.json'
-    # reqs = Reader.read_sharegpt_dataset(data_path, model_path, max_count=20000)
-
-    # tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
-    # reqs = []
-    # for i, line in enumerate(open('/mntnlp/nanxiao/dataset/biz/kag.txt')):
-    #     line = line.strip()
-    #     if len(line) == 0:
-    #         continue
-    #     if i >= 10000:
-    #         break
-    #     chat = [{"role": "system","content": "You are Qwen, created by Alibaba Cloud. You are a helpful assistant."},
-    #             {"role": "user", "content": line}]
-
-    #     prompt = tokenizer.apply_chat_template(chat, 
-    #                                            tokenize=False,
-    #                                            add_generation_prompt=True)
-    #     request = Request(i, 
-    #                       input_text=prompt, 
-    #                       input_length=0,
-    #                       output_length=4096)
-    #     reqs.append(request)
+    # data_path = 'your/path/ShareGPT_V3_unfiltered_cleaned_split.json'
+    # reqs = Reader.read_sharegpt_dataset(data_path, model_path, max_count=10000)
 
 
     # load model

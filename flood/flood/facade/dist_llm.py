@@ -80,13 +80,23 @@ class DistLLM(LLM):
         return model
 
     def get_device_list(self, n_layer, n_stage, counts=None):
-        assert n_layer // (
-                    n_stage * self.world_size) * n_stage * self.world_size == n_layer
         if counts is None:
-            counts = [n_layer // n_stage // self.world_size] * (
-                        n_stage * self.world_size)
+            if n_layer % (n_stage * self.world_size) == 0:
+                if n_stage == -1:
+                    m = n_layer // n_stage // self.world_size
+                    counts = [m - 2, m + 1, m + 1, m] * self.world_size  # set n_proc = n_stage
+                else:
+                    counts = [n_layer // n_stage // self.world_size] * (n_stage * self.world_size)
+            else:
+                c = (n_layer-1)//(n_stage*self.world_size)+1
+                gap = c*n_stage*self.world_size-n_layer 
+                g = gap//2 
+                if c-1 > g:
+                    counts = [c-1]*g+[c]*(n_stage*self.world_size-gap)+[c-1]*(gap-g)
+                else:
+                    counts = [c-1]*g+[c]*(n_stage*self.world_size-gap)+[c-1]*(gap-g)
         else:
-            assert len(counts) == n_stage and sum(counts) == n_layer
+            assert len(counts) == n_stage * self.world_size and sum(counts) == n_layer
         accums = [0]
         for c in counts:
             accum = accums[-1] + c

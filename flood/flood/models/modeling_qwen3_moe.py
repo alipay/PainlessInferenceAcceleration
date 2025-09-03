@@ -11,10 +11,12 @@ from typing import List, Optional, Tuple, Union, Dict
 
 import torch
 from transformers.cache_utils import Cache
-from transformers.modeling_utils import PreTrainedModel, PretrainedConfig
+from transformers.modeling_utils import PreTrainedModel
+from transformers.modeling_utils import PretrainedConfig
+
 
 from flood.ops.activation import silu_and_mul
-from flood.ops.norm import RMSNorm, RMSGroupNorm
+from flood.ops.norm import RMSNorm
 from flood.utils.batch import Batch
 from flood.layers.linear import AutoLinear
 from flood.layers.rope import AutoRope
@@ -22,11 +24,11 @@ from flood.layers.attention import AutoAttention
 from flood.layers.embedding import AutoEmbedding
 from flood.layers.sampler import Sampler
 from flood.layers.moe import AutoExperts
-from .configuration_bailing_moe_linear import BailingMoeLinearConfig
+from transformers.models.qwen3_moe.configuration_qwen3_moe import Qwen3MoeConfig
 
 
 
-class BailingMoeMLP(torch.nn.Module):
+class Qwen3MoeMLP(torch.nn.Module):
     def __init__(self, config: PretrainedConfig, layer_idx: int = 0):
         super().__init__()
         self.config = config
@@ -70,7 +72,7 @@ class BailingMoeMLP(torch.nn.Module):
         return self.down_proj(act)
 
 
-class BailingMoeMoE(torch.nn.Module):
+class Qwen3MoeSparseMoeBlock(torch.nn.Module):
     def __init__(
         self,
         config: PretrainedConfig,
@@ -83,51 +85,95 @@ class BailingMoeMoE(torch.nn.Module):
         self.num_experts = config.num_experts
         self.top_k = config.num_experts_per_tok
         self.norm_topk_prob = self.config.norm_topk_prob
-
         exp_conf = copy.deepcopy(config)
         exp_conf.intermediate_size = config.moe_intermediate_size
 
-        modules = torch.nn.ModuleList([BailingMoeMLP(exp_conf, layer_idx=-1)
+        modules = torch.nn.ModuleList([Qwen3MoeMLP(exp_conf, layer_idx=-1)
                                         for _ in range(self.num_experts)])
         self.experts = AutoExperts.from_pretrained(module_list=modules,
                                                     hidden_size=exp_conf.hidden_size,
                                                     intermediate_size=exp_conf.intermediate_size,
                                                     num_expert=self.num_experts,
-                                                    config=config
+                                                    scoring_func='softmax',
+                                                    config=config,
                                                     )
 
         self.gate = torch.nn.Linear(config.hidden_size,
                                      self.num_experts,
                                      bias=False)
 
-        im_sz = config.moe_intermediate_size * config.num_shared_experts
-        share_conf = copy.deepcopy(config)
-        share_conf.intermediate_size = im_sz
-        self.shared_experts = BailingMoeMLP(config=share_conf, layer_idx=-1)
-
     def flood_patch_func(self, kwargs=None):
         self.experts._flood_patch_func()
-
-        self.shared_experts._flood_patch_func()
 
     def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
         num_tokens, hidden_dim = hidden_states.shape
         hidden_states = hidden_states.view(-1, hidden_dim)
-        shared_output = self.shared_experts(hidden_states)
 
         router_logits = self.gate(hidden_states)
 
         final_hidden_states = self.experts(hidden_states,
                                         router_logits,
                                         self.top_k,
-                                        renormalize=self.norm_topk_prob
+                                        renormalize=self.norm_topk_prob,
                                         )
-        final_hidden_states = final_hidden_states + shared_output
-
         return final_hidden_states.view(num_tokens, hidden_dim)
 
 
-class BailingMoeAttention(torch.nn.Module):
+
+# class Qwen3MoeSparseMoeBlock(torch.nn.Module):
+#     def __init__(self, config, layer_idx):
+#         super().__init__()
+#         self.num_experts = config.num_experts
+#         self.top_k = config.num_experts_per_tok
+#         self.norm_topk_prob = config.norm_topk_prob
+
+#         # gating
+#         self.gate = torch.nn.Linear(config.hidden_size, config.num_experts, bias=False)
+#         self.experts = torch.nn.ModuleList(
+#             [Qwen3MoeMLP(config, layer_idx=-1) for _ in range(self.num_experts)]
+#         )
+
+#     def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
+#         """ """
+#         num_tokens, hidden_dim = hidden_states.shape
+#         hidden_states = hidden_states.view(-1, hidden_dim)
+#         # router_logits: (batch * sequence_length, n_experts)
+#         router_logits = self.gate(hidden_states)
+
+#         routing_weights = torch.nn.functional.softmax(router_logits, dim=1, dtype=torch.float)
+#         routing_weights, selected_experts = torch.topk(routing_weights, self.top_k, dim=-1)
+#         if self.norm_topk_prob:  # only diff with mixtral sparse moe block!
+#             routing_weights /= routing_weights.sum(dim=-1, keepdim=True)
+#         # we cast back to the input dtype
+#         routing_weights = routing_weights.to(hidden_states.dtype)
+
+#         final_hidden_states = torch.zeros(
+#             (num_tokens, hidden_dim), dtype=hidden_states.dtype, device=hidden_states.device
+#         )
+
+#         # One hot encode the selected experts to create an expert mask
+#         # this will be used to easily index which expert is going to be sollicitated
+#         expert_mask = torch.nn.functional.one_hot(selected_experts, num_classes=self.num_experts).permute(2, 1, 0)
+
+#         # Loop over all available experts in the model and perform the computation on each expert
+#         expert_hitted = torch.greater(expert_mask.sum(dim=(-1, -2)), 0).nonzero()
+#         for expert_idx in expert_hitted:
+#             expert_layer = self.experts[expert_idx]
+#             idx, top_x = torch.where(expert_mask[expert_idx].squeeze(0))
+
+#             # Index the correct hidden states and compute the expert hidden state for
+#             # the current expert. We need to make sure to multiply the output hidden
+#             # states by `routing_weights` on the corresponding tokens (top-1 and top-2)
+#             current_state = hidden_states[None, top_x].reshape(-1, hidden_dim)
+#             current_hidden_states = expert_layer(current_state) * routing_weights[top_x, idx, None]
+
+#             # However `index_add_` only support torch tensors for indexing so we'll use
+#             # the `top_x` tensor here.
+#             final_hidden_states.index_add_(0, top_x, current_hidden_states.to(hidden_states.dtype))
+#         final_hidden_states = final_hidden_states.reshape(num_tokens, hidden_dim)
+#         return final_hidden_states
+
+class Qwen3MoeAttention(torch.nn.Module):
     def __init__(self, config: PretrainedConfig, layer_idx: int = 0):
         super().__init__()
         self.config = config
@@ -148,18 +194,28 @@ class BailingMoeAttention(torch.nn.Module):
         self.rope_theta = float(config.rope_theta)
         self.softmax_scale = math.sqrt(1.0 / self.head_dim)
 
-        qkv_dim = (self.num_heads + 2 * self.num_key_value_heads) * self.head_dim
-        self.query_key_value = AutoLinear.from_pretrained(self.hidden_size, 
-                                                 qkv_dim, 
-                                                 bias=config.use_qkv_bias, 
+        self.q_proj = AutoLinear.from_pretrained(self.hidden_size, 
+                                                 self.num_heads * self.head_dim, 
+                                                 bias=config.attention_bias, 
                                                  config=config, 
-                                                 name='query_key_value')
-
-        self.dense = AutoLinear.from_pretrained(self.intermediate_size, 
+                                                 name='q_proj')
+        self.k_proj = AutoLinear.from_pretrained(self.hidden_size, 
+                                                 self.num_key_value_heads * self.head_dim, 
+                                                 bias=config.attention_bias, 
+                                                 config=config, 
+                                                 name='k_proj')
+        self.v_proj = AutoLinear.from_pretrained(self.hidden_size, 
+                                                 self.num_key_value_heads * self.head_dim, 
+                                                 bias=config.attention_bias, 
+                                                 config=config,
+                                                 name='v_proj')
+        self.o_proj = AutoLinear.from_pretrained(self.intermediate_size, 
                                                  self.hidden_size, 
-                                                 bias=config.use_bias, 
+                                                 bias=config.attention_bias, 
                                                  config=config, 
-                                                 name='dense')
+                                                 name='o_proj')
+        self.q_norm = RMSNorm(self.head_dim, eps=config.rms_norm_eps)
+        self.k_norm = RMSNorm(self.head_dim, eps=config.rms_norm_eps)
 
         self.rope = AutoRope.from_pretrained(config)
         self.attention =  None
@@ -168,12 +224,25 @@ class BailingMoeAttention(torch.nn.Module):
         if self.layer_idx == 0:
             print('patch Attention')
 
+        self.qkv_proj = self.q_proj.merge([self.q_proj, self.k_proj, self.v_proj])
+
+        self.o_proj.patch()
+
+        self.q_proj = None
+        delattr(self, 'q_proj')
+
+        self.k_proj = None
+        delattr(self, 'k_proj')
+
+        self.v_proj = None
+        delattr(self, 'v_proj')
+
         if kwargs is None:
             kwargs = {}
         cache_dtype = kwargs.get('cache_dtype', None)
         interleave_value = kwargs.get('interleave_value', False)
         if interleave_value:
-            AutoAttention.interleave(self.query_key_value, 
+            AutoAttention.interleave(self.qkv_proj, 
                                      self.num_heads, 
                                      self.num_key_value_heads, 
                                      self.head_dim)
@@ -184,7 +253,6 @@ class BailingMoeAttention(torch.nn.Module):
                                                        kernels=kernels,
                                                        softmax_scale=self.softmax_scale)
 
-
     def forward(
         self,
         hidden_states: torch.Tensor,
@@ -195,19 +263,22 @@ class BailingMoeAttention(torch.nn.Module):
     ) -> torch.Tensor:
 
         q_len = hidden_states.size(0)
-        qkv = self.query_key_value(hidden_states)
+        qkv = self.qkv_proj(hidden_states)
         qkv = qkv.view(q_len, self.num_heads + 2 * self.num_key_value_heads, self.head_dim)
 
         query_states, key_states, value_states = qkv.split([self.num_heads, 
                                                             self.num_key_value_heads, 
                                                             self.num_key_value_heads], 
                                                             dim=-2)
-
+        query_states = self.q_norm(query_states)
+        key_states = self.k_norm(key_states)
         batch_meta_info = kwargs['batch_meta_info']
 
+        q_offsets = (batch_meta_info.q_offsets if batch_meta_info.draft_offsets is None
+                 else batch_meta_info.draft_offsets)
         self.rope(query_states, 
                   key_states, 
-                  batch_meta_info.q_offsets if batch_meta_info.draft_offsets is None else batch_meta_info.draft_offsets, 
+                  q_offsets, 
                   batch_meta_info.position_ids)
 
         attn_output = self.attention(query_states, key_states, value_states, 
@@ -215,144 +286,35 @@ class BailingMoeAttention(torch.nn.Module):
 
         # model may have different hidden_size
         attn_output = attn_output.view(q_len, self.intermediate_size)  
-        attn_output = self.dense(attn_output)
+        attn_output = self.o_proj(attn_output)
 
         return attn_output
 
 
-class BailingMoeLinearAttention(torch.nn.Module):
-    def __init__(self, config: PretrainedConfig, layer_idx: int = 0):
-        super().__init__()
-        self.config = config
-        self.layer_idx = layer_idx
-
-        self.hidden_size = config.hidden_size
-        self.num_heads = config.num_attention_heads
-        head_dim = None
-        if hasattr(config, 'head_dim'):
-            head_dim = config.head_dim
-        if head_dim is None or head_dim<=0:
-            head_dim = self.hidden_size // self.num_heads
-        self.head_dim = head_dim
-        self.intermediate_size = self.num_heads * self.head_dim
-        self.num_key_value_heads = config.num_key_value_heads if config.use_linear_gqa else config.num_attention_heads
-        self.num_key_value_groups = self.num_heads // self.num_key_value_heads
-        self.max_position_embeddings = config.max_position_embeddings
-        self.rope_theta = float(config.rope_theta)
-        self.softmax_scale = math.sqrt(1.0 / self.head_dim)
-        self.use_linear_silu = config.use_linear_silu
-        self.use_low_rank = config.use_low_rank
-        self.num_layers = config.num_hidden_layers
-        self.linear_attn_norm_group_size = getattr(config, 'linear_attn_norm_group_size', None)
-
-        qkv_dim = (self.num_heads + 2 * self.num_key_value_heads) * self.head_dim
-        self.query_key_value = AutoLinear.from_pretrained(self.hidden_size, 
-                                                 qkv_dim, 
-                                                 bias=config.use_qkv_bias, 
-                                                 config=config, 
-                                                 name='query_key_value')
-        self.dense = AutoLinear.from_pretrained(self.intermediate_size, 
-                                            self.hidden_size, 
-                                            bias=config.use_bias, 
-                                            config=config, 
-                                            name='dense')
-
-        self.g_proj = torch.nn.Linear(self.hidden_size, self.num_heads * self.head_dim, bias=False)
-        if self.linear_attn_norm_group_size is not None:
-            self.g_norm = RMSGroupNorm(hidden_size=self.num_heads * self.head_dim,
-                                    linear_attn_norm_group_size=config.linear_attn_norm_group_size,
-                                    eps=config.rms_norm_eps)
-        else:
-            self.g_norm = RMSNorm(hidden_size=self.num_heads * self.head_dim, eps=config.rms_norm_eps)
-
-        self.rope = AutoRope.from_pretrained(config)
-        self.attention =  None
-
-    def flood_patch_func(self, kwargs=None):
-        if self.layer_idx == 0:
-            print('patch Attention')
-
-        if kwargs is None:
-            kwargs = {}
-        cache_dtype = kwargs.get('cache_dtype', None)
-        interleave_value = kwargs.get('interleave_value', False)
-        if interleave_value:
-            AutoAttention.interleave(self.query_key_value, 
-                                     self.num_heads, 
-                                     self.num_key_value_heads, 
-                                     self.head_dim)
-
-        self.attention = AutoAttention.from_pretrained(cache_dtype, 
-                                                       layer_idx=self.layer_idx, 
-                                                       kernels= ['sla'],
-                                                       softmax_scale=self.softmax_scale)
-
-        start = 2 ** (-(2 ** -(math.log2(self.num_key_value_heads) - 3)))
-        exponents = torch.arange(1, self.num_key_value_heads + 1, dtype=torch.float32)
-        self.decay_scales = -torch.pow(start, exponents) * (1 - self.layer_idx / (self.num_layers - 1) + 1e-5)
-
-    def forward(
-        self,
-        hidden_states: torch.Tensor,
-        attention_mask: Optional[torch.LongTensor] = None,
-        position_ids: Optional[torch.LongTensor] = None,
-        past_key_value: Optional[Cache] = None,
-        **kwargs,
-    ) -> torch.Tensor:
-
-        q_len = hidden_states.size(0)
-        qkv = self.query_key_value(hidden_states)
-        if self.use_linear_silu:
-            qkv = torch.nn.functional.silu(qkv)
-
-        qkv = qkv.view(q_len, self.num_heads + 2 * self.num_key_value_heads, self.head_dim)
-
-        query_states, key_states, value_states = qkv.split([self.num_heads, 
-                                                            self.num_key_value_heads, 
-                                                            self.num_key_value_heads], 
-                                                            dim=-2)
-
-        batch_meta_info = kwargs['batch_meta_info']
-
-        self.rope(query_states, 
-                  key_states, 
-                  batch_meta_info.q_offsets if batch_meta_info.draft_offsets is None else batch_meta_info.draft_offsets, 
-                  batch_meta_info.position_ids)
-        if self.decay_scales.device != query_states.device:
-            self.decay_scales = self.decay_scales.to(query_states.device)
-        attn_output = self.attention(query_states, 
-                                     key_states, 
-                                     value_states, 
-                                     self.decay_scales,
-                                     batch_meta_info, 
-                                     past_key_value)
-        
-        attn_output = attn_output.view(q_len, self.intermediate_size)  
-        attn_output = self.g_norm(attn_output)
-        g = self.g_proj(hidden_states)
-        attn_output = attn_output * torch.nn.functional.sigmoid(g)
-        attn_output = self.dense(attn_output)
-
-        return attn_output
-
-class BailingMoeDecoderLayer(torch.nn.Module):
+class Qwen3MoeDecoderLayer(torch.nn.Module):
     def __init__(self, config: PretrainedConfig, layer_idx: int = 0):
         super().__init__()
         self.hidden_size = config.hidden_size
         self.n_layer = config.num_hidden_layers
         self.layer_idx = layer_idx
+        self.decoder_sparse_step = config.decoder_sparse_step
 
         # use layer_idx==None to indicate that the layer does not 
-        # initialized on the current node, and use layer_idx==-1
-        # to indicate the final layer of the model
+        # initialized on the current node
         if self.layer_idx is not None:
-            if (self.layer_idx + 1) % config.layer_group_size == 0:
-                self.attention = BailingMoeAttention(config, layer_idx=layer_idx)
+            self.self_attn = Qwen3MoeAttention(config, layer_idx=layer_idx)
+            if (self.layer_idx not in config.mlp_only_layers) and (
+                config.num_experts > 0 and (self.layer_idx + 1) % config.decoder_sparse_step == 0
+            ):
+                self.mlp = Qwen3MoeSparseMoeBlock(config, layer_idx=layer_idx) 
             else:
-                self.attention = BailingMoeLinearAttention(config, layer_idx=layer_idx)
-            self.mlp = BailingMoeMoE(config, layer_idx=layer_idx)
+                self.mlp = Qwen3MoeMLP(config, layer_idx=layer_idx)
             self.input_layernorm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
             self.post_attention_layernorm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
+
+    def flood_patch_func(self, kwargs=None):
+        if self.layer_idx is not None and isinstance(self.mlp, Qwen3MoeMLP):
+            self.mlp._flood_patch_func()
 
     def forward(
         self,
@@ -370,7 +332,7 @@ class BailingMoeDecoderLayer(torch.nn.Module):
 
         hidden_states = self.input_layernorm(hidden_states)
 
-        hidden_states = self.attention(
+        hidden_states = self.self_attn(
             hidden_states=hidden_states,
             attention_mask=attention_mask,
             position_ids=position_ids,
@@ -394,11 +356,11 @@ class BailingMoeDecoderLayer(torch.nn.Module):
         return hidden_states
 
 
-class BailingMoeModel(PreTrainedModel):
+class Qwen3MoeModel(PreTrainedModel):
 
-    config_class = BailingMoeLinearConfig
+    config_class = Qwen3MoeConfig
     base_model_prefix = "model"
-    _no_split_modules = ["BailingMoeDecoderLayer"]
+    _no_split_modules = ["Qwen3MoeDecoderLayer"]
 
     def __init__(self, config: PretrainedConfig):
         super().__init__(config)
@@ -409,38 +371,37 @@ class BailingMoeModel(PreTrainedModel):
         self.world_size = int(os.environ.get('FLOOD_WORLD_SIZE', '1'))
 
         if self.rank == 0:
-            self.word_embeddings = AutoEmbedding.from_pretrained(config, 
+            self.embed_tokens = AutoEmbedding.from_pretrained(config, 
                                                                 config.vocab_size, 
                                                                 config.hidden_size, 
                                                                 padding_idx=self.padding_idx)
         else:
-            self.word_embeddings = None 
+            self.embed_tokens = None 
 
         n_layer = config.num_hidden_layers
         layers = []
         local_size = n_layer // self.world_size
         for i in range(n_layer):
             layer_idx = i if i // local_size == self.rank else None
-            layers.append(BailingMoeDecoderLayer(config, layer_idx=layer_idx))
+            layers.append(Qwen3MoeDecoderLayer(config, layer_idx=layer_idx))
         self.layers = torch.nn.ModuleList(layers)
 
         self.norm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
 
     def get_input_embeddings(self):
-        return self.word_embeddings
+        return self.embed_tokens
 
     def set_input_embeddings(self, value):
-        self.word_embeddings = value
+        self.embed_tokens = value
 
 
-class BailingMoeLinearForCausalLM(PreTrainedModel):
-    config_class = BailingMoeLinearConfig
+class Qwen3MoeForCausalLM(PreTrainedModel):
+    config_class = Qwen3MoeConfig
     _tied_weights_keys = ["lm_head.weight"]
 
     def __init__(self, config: PretrainedConfig):
         super().__init__(config)
-        self.config = config
-        self.model = BailingMoeModel(config)
+        self.model = Qwen3MoeModel(config)
         self.vocab_size = config.vocab_size
 
         self.rank = int(os.environ.get('FLOOD_RANK', '0'))
@@ -457,10 +418,10 @@ class BailingMoeLinearForCausalLM(PreTrainedModel):
 
 
     def get_input_embeddings(self):
-        return self.model.word_embeddings
+        return self.model.embed_tokens
 
     def set_input_embeddings(self, value):
-        self.model.word_embeddings = value
+        self.model.embed_tokens = value
 
     def get_output_embeddings(self):
         return self.lm_head
@@ -480,12 +441,6 @@ class BailingMoeLinearForCausalLM(PreTrainedModel):
             print('patch lm_head')            
             self.lm_head.patch()
 
-        if self.config.norm_head and self.lm_head is not None:
-            data = self.lm_head.weight.data
-            dtype = data.dtype
-            norm = torch.norm(data.float(), p=2, dim=0, keepdim=True) + 1e-7
-            self.lm_head.weight.data = (data.float() / norm).to(dtype)
-
     @torch.inference_mode()
     def forward(
         self,
@@ -502,13 +457,12 @@ class BailingMoeLinearForCausalLM(PreTrainedModel):
     ) -> List:
 
         n_devices = len(device_list)
-        n_layers = len(self.model.layers)
         for i, indices in enumerate(device_list):
             stream = streams[i]
             with torch.cuda.stream(stream):
                 if i == 0 and self.rank == 0:
                     batch_meta_info.to(torch.device(0), non_blocking=True)
-                    hidden_states = self.model.word_embeddings(batch_meta_info.input_ids)
+                    hidden_states = self.model.embed_tokens(batch_meta_info.input_ids)
                     embeddings = batch_meta_info.embeddings
                     if embeddings is not None:
                         emb_idx_list = batch_meta_info.emb_idx_list
@@ -545,6 +499,8 @@ class BailingMoeLinearForCausalLM(PreTrainedModel):
 
         # TODO: adapt for multi-node serving
         if batch_meta_info.mode == 2:
-            batch_meta_info.spec.update_cache(batch_meta_info.cache_src_indices, batch_meta_info.cache_dst_indices, past_key_values)
+            batch_meta_info.spec.update_cache(batch_meta_info.cache_src_indices, 
+                                              batch_meta_info.cache_dst_indices, 
+                                              past_key_values)
 
         return outputs

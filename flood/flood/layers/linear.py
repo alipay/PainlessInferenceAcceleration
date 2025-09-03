@@ -8,8 +8,8 @@ import torch.nn.functional as F
 from torch.nn import Parameter
 
 from flood.ops.quantization import scaled_fp8_quant, static_int8_quant, dynamic_int8_quant
-from flood.ops.quantization import tile_quant
-from flood.ops.gemm import  dynamic_int8_gemm_nt,static_int8_gemm_nt,fp8_tb_gemm
+from flood.ops.quantization import tile_quant, per_token_group_quant_fp8
+from flood.ops.gemm import  dynamic_int8_gemm_nt,static_int8_gemm_nt,fp8_tb_gemm, w8a8_block_fp8_matmul
 
 
 
@@ -94,6 +94,17 @@ class AutoLinear():
                                         weight_dtype=weight_dtype,
                                         bias_dtype=bias_dtype,
                                         config=config)
+        elif quant_type == 'block_fp8':
+            return DynamicBlockW8A8Fp8Linear(in_features,
+                                        out_features,
+                                        weight=weight,
+                                        bias=bias,
+                                        device=device,
+                                        input_scale=input_scale,
+                                        weight_scale_inv=weight_scale,
+                                        weight_dtype=weight_dtype,
+                                        bias_dtype=bias_dtype,
+                                        config=config)
         else:
             raise ValueError(f'unknown quant_type:{quant_type}')
 
@@ -102,13 +113,6 @@ class AutoLinear():
         if not config or not hasattr(config,
                                      'quantization_config') or config.quantization_config is None:
             return None
-
-        # hack for deepseek_v3
-        if config.model_type == 'deepseek_v3':
-            if layer_name == 'lm_head':
-                return None
-            else:
-                return 'tb_fp8'
 
         conf = config
         if hasattr(config, '_asdict'):
@@ -119,6 +123,11 @@ class AutoLinear():
         conf = conf['quantization_config']
         if hasattr(conf, 'to_dict') and callable(conf.to_dict):
             conf = conf.to_dict()
+        if 'weight_block_size' in conf:
+            if layer_name == 'lm_head' or layer_name == 'gate':
+                return None
+            else:
+                return 'block_fp8'
         if layer_name in conf.get('ignore',[]):
             return None
         conf = conf['config_groups']['group_0']
@@ -868,4 +877,110 @@ class DynamicTbW8A8Fp8Linear(torch.nn.Module):
 
     def __repr__(self):
         return (f'DynamicTbW8A8Fp8Linear(in_features={self.in_features}, '
+                f'out_features={self.out_features}, bias={self.bias is not None})')
+
+class DynamicBlockW8A8Fp8Linear(torch.nn.Module):
+    def __init__(self,
+                 in_features,
+                 out_features,
+                 weight=None,
+                 bias=None,
+                 dtype=None,
+                 input_scale=None,
+                 weight_scale_inv=None,
+                 device=None,
+                 weight_dtype=None,
+                 bias_dtype=None,
+                 config=None):
+        super().__init__()
+        self.in_features = in_features
+        self.out_features = out_features
+        self.weight = weight
+        self.bias = bias
+        self.input_scale = input_scale
+        self.weight_scale_inv = weight_scale_inv
+        self.device = device
+        self.weight_dtype = torch.float8_e4m3fn
+        self.bias_dtype = bias_dtype or dtype
+        self.config = config
+        self.block_size = config.quantization_config.weight_block_size
+
+        assert weight is None or isinstance(weight, Parameter)
+        if weight is None:
+            data = torch.empty(out_features, in_features,
+                               dtype=self.weight_dtype)
+            self.weight = Parameter(data, requires_grad=False)
+        else:
+            self.weight = weight
+
+        assert bias is None or isinstance(bias, bool) or isinstance(bias,
+                                                                    Parameter)
+        if bias is None or isinstance(bias, Parameter):
+            self.bias = bias
+        elif bias is False:
+            self.bias = None
+        else:
+            data = torch.empty(out_features, dtype=self.bias_dtype)
+            self.bias = Parameter(data, requires_grad=False)
+
+        assert weight_scale_inv is None or isinstance(weight_scale_inv, Parameter)
+        if weight_scale_inv is None:
+            weight_scale_inv = Parameter(torch.empty(( (out_features-1)//self.block_size[0] + 1, (in_features-1)//self.block_size[1] + 1), dtype=torch.float32),
+                                     requires_grad=False)
+
+        self.weight_scale_inv = weight_scale_inv
+
+    def forward(self, x):
+        x_q, x_scale = per_token_group_quant_fp8(x, group_size=self.block_size[0])
+        output = w8a8_block_fp8_matmul(x_q, self.weight, x_scale, self.weight_scale_inv, self.block_size, x.dtype)
+        if self.bias is not None:
+            output += self.bias
+        return output
+
+    @staticmethod
+    def merge(linears):
+        assert len(linears) > 1
+        in_features = []
+        out_features = []
+        dtype = None
+        device = None
+        weights = []
+        biases = []
+        scales = []
+        for linear in linears:
+            in_features.append(linear.in_features)
+            out_features.append(linear.out_features)
+            weight = linear.weight.data
+            dtype = weight.dtype
+            device = weight.device
+            weights.append(weight.view(torch.int8))
+            biases.append(None if linear.bias is None else linear.bias.data)
+            scales.append(linear.weight_scale_inv.data)
+
+        assert min(in_features) == max(in_features)
+
+        scale = Parameter(torch.cat(scales, dim=0))
+        weight = Parameter(torch.cat(weights, dim=0).view(dtype), requires_grad=False)
+        bias = None if any([b is None for b in biases]) else Parameter(
+            torch.cat(biases, dim=0), requires_grad=False)
+        in_features = in_features[0]
+        out_features = sum(out_features)
+        config = linears[0].config
+
+        return DynamicBlockW8A8Fp8Linear(in_features,
+                                    out_features,
+                                    weight=weight,
+                                    bias=bias,
+                                    weight_scale_inv=scale,
+                                    device=device,
+                                    weight_dtype=None,
+                                    bias_dtype=None,
+                                    config=config)
+
+    def patch(self):
+        # self.weight = Parameter(self.weight.t(), requires_grad=False)
+        pass
+
+    def __repr__(self):
+        return (f'DynamicBlockW8A8Fp8Linear(in_features={self.in_features}, '
                 f'out_features={self.out_features}, bias={self.bias is not None})')

@@ -24,8 +24,7 @@ from flood.layers.attention import AutoAttention
 from flood.layers.embedding import AutoEmbedding
 from flood.layers.sampler import Sampler
 from flood.layers.moe import AutoExperts
-from .configuration_deepseekv3 import DeepseekV3Config
-
+from transformers.models.deepseek_v3.configuration_deepseek_v3 import DeepseekV3Config
 
 
 class DeepseekV3MLP(torch.nn.Module):
@@ -53,7 +52,7 @@ class DeepseekV3MLP(torch.nn.Module):
                                                     config=config, 
                                                     name='down_proj')
 
-    def flood_patch_func(self, kwargs=None):
+    def _flood_patch_func(self, kwargs=None):
         # if self.layer_idx == 0:
         #     print('patch MLP')
 
@@ -72,201 +71,71 @@ class DeepseekV3MLP(torch.nn.Module):
         return self.down_proj(act)
 
 
-# class DeepseekV3MoE(torch.nn.Module):
-#     def __init__(
-#         self,
-#         config: PretrainedConfig,
-#         layer_idx: int = 0
-#     ):
-#         super().__init__()
-#         self.config = config
-#         self.layer_idx = layer_idx
-
-#         self.n_routed_experts = config.n_routed_experts
-#         self.top_k = config.num_experts_per_tok
-#         self.norm_topk_prob = self.config.norm_topk_prob
-
-#         exp_conf = copy.deepcopy(config)
-#         exp_conf.intermediate_size = config.moe_intermediate_size
-
-#         modules = torch.nn.ModuleList([DeepseekV3MLP(exp_conf, layer_idx=-1)
-#                                         for _ in range(self.n_routed_experts)])
-#         self.experts = AutoExperts.from_pretrained(module_list=modules,
-#                                                     hidden_size=exp_conf.hidden_size,
-#                                                     intermediate_size=exp_conf.intermediate_size,
-#                                                     num_expert=self.n_routed_experts,
-#                                                     config=config
-#                                                     )
-
-#         self.gate = torch.nn.Linear(config.hidden_size,
-#                                      self.n_routed_experts,
-#                                      bias=False)
-
-#         im_sz = config.moe_intermediate_size * config.n_shared_experts
-#         share_conf = copy.deepcopy(config)
-#         share_conf.intermediate_size = im_sz
-#         self.shared_experts = DeepseekV3MLP(config=share_conf, layer_idx=-1)
-
-#     def flood_patch_func(self, kwargs=None):
-#         self.experts._flood_patch_func()
-
-#         self.shared_experts._flood_patch_func()
-
-#     def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
-#         num_tokens, hidden_dim = hidden_states.shape
-#         hidden_states = hidden_states.view(-1, hidden_dim)
-#         shared_output = self.shared_experts(hidden_states)
-
-#         router_logits = self.gate(hidden_states)
-
-#         final_hidden_states = self.experts(hidden_states,
-#                                         router_logits,
-#                                         self.top_k,
-#                                         renormalize=self.norm_topk_prob
-#                                         )
-#         final_hidden_states = final_hidden_states + shared_output
-
-#         return final_hidden_states.view(num_tokens, hidden_dim)
-
-
-class MoEGate(torch.nn.Module):
-    def __init__(self, config):
-        super().__init__()
-        self.config = config
-        self.top_k = config.num_experts_per_tok
-        self.n_routed_experts = config.n_routed_experts
-        self.routed_scaling_factor = config.routed_scaling_factor
-        self.scoring_func = config.scoring_func
-        self.topk_method = config.topk_method
-        self.n_group = config.n_group
-        self.topk_group = config.topk_group
-
-        # topk selection algorithm
-        self.norm_topk_prob = config.norm_topk_prob
-        self.gating_dim = config.hidden_size
-        self.weight = torch.nn.Parameter(
-            torch.empty((self.n_routed_experts, self.gating_dim))
-        )
-        self.e_score_correction_bias = torch.nn.Parameter(
-                torch.empty((self.n_routed_experts))
-            )
-
-    def forward(self, hidden_states):
-        num_tokens, h = hidden_states.shape
-        ### compute gating score
-        hidden_states = hidden_states.view(-1, h)
-        logits = F.linear(
-            hidden_states.type(torch.float32), self.weight.type(torch.float32), None
-        )
-        scores = logits.sigmoid()
-
-        ### select top-k experts
-        scores_for_choice = scores.view(num_tokens, -1) + self.e_score_correction_bias.unsqueeze(0)
-        group_scores = (
-            scores_for_choice.view(num_tokens, self.n_group, -1).topk(2, dim=-1)[0].sum(dim = -1)
-        )  # [n, n_group]
-        group_idx = torch.topk(
-            group_scores, k=self.topk_group, dim=-1, sorted=False
-        )[
-            1
-        ]  # [n, top_k_group]
-        group_mask = torch.zeros_like(group_scores)  # [n, n_group]
-        group_mask.scatter_(1, group_idx, 1)  # [n, n_group]
-        score_mask = (
-            group_mask.unsqueeze(-1)
-            .expand(
-                num_tokens, self.n_group, self.n_routed_experts // self.n_group
-            )
-            .reshape(num_tokens, -1)
-        )  # [n, e]
-        tmp_scores = scores_for_choice.masked_fill(~score_mask.bool(), float("-inf"))  # [n, e]
-        _, topk_idx = torch.topk(
-            tmp_scores, k=self.top_k, dim=-1, sorted=False
-        )
-        topk_weight = scores.gather(1, topk_idx)
-
-        ### norm gate to sum 1
-        denominator = topk_weight.sum(dim=-1, keepdim=True) + 1e-20
-        topk_weight = topk_weight / denominator
-        topk_weight = topk_weight * self.routed_scaling_factor # must multiply the scaling factor
-
-        return topk_idx, topk_weight
-
 class DeepseekV3MoE(torch.nn.Module):
-    """
-    A mixed expert module containing shared experts.
-    """
-
-    def __init__(self, config, layer_idx=0):
+    def __init__(
+        self,
+        config: PretrainedConfig,
+        layer_idx: int = 0
+    ):
         super().__init__()
         self.config = config
         self.layer_idx = layer_idx
-        self.num_experts_per_tok = config.num_experts_per_tok
 
-        self.ep_size = 1
-        self.experts_per_rank = config.n_routed_experts
-        self.ep_rank = 0
-        self.experts = torch.nn.Sequential(
-            *[
-                DeepseekV3MLP(
-                    config, intermediate_size=config.moe_intermediate_size
-                )
-                for i in range(config.n_routed_experts)
-            ]
-        )
-        self.gate = MoEGate(config)
-        if config.n_shared_experts is not None:
-            intermediate_size = config.moe_intermediate_size * config.n_shared_experts
-            self.shared_experts = DeepseekV3MLP(
-                config=config, intermediate_size=intermediate_size
-            )
+        self.n_routed_experts = config.n_routed_experts
+        self.top_k = config.num_experts_per_tok
+        self.norm_topk_prob = self.config.norm_topk_prob
+        self.routed_scaling_factor = config.routed_scaling_factor
+        self.topk_group = config.topk_group
+        self.num_expert_group = config.n_group
 
-    def forward(self, hidden_states):
-        identity = hidden_states
-        orig_shape = hidden_states.shape
-        topk_idx, topk_weight = self.gate(hidden_states)
-        hidden_states = hidden_states.view(-1, hidden_states.shape[-1])
-        flat_topk_idx = topk_idx.view(-1)
-        y = self.moe_infer(hidden_states, topk_idx, topk_weight).view(*orig_shape)
-        y = y + self.shared_experts(identity)
-        return y
+        exp_conf = copy.deepcopy(config)
+        exp_conf.intermediate_size = config.moe_intermediate_size
 
-    @torch.no_grad()
-    def moe_infer(self, x, topk_ids, topk_weight):
-        cnts = topk_ids.new_zeros((topk_ids.shape[0], len(self.experts)))
-        cnts.scatter_(1, topk_ids, 1)
-        tokens_per_expert = cnts.sum(dim=0)
-        idxs = topk_ids.view(-1).argsort()
-        sorted_tokens = x[idxs // topk_ids.shape[1]]
-        sorted_tokens_shape = sorted_tokens.shape
-        
-        tokens_per_expert = tokens_per_expert.cpu().numpy()
+        modules = torch.nn.ModuleList([DeepseekV3MLP(exp_conf, layer_idx=-1)
+                                        for _ in range(self.n_routed_experts)])
+        self.experts = AutoExperts.from_pretrained(module_list=modules,
+                                                    hidden_size=exp_conf.hidden_size,
+                                                    intermediate_size=exp_conf.intermediate_size,
+                                                    num_expert=self.n_routed_experts,
+                                                    scoring_func='sigmoid',
+                                                    num_expert_group=self.num_expert_group,
+                                                    topk_group=self.topk_group,
+                                                    config=config
+                                                    )
 
-        outputs = []
-        start_idx = 0
-        for i, num_tokens in enumerate(tokens_per_expert):
-            end_idx = start_idx + num_tokens
-            if num_tokens == 0:
-                continue
-            expert = self.experts[i + self.ep_rank * self.experts_per_rank]
-            tokens_for_this_expert = sorted_tokens[start_idx:end_idx]
-            expert_out = expert(tokens_for_this_expert)
-            outputs.append(expert_out)
-            start_idx = end_idx
+        self.gate = AutoLinear.from_pretrained(config.hidden_size, 
+                                                    self.n_routed_experts, 
+                                                    bias=False,
+                                                    config=config, 
+                                                    name='gate')
+        self.gate.e_score_correction_bias = torch.nn.Parameter(torch.zeros(self.n_routed_experts))
 
-        outs = torch.cat(outputs, dim=0) if len(outputs) else sorted_tokens.new_empty(0)
+        im_sz = config.moe_intermediate_size * config.n_shared_experts
+        share_conf = copy.deepcopy(config)
+        share_conf.intermediate_size = im_sz
+        self.shared_experts = DeepseekV3MLP(config=share_conf, layer_idx=-1)
 
-        new_x = torch.empty_like(outs)
-        new_x[idxs] = outs
-        final_out = (
-            new_x.view(*topk_ids.shape, -1)
-            .type(topk_weight.dtype)
-            .mul_(topk_weight.unsqueeze(dim=-1))
-            .sum(dim=1)
-            .type(new_x.dtype)
-        )
-        return final_out
+    def flood_patch_func(self, kwargs=None):
+        self.experts._flood_patch_func()
 
+        self.shared_experts._flood_patch_func()
+
+    def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
+        num_tokens, hidden_dim = hidden_states.shape
+        hidden_states = hidden_states.view(-1, hidden_dim)
+        shared_output = self.shared_experts(hidden_states)
+
+        router_logits = self.gate(hidden_states)
+
+        final_hidden_states = self.experts(hidden_states,
+                                        router_logits,
+                                        self.top_k,
+                                        renormalize=self.norm_topk_prob,
+                                        e_score_correction_bias=self.gate.e_score_correction_bias,
+                                        )
+        final_hidden_states = final_hidden_states * self.routed_scaling_factor + shared_output
+
+        return final_hidden_states.view(num_tokens, hidden_dim)
 
 class DeepseekV3Attention(torch.nn.Module):
     def __init__(self, config: PretrainedConfig, layer_idx: int = 0):
@@ -321,6 +190,7 @@ class DeepseekV3Attention(torch.nn.Module):
         self.softmax_scale = self.q_head_dim ** (-0.5)
 
         self.rope = AutoRope.from_pretrained(config)
+        
         self.attention =  None
 
     def flood_patch_func(self, kwargs=None):
@@ -342,7 +212,15 @@ class DeepseekV3Attention(torch.nn.Module):
                                                        layer_idx=self.layer_idx, 
                                                        kernels=kernels,
                                                        softmax_scale=self.softmax_scale)
-
+        # dequant the weight
+        if self.kv_b_proj.weight.data.dtype == torch.float8_e4m3fn:     
+            scale_dtype = self.kv_b_proj.weight_scale_inv.dtype  
+            out_features, in_features = self.kv_b_proj.weight.data.shape
+            weight = self.kv_b_proj.weight.data.view(out_features//128, 128, in_features//128, 128)
+            weight_sacle_inv = self.kv_b_proj.weight_scale_inv.view(out_features//128, 1, in_features//128, 1)
+            dequant_weight = weight.to(scale_dtype) * weight_sacle_inv
+            self.kv_b_proj.weight.data = dequant_weight.view(out_features, in_features).contiguous().to(cache_dtype)
+            del self.kv_b_proj.weight_scale_inv
 
     def forward(
         self,
@@ -443,6 +321,10 @@ class DeepseekV3DecoderLayer(torch.nn.Module):
 
         return hidden_states
 
+    def flood_patch_func(self, kwargs=None):
+        if self.layer_idx is not None and isinstance(self.mlp, DeepseekV3MLP):
+            self.mlp._flood_patch_func()
+
 
 class DeepseekV3Model(PreTrainedModel):
 
@@ -468,7 +350,7 @@ class DeepseekV3Model(PreTrainedModel):
 
         n_layer = config.num_hidden_layers
         layers = []
-        local_size = n_layer // self.world_size
+        local_size = (n_layer - 1) // self.world_size + 1
         for i in range(n_layer):
             layer_idx = i if i // local_size == self.rank else None
             layers.append(DeepseekV3DecoderLayer(config, layer_idx=layer_idx))

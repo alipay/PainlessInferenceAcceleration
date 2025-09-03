@@ -14,7 +14,7 @@ from transformers.cache_utils import Cache
 from transformers.modeling_utils import PreTrainedModel, PretrainedConfig
 
 from flood.ops.activation import silu_and_mul
-from flood.ops.norm import RMSNorm, RMSGroupNorm
+from flood.ops.norm import RMSNorm, RMSGroupNormSigmoid
 from flood.utils.batch import Batch
 from flood.layers.linear import AutoLinear
 from flood.layers.rope import AutoRope
@@ -22,11 +22,10 @@ from flood.layers.attention import AutoAttention
 from flood.layers.embedding import AutoEmbedding
 from flood.layers.sampler import Sampler
 from flood.layers.moe import AutoExperts
-from .configuration_bailing_moe_linear import BailingMoeLinearConfig
+from .configuration_bailing_moe_linear_v2 import BailingMoeLinearV2Config
 
 
-
-class BailingMoeMLP(torch.nn.Module):
+class BailingMoeV2MLP(torch.nn.Module):
     def __init__(self, config: PretrainedConfig, layer_idx: int = 0):
         super().__init__()
         self.config = config
@@ -70,7 +69,7 @@ class BailingMoeMLP(torch.nn.Module):
         return self.down_proj(act)
 
 
-class BailingMoeMoE(torch.nn.Module):
+class BailingMoeV2MoE(torch.nn.Module):
     def __init__(
         self,
         config: PretrainedConfig,
@@ -83,27 +82,33 @@ class BailingMoeMoE(torch.nn.Module):
         self.num_experts = config.num_experts
         self.top_k = config.num_experts_per_tok
         self.norm_topk_prob = self.config.norm_topk_prob
-
+        self.num_expert_group = config.n_group
+        self.topk_group = config.topk_group
+        self.routed_scaling_factor = config.routed_scaling_factor
         exp_conf = copy.deepcopy(config)
         exp_conf.intermediate_size = config.moe_intermediate_size
 
-        modules = torch.nn.ModuleList([BailingMoeMLP(exp_conf, layer_idx=-1)
+        modules = torch.nn.ModuleList([BailingMoeV2MLP(exp_conf, layer_idx=-1)
                                         for _ in range(self.num_experts)])
+
         self.experts = AutoExperts.from_pretrained(module_list=modules,
                                                     hidden_size=exp_conf.hidden_size,
                                                     intermediate_size=exp_conf.intermediate_size,
                                                     num_expert=self.num_experts,
-                                                    config=config
+                                                    scoring_func='sigmoid',
+                                                    num_expert_group=self.num_expert_group,
+                                                    topk_group=self.topk_group,
+                                                    config=config,
                                                     )
 
         self.gate = torch.nn.Linear(config.hidden_size,
                                      self.num_experts,
                                      bias=False)
-
+        self.gate.expert_bias = torch.nn.Parameter(torch.zeros(self.num_experts))
         im_sz = config.moe_intermediate_size * config.num_shared_experts
         share_conf = copy.deepcopy(config)
         share_conf.intermediate_size = im_sz
-        self.shared_experts = BailingMoeMLP(config=share_conf, layer_idx=-1)
+        self.shared_experts = BailingMoeV2MLP(config=share_conf, layer_idx=-1)
 
     def flood_patch_func(self, kwargs=None):
         self.experts._flood_patch_func()
@@ -120,14 +125,15 @@ class BailingMoeMoE(torch.nn.Module):
         final_hidden_states = self.experts(hidden_states,
                                         router_logits,
                                         self.top_k,
-                                        renormalize=self.norm_topk_prob
+                                        renormalize=self.norm_topk_prob,
+                                        e_score_correction_bias=self.gate.expert_bias,
                                         )
-        final_hidden_states = final_hidden_states + shared_output
+        final_hidden_states = final_hidden_states * self.routed_scaling_factor + shared_output
 
         return final_hidden_states.view(num_tokens, hidden_dim)
 
 
-class BailingMoeAttention(torch.nn.Module):
+class BailingMoeV2Attention(torch.nn.Module):
     def __init__(self, config: PretrainedConfig, layer_idx: int = 0):
         super().__init__()
         self.config = config
@@ -135,6 +141,7 @@ class BailingMoeAttention(torch.nn.Module):
 
         self.hidden_size = config.hidden_size
         self.num_heads = config.num_attention_heads
+        self.use_qk_norm = config.use_qk_norm
         head_dim = None
         if hasattr(config, 'head_dim'):
             head_dim = config.head_dim
@@ -154,7 +161,8 @@ class BailingMoeAttention(torch.nn.Module):
                                                  bias=config.use_qkv_bias, 
                                                  config=config, 
                                                  name='query_key_value')
-
+        self.query_layernorm = RMSNorm(self.head_dim, eps=config.rms_norm_eps)
+        self.key_layernorm = RMSNorm(self.head_dim, eps=config.rms_norm_eps)
         self.dense = AutoLinear.from_pretrained(self.intermediate_size, 
                                                  self.hidden_size, 
                                                  bias=config.use_bias, 
@@ -203,8 +211,10 @@ class BailingMoeAttention(torch.nn.Module):
                                                             self.num_key_value_heads], 
                                                             dim=-2)
 
-        batch_meta_info = kwargs['batch_meta_info']
+        query_states = self.query_layernorm(query_states)
+        key_states = self.key_layernorm(key_states)
 
+        batch_meta_info = kwargs['batch_meta_info']
         self.rope(query_states, 
                   key_states, 
                   batch_meta_info.q_offsets if batch_meta_info.draft_offsets is None else batch_meta_info.draft_offsets, 
@@ -220,7 +230,7 @@ class BailingMoeAttention(torch.nn.Module):
         return attn_output
 
 
-class BailingMoeLinearAttention(torch.nn.Module):
+class BailingMoeV2LinearAttention(torch.nn.Module):
     def __init__(self, config: PretrainedConfig, layer_idx: int = 0):
         super().__init__()
         self.config = config
@@ -228,6 +238,7 @@ class BailingMoeLinearAttention(torch.nn.Module):
 
         self.hidden_size = config.hidden_size
         self.num_heads = config.num_attention_heads
+        self.use_qk_norm = config.use_qk_norm
         head_dim = None
         if hasattr(config, 'head_dim'):
             head_dim = config.head_dim
@@ -243,7 +254,7 @@ class BailingMoeLinearAttention(torch.nn.Module):
         self.use_linear_silu = config.use_linear_silu
         self.use_low_rank = config.use_low_rank
         self.num_layers = config.num_hidden_layers
-        self.linear_attn_norm_group_size = getattr(config, 'linear_attn_norm_group_size', None)
+        self.num_norm_group = getattr(config, 'group_norm_size', None)
 
         qkv_dim = (self.num_heads + 2 * self.num_key_value_heads) * self.head_dim
         self.query_key_value = AutoLinear.from_pretrained(self.hidden_size, 
@@ -258,13 +269,11 @@ class BailingMoeLinearAttention(torch.nn.Module):
                                             name='dense')
 
         self.g_proj = torch.nn.Linear(self.hidden_size, self.num_heads * self.head_dim, bias=False)
-        if self.linear_attn_norm_group_size is not None:
-            self.g_norm = RMSGroupNorm(hidden_size=self.num_heads * self.head_dim,
-                                    linear_attn_norm_group_size=config.linear_attn_norm_group_size,
+        self.query_layernorm = RMSNorm(self.head_dim, eps=config.rms_norm_eps)
+        self.key_layernorm = RMSNorm(self.head_dim, eps=config.rms_norm_eps)
+        self.g_norm = RMSGroupNormSigmoid(hidden_size=self.num_heads * self.head_dim,
+                                    num_norm_group=self.num_norm_group,
                                     eps=config.rms_norm_eps)
-        else:
-            self.g_norm = RMSNorm(hidden_size=self.num_heads * self.head_dim, eps=config.rms_norm_eps)
-
         self.rope = AutoRope.from_pretrained(config)
         self.attention =  None
 
@@ -282,6 +291,14 @@ class BailingMoeLinearAttention(torch.nn.Module):
                                      self.num_key_value_heads, 
                                      self.head_dim)
 
+        self.query_key_value_gate = self.query_key_value.merge([self.query_key_value, self.g_proj])
+
+        self.query_key_value = None
+        delattr(self, 'query_key_value')
+
+        self.g_proj = None
+        delattr(self, 'g_proj')
+
         self.attention = AutoAttention.from_pretrained(cache_dtype, 
                                                        layer_idx=self.layer_idx, 
                                                        kernels= ['sla'],
@@ -290,6 +307,7 @@ class BailingMoeLinearAttention(torch.nn.Module):
         start = 2 ** (-(2 ** -(math.log2(self.num_key_value_heads) - 3)))
         exponents = torch.arange(1, self.num_key_value_heads + 1, dtype=torch.float32)
         self.decay_scales = -torch.pow(start, exponents) * (1 - self.layer_idx / (self.num_layers - 1) + 1e-5)
+        self.decay_scales = self.decay_scales.to(self.dense.weight.device)
 
     def forward(
         self,
@@ -301,25 +319,24 @@ class BailingMoeLinearAttention(torch.nn.Module):
     ) -> torch.Tensor:
 
         q_len = hidden_states.size(0)
-        qkv = self.query_key_value(hidden_states)
-        if self.use_linear_silu:
-            qkv = torch.nn.functional.silu(qkv)
-
+        qkvg = self.query_key_value_gate(hidden_states)
+        qkv, g = qkvg.split([(self.num_heads + 2 * self.num_key_value_heads) * self.head_dim,
+                             self.num_heads * self.head_dim], 
+                            dim=-1)
         qkv = qkv.view(q_len, self.num_heads + 2 * self.num_key_value_heads, self.head_dim)
 
         query_states, key_states, value_states = qkv.split([self.num_heads, 
                                                             self.num_key_value_heads, 
                                                             self.num_key_value_heads], 
                                                             dim=-2)
-
+        query_states = self.query_layernorm(query_states)
+        key_states = self.key_layernorm(key_states)
         batch_meta_info = kwargs['batch_meta_info']
 
         self.rope(query_states, 
                   key_states, 
                   batch_meta_info.q_offsets if batch_meta_info.draft_offsets is None else batch_meta_info.draft_offsets, 
                   batch_meta_info.position_ids)
-        if self.decay_scales.device != query_states.device:
-            self.decay_scales = self.decay_scales.to(query_states.device)
         attn_output = self.attention(query_states, 
                                      key_states, 
                                      value_states, 
@@ -328,14 +345,12 @@ class BailingMoeLinearAttention(torch.nn.Module):
                                      past_key_value)
         
         attn_output = attn_output.view(q_len, self.intermediate_size)  
-        attn_output = self.g_norm(attn_output)
-        g = self.g_proj(hidden_states)
-        attn_output = attn_output * torch.nn.functional.sigmoid(g)
+        attn_output = self.g_norm(attn_output, g)
         attn_output = self.dense(attn_output)
 
         return attn_output
 
-class BailingMoeDecoderLayer(torch.nn.Module):
+class BailingMoeV2DecoderLayer(torch.nn.Module):
     def __init__(self, config: PretrainedConfig, layer_idx: int = 0):
         super().__init__()
         self.hidden_size = config.hidden_size
@@ -347,10 +362,14 @@ class BailingMoeDecoderLayer(torch.nn.Module):
         # to indicate the final layer of the model
         if self.layer_idx is not None:
             if (self.layer_idx + 1) % config.layer_group_size == 0:
-                self.attention = BailingMoeAttention(config, layer_idx=layer_idx)
+                self.attention = BailingMoeV2Attention(config, layer_idx=layer_idx)
             else:
-                self.attention = BailingMoeLinearAttention(config, layer_idx=layer_idx)
-            self.mlp = BailingMoeMoE(config, layer_idx=layer_idx)
+                self.attention = BailingMoeV2LinearAttention(config, layer_idx=layer_idx)
+            if self.layer_idx >= config.first_k_dense_replace:
+                self.mlp = BailingMoeV2MoE(config, layer_idx=layer_idx)
+            else:
+                self.mlp = BailingMoeV2MLP(config, layer_idx=layer_idx)
+
             self.input_layernorm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
             self.post_attention_layernorm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
 
@@ -393,12 +412,15 @@ class BailingMoeDecoderLayer(torch.nn.Module):
 
         return hidden_states
 
+    def flood_patch_func(self, kwargs=None):
+        if self.layer_idx is not None and isinstance(self.mlp, BailingMoeV2MLP):
+            self.mlp._flood_patch_func()
 
-class BailingMoeModel(PreTrainedModel):
+class BailingMoeV2Model(PreTrainedModel):
 
-    config_class = BailingMoeLinearConfig
+    config_class = BailingMoeLinearV2Config
     base_model_prefix = "model"
-    _no_split_modules = ["BailingMoeDecoderLayer"]
+    _no_split_modules = ["BailingMoeV2DecoderLayer"]
 
     def __init__(self, config: PretrainedConfig):
         super().__init__(config)
@@ -421,7 +443,7 @@ class BailingMoeModel(PreTrainedModel):
         local_size = n_layer // self.world_size
         for i in range(n_layer):
             layer_idx = i if i // local_size == self.rank else None
-            layers.append(BailingMoeDecoderLayer(config, layer_idx=layer_idx))
+            layers.append(BailingMoeV2DecoderLayer(config, layer_idx=layer_idx))
         self.layers = torch.nn.ModuleList(layers)
 
         self.norm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
@@ -433,14 +455,14 @@ class BailingMoeModel(PreTrainedModel):
         self.word_embeddings = value
 
 
-class BailingMoeLinearForCausalLM(PreTrainedModel):
-    config_class = BailingMoeLinearConfig
+class BailingMoeV2LinearForCausalLM(PreTrainedModel):
+    config_class = BailingMoeLinearV2Config
     _tied_weights_keys = ["lm_head.weight"]
 
     def __init__(self, config: PretrainedConfig):
         super().__init__(config)
         self.config = config
-        self.model = BailingMoeModel(config)
+        self.model = BailingMoeV2Model(config)
         self.vocab_size = config.vocab_size
 
         self.rank = int(os.environ.get('FLOOD_RANK', '0'))

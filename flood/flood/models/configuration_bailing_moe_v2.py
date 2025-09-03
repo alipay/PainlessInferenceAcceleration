@@ -3,8 +3,8 @@
 from transformers.configuration_utils import PretrainedConfig
 
 
-class BailingMoeLinearConfig(PretrainedConfig):
-    model_type = "bailing_moe_linear"
+class BailingMoeV2Config(PretrainedConfig):
+    model_type = "bailing_moe_v2"
 
     def __init__(
         self,
@@ -16,6 +16,7 @@ class BailingMoeLinearConfig(PretrainedConfig):
         num_key_value_heads=0,
         hidden_act="silu",
         use_qkv_bias=False,  # bailing only
+        use_qk_norm=False,
         use_bias=True,  # bailing only
         rms_norm_eps=1e-05,
         norm_head=False,  # bailing only
@@ -26,6 +27,7 @@ class BailingMoeLinearConfig(PretrainedConfig):
         initializer_range=0.02,
         max_position_embeddings=16384,
         rope_theta=10000.0,
+        partial_rotary_factor=1.0,
         use_cache=True,
         use_sliding_window=False,
         sliding_window=4096,
@@ -35,18 +37,15 @@ class BailingMoeLinearConfig(PretrainedConfig):
         num_experts=16,
         num_shared_experts=0,
         num_experts_per_tok=2,
+        n_group=8,
+        topk_group=4,
+        moe_router_topk_scaling_factor=2.5,
         norm_topk_prob=True,
         moe_intermediate_size=None,
         first_k_dense_replace=0,
         head_dim=None,
+        use_expert_bias=False,
         output_router_logits=False,
-        layer_group_size=1,
-        use_linear_silu=False,
-        linear_rope=True,
-        use_linear_gqa=False,
-        use_low_rank=False,
-        rotary_type='full-1d',
-        linear_mode='chunk',
         **kwargs,
     ):
         self.num_hidden_layers = num_hidden_layers
@@ -57,6 +56,7 @@ class BailingMoeLinearConfig(PretrainedConfig):
         self.num_key_value_heads = num_key_value_heads
         self.hidden_act = hidden_act
         self.use_qkv_bias = use_qkv_bias
+        self.use_qk_norm = use_qk_norm
         self.use_bias = use_bias
         self.norm_head = norm_head
         self.rms_norm_eps = rms_norm_eps
@@ -70,25 +70,21 @@ class BailingMoeLinearConfig(PretrainedConfig):
         self.use_sliding_window = use_sliding_window
         self.sliding_window = sliding_window
         self.max_window_layers = max_window_layers
-        self.head_dim = head_dim or self.hidden_size // self.num_attention_heads
+        self.head_dim = head_dim
         self.rope_scaling = rope_scaling
+        self.partial_rotary_factor = partial_rotary_factor
 
         # MoE configs
         self.num_experts = num_experts
         self.num_shared_experts = num_shared_experts
         self.num_experts_per_tok = num_experts_per_tok
         self.norm_topk_prob = norm_topk_prob
+        self.n_group = n_group
+        self.topk_group = topk_group
         self.moe_intermediate_size = moe_intermediate_size
         self.first_k_dense_replace = first_k_dense_replace
+        self.use_expert_bias = use_expert_bias
         self.output_router_logits = output_router_logits
-
-        # hybrid linear configs
-        self.layer_group_size = layer_group_size
-        self.use_linear_silu = use_linear_silu
-        self.linear_rope = linear_rope
-        self.use_linear_gqa = use_linear_gqa
-        self.use_low_rank = use_low_rank
-        self.rotary_type = rotary_type
-        self.linear_mode = linear_mode
+        self.moe_router_topk_scaling_factor = moe_router_topk_scaling_factor
 
         super().__init__(pad_token_id=pad_token_id, tie_word_embeddings=tie_word_embeddings, **kwargs)

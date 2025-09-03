@@ -9,13 +9,7 @@ from vllm import LLM, SamplingParams
 
 from flood.utils.reader import Reader
 
-
-os.environ['CUDA_VISIBLE_DEVICES']='1'
-
-# model_path = '/mntnlp/common_base_model/Qwen__Qwen2.5-7B-Instruct'
-model_path = '/mnt/prev_nas/chatgpt/pretrained_models/Qwen2.5-72B-Instruct'
-# data_path = 'your/path/ShareGPT_V3_unfiltered_cleaned_split.json'
-# reqs = Reader.read_sharegpt_dataset(data_path, model_path, max_count=20000)
+model_path = '/mntnlp/common_base_model/Qwen__Qwen2.5-7B-Instruct'
 
 n_sample = 20000
 max_output_length = 300

@@ -153,8 +153,8 @@ def get_seg_attn_meta(qls, kls, mask=None):
 def test_seg_attn(mode='prefill', even=True, decouple=False):
     device = torch.device('cuda:0')
     dtype = torch.bfloat16
-    qo_head = 32
-    kv_head = 32
+    qo_head = 16
+    kv_head = 16
     dim = 128
     masks = None
     mask_size = 16
@@ -162,7 +162,7 @@ def test_seg_attn(mode='prefill', even=True, decouple=False):
     if mode == 'prefill':
         bs = 1
         if even:
-            qls = [4096]*bs
+            qls = [128]*bs
         else:
             qls = [1024+63]*bs
         kls = qls
@@ -297,7 +297,7 @@ def test_seg_attn(mode='prefill', even=True, decouple=False):
     
 
 if __name__ == '__main__':
-    for mode in ['prefill']:
+    for mode in ['prefill', 'decode']:
         for even in [True]:
             for decouple in [True, False]:
                 test_seg_attn(mode=mode, even=even, decouple=decouple)

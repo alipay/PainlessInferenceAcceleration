@@ -24,7 +24,7 @@ class SegmentCache(Cache):
                  dtype=None,
                  devices=(),
                  fix_size_indices=None) -> None:
-        super().__init__()
+        # super().__init__()
         self.max_token = max_token
         self.num_layers = num_layers
         self.dims = dims  # key cache dim + value cache dim, 2048=2*8*128

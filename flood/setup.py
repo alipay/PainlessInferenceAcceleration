@@ -11,6 +11,7 @@ from typing import Set
 # import pkg_resources
 from packaging.version import parse, Version
 from setuptools import find_packages, setup
+import torch
 from torch.utils import cpp_extension
 from torch.utils.cpp_extension import BuildExtension, CUDAExtension, \
     CUDA_HOME
@@ -27,7 +28,8 @@ NVCC_FLAGS = ["-O3", "-std=c++17",
               '-U__CUDA_NO_HALF_CONVERSIONS__',
               '-U__CUDA_NO_HALF2_OPERATORS__',
               '-U__CUDA_NO_HALF2_CONVERSIONS__',
-              '-DSM90_MM'
+              '-DSM90_MM',
+              '-Wno-deprecated-declarations'
               ]
 
 
@@ -108,7 +110,10 @@ for item in sources:
     sources[sources.index(item)] = os.path.join(current_dir, item)
 
 include_paths = []
-include_paths.append(cpp_extension.include_paths(cuda=True))  # cuda path
+if parse(torch.__version__) >= parse("2.6.0"):
+    include_paths.append(cpp_extension.include_paths(device_type='cuda'))
+else:
+    include_paths.append(cpp_extension.include_paths(cuda=True))
 include_paths.append(os.path.join(current_dir, 'csrc'))
 include_paths.append(os.path.join(current_dir, 'csrc/layernorm'))
 include_paths.append(os.path.join(current_dir, 'csrc/activation'))

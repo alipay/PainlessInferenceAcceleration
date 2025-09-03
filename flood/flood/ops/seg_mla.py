@@ -273,10 +273,10 @@ def seg_mla_fwd(q, kv, meta):
     # kv: [cache_size, 576]
     q_length, n_heads, q_dim = q.shape
     batch = meta.batch_size
-    assert n_heads == 128 and q_dim == 576
+    # assert n_heads == 128 and q_dim == 576
     softmax_scale = 1.0 / math.sqrt(128)
 
-    o = torch.empty((q_length, 128, 512), device=q.device, dtype=q.dtype)
+    o = torch.empty((q_length, n_heads, 512), device=q.device, dtype=q.dtype)
 
     SINGLE = meta.max_seg == 1
 
