@@ -1,1 +1,2 @@
 pytest
+transformers >= 4.54.0

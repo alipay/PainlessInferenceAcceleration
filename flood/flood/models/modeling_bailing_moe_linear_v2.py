@@ -254,7 +254,7 @@ class BailingMoeV2LinearAttention(torch.nn.Module):
         self.use_linear_silu = config.use_linear_silu
         self.use_low_rank = config.use_low_rank
         self.num_layers = config.num_hidden_layers
-        self.num_norm_group = getattr(config, 'group_norm_size', None)
+        self.group_norm_size = getattr(config, 'group_norm_size', None)
 
         qkv_dim = (self.num_heads + 2 * self.num_key_value_heads) * self.head_dim
         self.query_key_value = AutoLinear.from_pretrained(self.hidden_size, 
@@ -272,7 +272,7 @@ class BailingMoeV2LinearAttention(torch.nn.Module):
         self.query_layernorm = RMSNorm(self.head_dim, eps=config.rms_norm_eps)
         self.key_layernorm = RMSNorm(self.head_dim, eps=config.rms_norm_eps)
         self.g_norm = RMSGroupNormSigmoid(hidden_size=self.num_heads * self.head_dim,
-                                    num_norm_group=self.num_norm_group,
+                                    num_norm_group=self.group_norm_size,
                                     eps=config.rms_norm_eps)
         self.rope = AutoRope.from_pretrained(config)
         self.attention =  None
@@ -306,7 +306,7 @@ class BailingMoeV2LinearAttention(torch.nn.Module):
 
         start = 2 ** (-(2 ** -(math.log2(self.num_key_value_heads) - 3)))
         exponents = torch.arange(1, self.num_key_value_heads + 1, dtype=torch.float32)
-        self.decay_scales = -torch.pow(start, exponents) * (1 - self.layer_idx / (self.num_layers - 1) + 1e-5)
+        self.decay_scales = torch.pow(start, exponents) * (1 - self.layer_idx / (self.num_layers - 1) + 1e-5)
         self.decay_scales = self.decay_scales.to(self.dense.weight.device)
 
     def forward(

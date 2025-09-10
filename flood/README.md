@@ -10,7 +10,8 @@
 
 
 ## *News or Update* 🔥
-
+- [2025/09] We provide efficient kernels for linear attention.
+- [2025/09] We support bailing moe v1 and v2.
 - [2025/03] We release the code of our inference framework `FLOOD`.
 
 
