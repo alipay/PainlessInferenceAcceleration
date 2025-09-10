@@ -14,7 +14,7 @@ from transformers.cache_utils import Cache
 from transformers.modeling_utils import PreTrainedModel, PretrainedConfig
 
 from flood.ops.activation import silu_and_mul
-from flood.ops.norm import RMSNorm, RMSGroupNorm
+from flood.ops.norm import RMSNorm, RMSGroupNorm, RMSGroupNormSigmoid
 from flood.utils.batch import Batch
 from flood.layers.linear import AutoLinear
 from flood.layers.rope import AutoRope
@@ -258,13 +258,9 @@ class BailingMoeLinearAttention(torch.nn.Module):
                                             name='dense')
 
         self.g_proj = torch.nn.Linear(self.hidden_size, self.num_heads * self.head_dim, bias=False)
-        if self.linear_attn_norm_group_size is not None:
-            self.g_norm = RMSGroupNorm(hidden_size=self.num_heads * self.head_dim,
-                                    linear_attn_norm_group_size=config.linear_attn_norm_group_size,
+        self.g_norm = RMSGroupNormSigmoid(hidden_size=self.num_heads * self.head_dim,
+                                    num_norm_group=self.linear_attn_norm_group_size,
                                     eps=config.rms_norm_eps)
-        else:
-            self.g_norm = RMSNorm(hidden_size=self.num_heads * self.head_dim, eps=config.rms_norm_eps)
-
         self.rope = AutoRope.from_pretrained(config)
         self.attention =  None
 
@@ -282,6 +278,14 @@ class BailingMoeLinearAttention(torch.nn.Module):
                                      self.num_key_value_heads, 
                                      self.head_dim)
 
+        self.query_key_value_gate = self.query_key_value.merge([self.query_key_value, self.g_proj])
+
+        self.query_key_value = None
+        delattr(self, 'query_key_value')
+
+        self.g_proj = None
+        delattr(self, 'g_proj')
+
         self.attention = AutoAttention.from_pretrained(cache_dtype, 
                                                        layer_idx=self.layer_idx, 
                                                        kernels= ['sla'],
@@ -289,7 +293,8 @@ class BailingMoeLinearAttention(torch.nn.Module):
 
         start = 2 ** (-(2 ** -(math.log2(self.num_key_value_heads) - 3)))
         exponents = torch.arange(1, self.num_key_value_heads + 1, dtype=torch.float32)
-        self.decay_scales = -torch.pow(start, exponents) * (1 - self.layer_idx / (self.num_layers - 1) + 1e-5)
+        self.decay_scales = torch.pow(start, exponents) * (1 - self.layer_idx / (self.num_layers - 1) + 1e-5)
+        self.decay_scales = self.decay_scales.to(self.dense.weight.device)
 
     def forward(
         self,
@@ -301,10 +306,10 @@ class BailingMoeLinearAttention(torch.nn.Module):
     ) -> torch.Tensor:
 
         q_len = hidden_states.size(0)
-        qkv = self.query_key_value(hidden_states)
-        if self.use_linear_silu:
-            qkv = torch.nn.functional.silu(qkv)
-
+        qkvg = self.query_key_value_gate(hidden_states)
+        qkv, g = qkvg.split([(self.num_heads + 2 * self.num_key_value_heads) * self.head_dim,
+                             self.num_heads * self.head_dim], 
+                            dim=-1)
         qkv = qkv.view(q_len, self.num_heads + 2 * self.num_key_value_heads, self.head_dim)
 
         query_states, key_states, value_states = qkv.split([self.num_heads, 
@@ -318,8 +323,6 @@ class BailingMoeLinearAttention(torch.nn.Module):
                   key_states, 
                   batch_meta_info.q_offsets if batch_meta_info.draft_offsets is None else batch_meta_info.draft_offsets, 
                   batch_meta_info.position_ids)
-        if self.decay_scales.device != query_states.device:
-            self.decay_scales = self.decay_scales.to(query_states.device)
         attn_output = self.attention(query_states, 
                                      key_states, 
                                      value_states, 
@@ -328,9 +331,7 @@ class BailingMoeLinearAttention(torch.nn.Module):
                                      past_key_value)
         
         attn_output = attn_output.view(q_len, self.intermediate_size)  
-        attn_output = self.g_norm(attn_output)
-        g = self.g_proj(hidden_states)
-        attn_output = attn_output * torch.nn.functional.sigmoid(g)
+        attn_output = self.g_norm(attn_output, g)
         attn_output = self.dense(attn_output)
 
         return attn_output
