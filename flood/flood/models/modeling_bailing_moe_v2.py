@@ -108,10 +108,8 @@ class BailingMoeV2MoE(torch.nn.Module):
                                      self.num_experts,
                                      bias=False)
 
-        if getattr(config, 'use_expert_bias', False):
-            self.gate.expert_bias = torch.nn.Parameter(torch.zeros(self.num_experts))
-        else:
-            self.gate.expert_bias = None
+        self.gate.expert_bias = torch.nn.Parameter(torch.zeros(self.num_experts))
+
         im_sz = config.moe_intermediate_size * config.num_shared_experts
         share_conf = copy.deepcopy(config)
         share_conf.intermediate_size = im_sz
@@ -170,8 +168,8 @@ class BailingMoeV2Attention(torch.nn.Module):
                                                  config=config, 
                                                  name='query_key_value')
         if self.use_qk_norm:
-            self.q_norm = RMSNorm(self.head_dim, eps=config.rms_norm_eps)
-            self.k_norm = RMSNorm(self.head_dim, eps=config.rms_norm_eps)
+            self.query_layernorm = RMSNorm(self.head_dim, eps=config.rms_norm_eps)
+            self.key_layernorm = RMSNorm(self.head_dim, eps=config.rms_norm_eps)
         self.dense = AutoLinear.from_pretrained(self.intermediate_size, 
                                                  self.hidden_size, 
                                                  bias=config.use_bias, 
@@ -220,8 +218,8 @@ class BailingMoeV2Attention(torch.nn.Module):
                                                             self.num_key_value_heads], 
                                                             dim=-2)
         if self.use_qk_norm:
-            query_states = self.q_norm(query_states)
-            key_states = self.k_norm(key_states)
+            query_states = self.query_layernorm(query_states)
+            key_states = self.key_layernorm(key_states)
         batch_meta_info = kwargs['batch_meta_info']
 
         q_offsets = (batch_meta_info.q_offsets if batch_meta_info.draft_offsets is None
