@@ -11,7 +11,6 @@
 
 ## *News or Update* 🔥
 - [2025/09] We release segment linear attention for better performance.
-- [2025/06] We fix errors for multi-node infenrence.
 - [2025/05] We integrade Lookahead into FLOOD.
 - [2025/03] We release the code of our inference framework `FLOOD`.
 

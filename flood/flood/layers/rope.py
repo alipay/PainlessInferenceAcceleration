@@ -155,6 +155,9 @@ class Llama31Rope(torch.nn.Module):
         self.high_freq_factor = config.rope_scaling.get('high_freq_factor', 4.0)
         self.original_max_position_embeddings = config.rope_scaling.get(
             'original_max_position_embeddings', 8192)
+        partial_rotary_factor = config.partial_rotary_factor if hasattr(config, 'partial_rotary_factor') else 1.0
+        head_dim = getattr(config, "head_dim", None) or config.hidden_size // config.num_attention_heads
+        self.rotary_dim = int(head_dim * partial_rotary_factor)
 
     def __call__(self,
                  q: torch.Tensor,
@@ -162,7 +165,7 @@ class Llama31Rope(torch.nn.Module):
                  indptr: torch.Tensor,
                  offsets: torch.Tensor):
         flood_cuda.apply_llama31_rope_inplace(
-            q, k, indptr, offsets, False, self.rope_scale, self.rope_theta,
+            q, k, indptr, offsets, self.rotary_dim, False, self.rope_scale, self.rope_theta,
             self.low_freq_factor, self.high_freq_factor,
             self.original_max_position_embeddings)
 

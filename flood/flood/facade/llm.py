@@ -375,13 +375,13 @@ class LLM():
             frees.append(free_memory)
             totals.append(total_memory)
             if self.max_concurrency is not None:
-                n_layer = sum(1 for j in device_list[i] if j not in self.fix_size_indices)
-                n_la_layer = len(device_list[i]) - n_layer
-                alloc_memory = max_rate * total_memory - used_memory - self.max_concurrency * n_la_layer * self.fix_size_dim * self.cache_dtype.itemsize
+                n_var_size_layer = sum(1 for j in device_list[i] if j not in self.fix_size_indices)
+                n_fix_size_layer = len(device_list[i]) - n_var_size_layer
+                alloc_memory = max_rate * total_memory - used_memory - self.max_concurrency * n_fix_size_layer * self.fix_size_dim * self.cache_dtype.itemsize
             else:
                 alloc_memory = max_rate * total_memory - used_memory
-                n_layer = len(device_list[i])
-            cache_size = alloc_memory / (token_size*n_layer)
+                n_var_size_layer = len(device_list[i])
+            cache_size = alloc_memory / (token_size*n_var_size_layer)
             cache_sizes.append(cache_size)
             info.append(f'{total_memory/2**30:.1f}/{used_memory/2**30:.1f}/{free_memory/2**30:.1f}')
         info = ' '.join(info)
