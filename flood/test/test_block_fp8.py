@@ -1,3 +1,8 @@
+# -*- coding: utf-8 -*-
+"""
+Copyright (c) Ant Financial Service Group and its affiliates.
+"""
+
 import torch
 import torch.nn.functional as F
 from flood.ops.quantization import per_token_group_quant_fp8
