@@ -277,7 +277,7 @@ class LLM():
         torch_dtype = self.torch_dtype if (
                 self.model_dtype == torch.float8_e4m3fn) else self.model_dtype
         model = Model.from_pretrained(model_path,
-                                      torch_dtype=torch_dtype,
+                                      dtype=torch_dtype,
                                       low_cpu_mem_usage=True,
                                       device_map=device_map)
 
@@ -631,6 +631,7 @@ class LLM():
                             update_fails.append(req)
                     fails = update_fails
 
+                queue_ts = time.time()
                 if n_tokens < chunk_size:
                     while True:
                         try:
@@ -656,6 +657,7 @@ class LLM():
                             reqs.append(req)
                             embs.append(self.get_emb(req, fe))
                             break
+                queue_time = time.time() - queue_ts
 
                 if len(reqs) == 0:
                     time.sleep(0.001)
@@ -752,6 +754,7 @@ class LLM():
                     print(f'extend slot: suc:{n_suc} fail:{n_fail}')
                 waits = update_waits
 
+                queue_ts = time.time()
                 while True:
                     try:
                         req = working_queue.get(block=True,
@@ -761,6 +764,7 @@ class LLM():
                     reqs.append(req)
                     if len(reqs) >= dbs:
                         break
+                queue_time = time.time() - queue_ts
 
                 if len(reqs) == 0:
                     # time.sleep(0.001)
@@ -879,6 +883,7 @@ class LLM():
                 tokens = batch.token_count
                 bs_str = f'{batch.batch_size}/{tokens}'
                 times = (f'{batching_time * 1000:.1f}/'
+                         f'{queue_time * 1000:.1f}/'
                          f'{forward_time * 1000:.1f}/{recycle_time * 1000:.1f}')
                 mean_input_length = sum(input_lengths)/max(len(input_lengths),1)
                 mean_output_length = sum(output_lengths)/max(len(output_lengths),1)

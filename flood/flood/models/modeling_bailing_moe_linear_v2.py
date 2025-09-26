@@ -100,10 +100,11 @@ class BailingMoeV2MoE(torch.nn.Module):
                                                     topk_group=self.topk_group,
                                                     config=config,
                                                     )
-
-        self.gate = torch.nn.Linear(config.hidden_size,
-                                     self.num_experts,
-                                     bias=False)
+        self.gate = AutoLinear.from_pretrained(config.hidden_size, 
+                                            self.num_experts, 
+                                            bias=False, 
+                                            config=config, 
+                                            name='gate')
         self.gate.expert_bias = torch.nn.Parameter(torch.zeros(self.num_experts))
         im_sz = config.moe_intermediate_size * config.num_shared_experts
         share_conf = copy.deepcopy(config)
@@ -267,8 +268,10 @@ class BailingMoeV2LinearAttention(torch.nn.Module):
                                             bias=config.use_bias, 
                                             config=config, 
                                             name='dense')
-
-        self.g_proj = torch.nn.Linear(self.hidden_size, self.num_heads * self.head_dim, bias=False)
+        self.g_proj = AutoLinear.from_pretrained(self.hidden_size, 
+                                                self.num_heads * self.head_dim,
+                                                bias=False,
+                                                config=config)
         self.query_layernorm = RMSNorm(self.head_dim, eps=config.rms_norm_eps)
         self.key_layernorm = RMSNorm(self.head_dim, eps=config.rms_norm_eps)
         self.g_norm = RMSGroupNormSigmoid(hidden_size=self.num_heads * self.head_dim,
@@ -455,7 +458,7 @@ class BailingMoeV2Model(PreTrainedModel):
         self.word_embeddings = value
 
 
-class BailingMoeV2LinearForCausalLM(PreTrainedModel):
+class BailingMoeLinearV2ForCausalLM(PreTrainedModel):
     config_class = BailingMoeLinearV2Config
     _tied_weights_keys = ["lm_head.weight"]
 
