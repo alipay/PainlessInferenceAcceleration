@@ -10,26 +10,29 @@ import flood_cuda
 import triton
 import triton.language as tl
 
+
 class RMSNorm(torch.nn.Module):
 
     def __init__(
-            self,
-            hidden_size: int,
-            eps: float = 1e-6,
+        self,
+        hidden_size: int,
+        eps: float = 1e-6,
     ):
         super().__init__()
         self.hidden_size = hidden_size
         self.variance_epsilon = eps
-        self.weight = torch.nn.Parameter(torch.ones(hidden_size),
-                                         requires_grad=False)
+        self.weight = torch.nn.Parameter(torch.ones(hidden_size), requires_grad=False)
 
     def forward(self, x: torch.Tensor):
         y = torch.empty_like(x)
         flood_cuda.rmsnorm(x, self.weight, y, self.variance_epsilon)
         return y
 
+
 class RMSGroupNorm(torch.nn.Module):
-    def __init__(self, hidden_size: int, num_norm_group: int, eps: float = 1e-6) -> None:
+    def __init__(
+        self, hidden_size: int, num_norm_group: int, eps: float = 1e-6
+    ) -> None:
         super().__init__()
         self.weight = torch.nn.Parameter(torch.ones(hidden_size))
         self.variance_epsilon = eps
@@ -37,7 +40,10 @@ class RMSGroupNorm(torch.nn.Module):
         self.num_norm_group = num_norm_group
         self.per_group_hidden_size = hidden_size // num_norm_group
 
-    def forward(self,x: torch.Tensor,) -> torch.Tensor:
+    def forward(
+        self,
+        x: torch.Tensor,
+    ) -> torch.Tensor:
         x = x.view(-1, self.num_norm_group, self.per_group_hidden_size)
         orig_dtype = x.dtype
         x = x.to(torch.float32)
@@ -47,8 +53,11 @@ class RMSGroupNorm(torch.nn.Module):
         x = x.view(-1, self.hidden_size)
         return x * self.weight
 
+
 class RMSGroupNormSigmoid(torch.nn.Module):
-    def __init__(self, hidden_size: int, num_norm_group: int, eps: float = 1e-6) -> None:
+    def __init__(
+        self, hidden_size: int, num_norm_group: int, eps: float = 1e-6
+    ) -> None:
         super().__init__()
         self.weight = torch.nn.Parameter(torch.ones(hidden_size))
         self.variance_epsilon = eps
@@ -56,14 +65,16 @@ class RMSGroupNormSigmoid(torch.nn.Module):
         self.num_norm_group = num_norm_group
         self.per_group_hidden_size = hidden_size // num_norm_group
 
-    def forward(self,x: torch.Tensor, g: torch.Tensor) -> torch.Tensor:
-        return triton_rms_groupnorm_sigmoid(x, self.weight, g, self.variance_epsilon, self.per_group_hidden_size)
+    def forward(self, x: torch.Tensor, g: torch.Tensor) -> torch.Tensor:
+        return triton_rms_groupnorm_sigmoid(
+            x, self.weight, g, self.variance_epsilon, self.per_group_hidden_size
+        )
 
 
 @triton.jit
 def rms_groupnorm_sigmoid_kernel(
     x_ptr,
-    weight_ptr, 
+    weight_ptr,
     g_ptr,
     out_ptr,
     eps,
@@ -72,7 +83,7 @@ def rms_groupnorm_sigmoid_kernel(
     x_stride: tl.constexpr,
     g_stride: tl.constexpr,
     group_size: tl.constexpr,
-    BLOCK: tl.constexpr
+    BLOCK: tl.constexpr,
 ):
     bid = tl.program_id(0)
     gid = tl.program_id(1)
@@ -83,14 +94,19 @@ def rms_groupnorm_sigmoid_kernel(
     g_mask = g_off < N
     mask = seq_mask[:, None] & g_mask[None, :]
 
-    x = tl.load(x_ptr + seq_off[:, None] * x_stride + g_off[None, :], mask=mask, other=0.0).to(tl.float32)
+    x = tl.load(
+        x_ptr + seq_off[:, None] * x_stride + g_off[None, :], mask=mask, other=0.0
+    ).to(tl.float32)
     w = tl.load(weight_ptr + g_off)
-    g = tl.load(g_ptr + seq_off[:, None] * g_stride + g_off[None, :] , mask=mask, other=0.0).to(tl.float32)
-    rms = 1/tl.sqrt(tl.sum(x*x, 1) / group_size + eps)
+    g = tl.load(
+        g_ptr + seq_off[:, None] * g_stride + g_off[None, :], mask=mask, other=0.0
+    ).to(tl.float32)
+    rms = 1 / tl.sqrt(tl.sum(x * x, 1) / group_size + eps)
     x *= rms[:, None]
     x = x.to(w.dtype) * w[None, :]
     x *= tl.sigmoid(g).to(w.dtype)
     tl.store(out_ptr + seq_off[:, None] * N + g_off, x, mask=mask)
+
 
 def triton_rms_groupnorm_sigmoid(x, weight, g, eps, group_size):
     assert x.shape[1] == weight.shape[0]
@@ -120,7 +136,6 @@ def triton_rms_groupnorm_sigmoid(x, weight, g, eps, group_size):
         group_size,
         BLOCK,
         num_stages=num_stages,
-        num_warps=num_warps
-        )
+        num_warps=num_warps,
+    )
     return out
-

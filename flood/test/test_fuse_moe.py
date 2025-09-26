@@ -24,20 +24,21 @@ def torch_moe(a, w1, w2, score, topk):
         if mask.sum():
             act = a[mask] @ w1[i].transpose(0, 1)
             dim = act.size(-1) // 2
-            out[mask] = (
-                                F.silu(act[..., :dim]) * act[..., dim:]) @ w2[
-                            i].transpose(0, 1)
-    return (out.view(B, -1, w2.shape[1]) *
-            topk_weight.view(B, -1, 1).to(out.dtype)).sum(dim=1)
+            out[mask] = (F.silu(act[..., :dim]) * act[..., dim:]) @ w2[i].transpose(
+                0, 1
+            )
+    return (
+        out.view(B, -1, w2.shape[1]) * topk_weight.view(B, -1, 1).to(out.dtype)
+    ).sum(dim=1)
 
 
 def test_fused_moe(
-        m: int,
-        n: int,
-        k: int,
-        e: int,
-        topk: int,
-        dtype: torch.dtype,
+    m: int,
+    n: int,
+    k: int,
+    e: int,
+    topk: int,
+    dtype: torch.dtype,
 ):
     a = torch.randn((m, k), device="cuda", dtype=dtype) / 10
     w1 = torch.randn((e, 2 * n, k), device="cuda", dtype=dtype) / 10

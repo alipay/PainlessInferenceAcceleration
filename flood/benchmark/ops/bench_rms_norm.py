@@ -27,8 +27,8 @@ hidden_size = 8192
 dtype = torch.bfloat16
 # dtype = torch.float16
 
-x = torch.rand(batch_size, hidden_size, dtype=dtype, device='cuda:0')
-w = torch.rand(hidden_size, dtype=dtype, device='cuda:0')
+x = torch.rand(batch_size, hidden_size, dtype=dtype, device="cuda:0")
+w = torch.rand(hidden_size, dtype=dtype, device="cuda:0")
 
 n_repeat = 1000
 benchmark_func(torch_rms_norm, x, w, n_repeat=n_repeat)

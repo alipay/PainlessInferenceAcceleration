@@ -1,4 +1,4 @@
-""" Bailing MoE model configuration """
+"""Bailing MoE model configuration"""
 
 from transformers.configuration_utils import PretrainedConfig
 
@@ -45,8 +45,8 @@ class BailingMoeLinearV2Config(PretrainedConfig):
         linear_rope=True,
         use_linear_gqa=False,
         use_low_rank=False,
-        rotary_type='full-1d',
-        linear_mode='chunk',
+        rotary_type="full-1d",
+        linear_mode="chunk",
         **kwargs,
     ):
         self.num_hidden_layers = num_hidden_layers
@@ -91,4 +91,6 @@ class BailingMoeLinearV2Config(PretrainedConfig):
         self.rotary_type = rotary_type
         self.linear_mode = linear_mode
 
-        super().__init__(pad_token_id=pad_token_id, tie_word_embeddings=tie_word_embeddings, **kwargs)
+        super().__init__(
+            pad_token_id=pad_token_id, tie_word_embeddings=tie_word_embeddings, **kwargs
+        )

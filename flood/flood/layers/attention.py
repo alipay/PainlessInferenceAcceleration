@@ -21,56 +21,54 @@ except:
     flash_attn_3_cuda = None
 
 
-class AutoAttention():
+class AutoAttention:
 
     @classmethod
-    def from_pretrained(cls,
-                        dtype,
-                        layer_idx=0,
-                        softmax_scale=1.0,
-                        kernels=('sa',),
-                        name=None):
+    def from_pretrained(
+        cls, dtype, layer_idx=0, softmax_scale=1.0, kernels=("sa",), name=None
+    ):
         if layer_idx == 0:
             print(f"attention dtype:{dtype}")
-        if (dtype is None or dtype == torch.bfloat16 or 
-            dtype == torch.float16 or 
-            dtype in ('float16', 'bfloat16')):
-            if 'sla' in kernels:
+        if (
+            dtype is None
+            or dtype == torch.bfloat16
+            or dtype == torch.float16
+            or dtype in ("float16", "bfloat16")
+        ):
+            if "sla" in kernels:
                 return Fp16SegLinearAttention(layer_idx)
-            elif 'fa3' in kernels:
+            elif "fa3" in kernels:
                 return Fp16Attention3(layer_idx, softmax_scale=softmax_scale)
-            elif 'fa2' in kernels:
+            elif "fa2" in kernels:
                 return Fp16Attention(layer_idx, softmax_scale=softmax_scale)
-            elif 'mla' in kernels:
+            elif "mla" in kernels:
                 return Fp16SegMla(layer_idx, softmax_scale=softmax_scale)
             else:
                 return Fp16SegAttention(layer_idx, softmax_scale=softmax_scale)
         else:
-            raise ValueError(f'unknown dtype:{dtype}')
+            raise ValueError(f"unknown dtype:{dtype}")
 
-    @staticmethod 
+    @staticmethod
     def interleave(query_key_value, num_heads, num_key_value_heads, head_dim):
         permute = []
         for g in range(num_key_value_heads):
-            offset = (
-                                    num_heads + num_key_value_heads + g) * head_dim
+            offset = (num_heads + num_key_value_heads + g) * head_dim
             for i in range(head_dim // 16):
                 for j in range(8):
                     permute.append(offset + i * 16 + j)
                     permute.append(offset + i * 16 + j + 8)
-        permute = torch.tensor(permute, dtype=torch.int32,
-                                device=query_key_value.weight.data.device)
+        permute = torch.tensor(
+            permute, dtype=torch.int32, device=query_key_value.weight.data.device
+        )
         offset = (num_heads + num_key_value_heads) * head_dim
         if query_key_value.weight.data.dtype == torch.float8_e4m3fn:
-            query_key_value.weight.data.view(torch.int8)[:,
-            offset:] = query_key_value.weight.data.view(torch.int8)[:,
-                        permute]
+            query_key_value.weight.data.view(torch.int8)[:, offset:] = (
+                query_key_value.weight.data.view(torch.int8)[:, permute]
+            )
         else:
-            query_key_value.weight.data[offset:] = \
-            query_key_value.weight.data[permute]
+            query_key_value.weight.data[offset:] = query_key_value.weight.data[permute]
         if query_key_value.bias is not None:
-            query_key_value.bias.data[offset:] = \
-            query_key_value.bias.data[permute]
+            query_key_value.bias.data[offset:] = query_key_value.bias.data[permute]
 
 
 class Fp16Attention(torch.nn.Module):
@@ -79,10 +77,10 @@ class Fp16Attention(torch.nn.Module):
         self.layer_idx = layer_idx
         self.softmax_scale = softmax_scale
 
-    def forward(self, query_states, key_states, value_states, batch_meta_info,
-                cache):
-        key_states, value_states = cache.update_cache(key_states, value_states,
-                                                self.layer_idx, batch_meta_info)
+    def forward(self, query_states, key_states, value_states, batch_meta_info, cache):
+        key_states, value_states = cache.update_cache(
+            key_states, value_states, self.layer_idx, batch_meta_info
+        )
 
         outputs = flash_attn_2_cuda.varlen_fwd(
             query_states,
@@ -100,12 +98,12 @@ class Fp16Attention(torch.nn.Module):
             0.0,  # dropout
             self.softmax_scale,
             False,  # zero_tensors
-            True,  # causal 
+            True,  # causal
             -1,  # window_size_left
             -1,  # window_size_right
             0.0,  # softcap
             False,  # return_softmax
-            None  # Generator
+            None,  # Generator
         )
 
         return outputs[0]
@@ -118,30 +116,36 @@ class Fp16SegAttention(torch.nn.Module):
         self.softmax_scale = softmax_scale
         self.online_scale = online_scale
 
-    def forward(self, query_states, key_states, value_states, batch_meta_info,
-                cache):
-        key_states, value_states = cache.update_cache(key_states, 
-                                                      value_states,
-                                                      self.layer_idx, 
-                                                      batch_meta_info)
+    def forward(self, query_states, key_states, value_states, batch_meta_info, cache):
+        key_states, value_states = cache.update_cache(
+            key_states, value_states, self.layer_idx, batch_meta_info
+        )
 
         output = seg_attn_fwd(
             query_states,
             key_states,
             value_states,
             batch_meta_info,
-            online_scale=self.online_scale
+            online_scale=self.online_scale,
         )
 
         return output
+
 
 class Fp16SegLinearAttention(torch.nn.Module):
     def __init__(self, layer_idx):
         super().__init__()
         self.layer_idx = layer_idx
 
-    def forward(self, query_states, key_states, value_states, decay_scales, batch_meta_info,
-                cache):
+    def forward(
+        self,
+        query_states,
+        key_states,
+        value_states,
+        decay_scales,
+        batch_meta_info,
+        cache,
+    ):
         s_states = cache.caches[self.layer_idx]
         output = seg_la_fwd(
             query_states,
@@ -149,7 +153,7 @@ class Fp16SegLinearAttention(torch.nn.Module):
             value_states,
             s_states,
             decay_scales,
-            batch_meta_info
+            batch_meta_info,
         )
 
         return output
@@ -161,19 +165,13 @@ class Fp16SegMla(torch.nn.Module):
         self.layer_idx = layer_idx
         self.softmax_scale = softmax_scale
 
-    def forward(self, query_states, key_value_states, batch_meta_info,
-                cache):
-        key_value_states = cache.update_fusion_cache(key_value_states,
-                                                self.layer_idx, batch_meta_info)
-        output = seg_mla_fwd(
-            query_states,
-            key_value_states,
-            batch_meta_info
+    def forward(self, query_states, key_value_states, batch_meta_info, cache):
+        key_value_states = cache.update_fusion_cache(
+            key_value_states, self.layer_idx, batch_meta_info
         )
+        output = seg_mla_fwd(query_states, key_value_states, batch_meta_info)
 
         return output
-
-
 
 
 class Fp16Attention3(torch.nn.Module):
@@ -182,10 +180,10 @@ class Fp16Attention3(torch.nn.Module):
         self.layer_idx = layer_idx
         self.softmax_scale = softmax_scale
 
-    def forward(self, query_states, key_states, value_states, batch_meta_info,
-                cache):
-        key_states, value_states = cache.update_cache(key_states, value_states,
-                                                self.layer_idx, batch_meta_info)
+    def forward(self, query_states, key_states, value_states, batch_meta_info, cache):
+        key_states, value_states = cache.update_cache(
+            key_states, value_states, self.layer_idx, batch_meta_info
+        )
 
         # outputs = flashattn_hopper_cuda.varlen_fwd(
         #     query_states,
@@ -199,44 +197,43 @@ class Fp16Attention3(torch.nn.Module):
         #     batch_meta_info.max_q_length,
         #     batch_meta_info.max_k_length,
         #     self.softmax_scale,
-        #     True,  # causal 
+        #     True,  # causal
         #     -1,  # window_size_left
         #     -1,  # window_size_right
         # )
         causal = True
         pack_gqa = True
         outputs = flash_attn_3_cuda.fwd(
-                query_states,
-                key_states,
-                value_states,
-                None,
-                None,
-                None,
-                None,
-                batch_meta_info.q_offsets,
-                batch_meta_info.k_offsets,
-                None,
-                batch_meta_info.q_lengths,
-                batch_meta_info.k_lengths,
-                batch_meta_info.max_q_length,
-                batch_meta_info.max_k_length,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                self.softmax_scale,
-                causal,
-                -1,
-                -1,
-                0.0,
-                False,
-                0,
-                pack_gqa,
-                0
-            )
+            query_states,
+            key_states,
+            value_states,
+            None,
+            None,
+            None,
+            None,
+            batch_meta_info.q_offsets,
+            batch_meta_info.k_offsets,
+            None,
+            batch_meta_info.q_lengths,
+            batch_meta_info.k_lengths,
+            batch_meta_info.max_q_length,
+            batch_meta_info.max_k_length,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            self.softmax_scale,
+            causal,
+            -1,
+            -1,
+            0.0,
+            False,
+            0,
+            pack_gqa,
+            0,
+        )
         return outputs[0]
-

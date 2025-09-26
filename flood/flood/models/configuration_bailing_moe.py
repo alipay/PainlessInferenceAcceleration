@@ -1,4 +1,4 @@
-""" Bailing MoE model configuration """
+"""Bailing MoE model configuration"""
 
 from transformers.configuration_utils import PretrainedConfig
 
@@ -75,4 +75,6 @@ class BailingMoeConfig(PretrainedConfig):
         self.first_k_dense_replace = first_k_dense_replace
         self.output_router_logits = output_router_logits
 
-        super().__init__(pad_token_id=pad_token_id, tie_word_embeddings=tie_word_embeddings, **kwargs)
+        super().__init__(
+            pad_token_id=pad_token_id, tie_word_embeddings=tie_word_embeddings, **kwargs
+        )

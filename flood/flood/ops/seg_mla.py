@@ -10,7 +10,6 @@ import triton
 import triton.language as tl
 
 
-
 """
 deepseek R1 MLA kernel
 head_num: 128
@@ -28,19 +27,19 @@ kv_rope: 64
 
 @triton.jit
 def single_seg_mla_kernel(
-        Q,
-        KV,
-        Out,
-        softmax_scale,
-        stride_q,
-        stride_k,
-        stride_o,
-        q_offsets,
-        k_offsets,
-        q_lengths,
-        k_lengths,
-        BLOCK: tl.constexpr,
-        EVEN: tl.constexpr,
+    Q,
+    KV,
+    Out,
+    softmax_scale,
+    stride_q,
+    stride_k,
+    stride_o,
+    q_offsets,
+    k_offsets,
+    q_lengths,
+    k_lengths,
+    BLOCK: tl.constexpr,
+    EVEN: tl.constexpr,
 ):
 
     bid = tl.program_id(0)
@@ -60,20 +59,23 @@ def single_seg_mla_kernel(
     max_n = k_length - q_length + mid + 1
 
     q0_ptrs = (
-            Q + q_offset * stride_q + mid * stride_q + (
-                offs_h[:, None] * 576 + offs_v[None, :])
+        Q
+        + q_offset * stride_q
+        + mid * stride_q
+        + (offs_h[:, None] * 576 + offs_v[None, :])
     )
     q1_ptrs = (
-            Q + q_offset * stride_q + mid * stride_q + 512 + (
-                offs_h[:, None] * 576 + offs_p[None, :])
+        Q
+        + q_offset * stride_q
+        + mid * stride_q
+        + 512
+        + (offs_h[:, None] * 576 + offs_p[None, :])
     )
-    k0_ptrs = (
-            (KV + k_offset * stride_k ) + (
-                offs_n[:, None] * stride_k + offs_v[None, :])
+    k0_ptrs = (KV + k_offset * stride_k) + (
+        offs_n[:, None] * stride_k + offs_v[None, :]
     )
-    k1_ptrs = (
-            (KV + k_offset * stride_k + 512) + (
-                offs_n[:, None] * stride_k + offs_p[None, :])
+    k1_ptrs = (KV + k_offset * stride_k + 512) + (
+        offs_n[:, None] * stride_k + offs_p[None, :]
     )
 
     lse = tl.zeros([128], dtype=tl.float32)
@@ -89,15 +91,17 @@ def single_seg_mla_kernel(
         if EVEN:
             k0 = tl.load(k0_ptrs + n * stride_k)
         else:
-            k0 = tl.load(k0_ptrs + n * stride_k,
-                         mask=(n + offs_n)[:, None] < max_n, other=0.0)
+            k0 = tl.load(
+                k0_ptrs + n * stride_k, mask=(n + offs_n)[:, None] < max_n, other=0.0
+            )
         qk = tl.dot(q0, tl.trans(k0))
 
         if EVEN:
             k1 = tl.load(k1_ptrs + n * stride_k)
         else:
-            k1 = tl.load(k1_ptrs + n * stride_k,
-                        mask=(n + offs_n)[:, None] < max_n, other=0.0)
+            k1 = tl.load(
+                k1_ptrs + n * stride_k, mask=(n + offs_n)[:, None] < max_n, other=0.0
+            )
 
         qk = tl.dot(q1, tl.trans(k1), qk)
 
@@ -110,37 +114,35 @@ def single_seg_mla_kernel(
         p = p.to(KV.dtype.element_ty)
         acc_o = tl.dot(p, k0, acc_o)
 
-
     acc_o = acc_o / lse[:, None]
 
     out_ptrs = (
-            Out
-            + q_offset * stride_o + mid * stride_o + (
-                        offs_h[:, None] * 512 + offs_v[None, :])
+        Out
+        + q_offset * stride_o
+        + mid * stride_o
+        + (offs_h[:, None] * 512 + offs_v[None, :])
     )
 
     tl.store(out_ptrs, acc_o)
 
 
-
-
 @triton.jit
 def multi_seg_mla_kernel(
-        Q,
-        KV,
-        Out,
-        softmax_scale,
-        stride_q,
-        stride_k,
-        stride_o,
-        q_offsets,
-        k_offsets,
-        q_lengths,
-        k_lengths,
-        k_segs,
-        max_seg,
-        BLOCK: tl.constexpr,
-        EVEN: tl.constexpr,
+    Q,
+    KV,
+    Out,
+    softmax_scale,
+    stride_q,
+    stride_k,
+    stride_o,
+    q_offsets,
+    k_offsets,
+    q_lengths,
+    k_lengths,
+    k_segs,
+    max_seg,
+    BLOCK: tl.constexpr,
+    EVEN: tl.constexpr,
 ):
     bid = tl.program_id(0)
     mid = tl.num_programs(1) - tl.program_id(1) - 1
@@ -158,12 +160,17 @@ def multi_seg_mla_kernel(
     offs_p = tl.arange(0, 64)
 
     q0_ptrs = (
-            Q + q_offset * stride_q + mid * stride_q + (
-                offs_h[:, None] * 576 + offs_v[None, :])
+        Q
+        + q_offset * stride_q
+        + mid * stride_q
+        + (offs_h[:, None] * 576 + offs_v[None, :])
     )
     q1_ptrs = (
-            Q + q_offset * stride_q + mid * stride_q + 512 + (
-                offs_h[:, None] * 576 + offs_p[None, :])
+        Q
+        + q_offset * stride_q
+        + mid * stride_q
+        + 512
+        + (offs_h[:, None] * 576 + offs_p[None, :])
     )
     q0 = tl.load(q0_ptrs)
     q1 = tl.load(q1_ptrs)
@@ -171,19 +178,16 @@ def multi_seg_mla_kernel(
     lse = tl.zeros([128], dtype=tl.float32)
     acc_o = tl.zeros([128, 512], dtype=tl.float32)
 
-
     for i_seg in range(n_seg - 1):
 
         k_offset = tl.load(k_offsets + bid * max_seg + i_seg)
         k_seg_length = tl.load(k_lengths + bid * (max_seg + 1) + i_seg)
 
-        k0_ptrs = (
-                (KV + k_offset * stride_k) + (
-                    offs_n[:, None] * stride_k + offs_v[None, :])
+        k0_ptrs = (KV + k_offset * stride_k) + (
+            offs_n[:, None] * stride_k + offs_v[None, :]
         )
-        k1_ptrs = (
-                (KV + k_offset * stride_k + 512) + (
-                    offs_n[:, None] * stride_k + offs_p[None, :])
+        k1_ptrs = (KV + k_offset * stride_k + 512) + (
+            offs_n[:, None] * stride_k + offs_p[None, :]
         )
 
         for i in range(tl.cdiv(k_seg_length, BLOCK)):
@@ -191,17 +195,21 @@ def multi_seg_mla_kernel(
             if EVEN:
                 k0 = tl.load(k0_ptrs + n * stride_k)
             else:
-                k0 = tl.load(k0_ptrs + n * stride_k,
-                            mask=(n + offs_n)[:, None] < k_seg_length,
-                            other=0.0)
+                k0 = tl.load(
+                    k0_ptrs + n * stride_k,
+                    mask=(n + offs_n)[:, None] < k_seg_length,
+                    other=0.0,
+                )
             qk = tl.dot(q0, tl.trans(k0))
-            
+
             if EVEN:
                 k1 = tl.load(k1_ptrs + n * stride_k)
             else:
-                k1 = tl.load(k1_ptrs + n * stride_k,
-                            mask=(n + offs_n)[:, None] < k_seg_length, 
-                            other=0.0)
+                k1 = tl.load(
+                    k1_ptrs + n * stride_k,
+                    mask=(n + offs_n)[:, None] < k_seg_length,
+                    other=0.0,
+                )
 
             qk = tl.dot(q1, tl.trans(k1), qk)
 
@@ -214,19 +222,16 @@ def multi_seg_mla_kernel(
             p = p.to(KV.dtype.element_ty)
             acc_o = tl.dot(p, k0, acc_o)
 
-
     gap = k_total_length - q_length
     k_offset = tl.load(k_offsets + bid * max_seg + n_seg - 1)
     k_seg_length = tl.load(k_lengths + bid * (max_seg + 1) + n_seg - 1)
     k_acc_length = k_total_length - k_seg_length
 
-    k0_ptrs = (
-            (KV + k_offset * stride_k) + (
-                offs_n[:, None] * stride_k + offs_v[None, :])
+    k0_ptrs = (KV + k_offset * stride_k) + (
+        offs_n[:, None] * stride_k + offs_v[None, :]
     )
-    k1_ptrs = (
-            (KV + k_offset * stride_k + 512) + (
-                offs_n[:, None] * stride_k + offs_p[None, :])
+    k1_ptrs = (KV + k_offset * stride_k + 512) + (
+        offs_n[:, None] * stride_k + offs_p[None, :]
     )
 
     steps = tl.cdiv(gap + mid + 1 - k_acc_length, BLOCK)
@@ -236,20 +241,28 @@ def multi_seg_mla_kernel(
         if EVEN:
             k0 = tl.load(k0_ptrs + n * stride_k)
         else:
-            k0 = tl.load(k0_ptrs + n * stride_k,
-                         mask=(n + offs_n)[:, None] < k_seg_length, other=0.0)
+            k0 = tl.load(
+                k0_ptrs + n * stride_k,
+                mask=(n + offs_n)[:, None] < k_seg_length,
+                other=0.0,
+            )
         qk = tl.dot(q0, tl.trans(k0))
 
         if EVEN:
             k1 = tl.load(k1_ptrs + n * stride_k)
         else:
-            k1 = tl.load(k1_ptrs + n * stride_k,
-                         mask=(n + offs_n)[:, None] < k_seg_length, other=0.0)
+            k1 = tl.load(
+                k1_ptrs + n * stride_k,
+                mask=(n + offs_n)[:, None] < k_seg_length,
+                other=0.0,
+            )
 
         qk = tl.dot(q1, tl.trans(k1), qk)
 
-        # prefill: 
-        qk += tl.where((k_acc_length + n + offs_n)[None, :] <= gap + mid, 0.0, float("-inf"))
+        # prefill:
+        qk += tl.where(
+            (k_acc_length + n + offs_n)[None, :] <= gap + mid, 0.0, float("-inf")
+        )
 
         p = tl.exp(qk * softmax_scale)
         lse += tl.sum(p, 1)
@@ -260,9 +273,10 @@ def multi_seg_mla_kernel(
     acc_o = acc_o / lse[:, None]
 
     out_ptrs = (
-            Out
-            + q_offset * stride_o + mid * stride_o  + (
-                        offs_h[:, None] * 512 + offs_v[None, :])
+        Out
+        + q_offset * stride_o
+        + mid * stride_o
+        + (offs_h[:, None] * 512 + offs_v[None, :])
     )
 
     tl.store(out_ptrs, acc_o)
@@ -283,8 +297,7 @@ def seg_mla_fwd(q, kv, meta):
     BLOCK = 64
 
     if isinstance(meta.kls[0], (list, tuple)):
-        EVEN = all(
-            [all([y % BLOCK == 0 for y in x]) for x in meta.kls])
+        EVEN = all([all([y % BLOCK == 0 for y in x]) for x in meta.kls])
     else:
         EVEN = all([x % BLOCK == 0 for x in meta.kls])
 
@@ -313,7 +326,7 @@ def seg_mla_fwd(q, kv, meta):
             BLOCK=BLOCK,
             EVEN=EVEN,
             num_warps=num_warps,
-            num_stages=num_stages
+            num_stages=num_stages,
         )
         return o
     else:
@@ -334,7 +347,6 @@ def seg_mla_fwd(q, kv, meta):
             BLOCK=BLOCK,
             EVEN=EVEN,
             num_warps=num_warps,
-            num_stages=num_stages
+            num_stages=num_stages,
         )
         return o
-

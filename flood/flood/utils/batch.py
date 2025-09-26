@@ -45,40 +45,41 @@ share=1: prefix cache
 
 
 class Slot(Structure):
-    _fields_ = [('s', c_int), ('e', c_int), ('state', c_int), ('share', c_int)]
+    _fields_ = [("s", c_int), ("e", c_int), ("state", c_int), ("share", c_int)]
 
 
 class Batch:
-    def __init__(self,
-                 reqs=None,
-                 batch_size=0,
-                 token_count=0,
-                 mode=1,
-                 samplings=None,
-                 input_ids=None,
-                 position_ids=None,
-                 q_offsets=None,
-                 k_offsets=None,
-                 s_offsets=None,
-                 s_scales=None,
-                 max_q_length=None,
-                 max_k_length=None,
-                 k_segs=None,
-                 max_seg=None,
-                 q_lengths=None,
-                 k_lengths=None,
-                 mask=None,
-                 cache_indices=None,
-                 logit_indices=None,
-                 logit_counts=None,
-                 qls=None,
-                 kls=None,
-                 spec=None,
-                 draft_offsets=None,
-                 retrieve_count=None,
-                 embeddings=None,
-                 emb_idx_list=None
-                 ):
+    def __init__(
+        self,
+        reqs=None,
+        batch_size=0,
+        token_count=0,
+        mode=1,
+        samplings=None,
+        input_ids=None,
+        position_ids=None,
+        q_offsets=None,
+        k_offsets=None,
+        s_offsets=None,
+        s_scales=None,
+        max_q_length=None,
+        max_k_length=None,
+        k_segs=None,
+        max_seg=None,
+        q_lengths=None,
+        k_lengths=None,
+        mask=None,
+        cache_indices=None,
+        logit_indices=None,
+        logit_counts=None,
+        qls=None,
+        kls=None,
+        spec=None,
+        draft_offsets=None,
+        retrieve_count=None,
+        embeddings=None,
+        emb_idx_list=None,
+    ):
         """
         batch meta info for forward
         :param reqs: reqs,  `output_ids` of reqs will be updated with next token ids
@@ -100,7 +101,7 @@ class Batch:
                 example: [4096,1024,2048,...,dummy]
             MULTIPLE SEG: at least one of the kvcaches of reqs are multi-segment
                 shape of [bs, max_seg]
-                example:  
+                example:
                     first req has 2 segs with indices [4096,1024] and second req has 1 seg with indices [3073]
                     k_offsets = [[4096,1024],[3072,0]]
         :param s_offsets: the first fixed size key/value indices of each req
@@ -139,7 +140,7 @@ class Batch:
         self.reqs = reqs
         self.batch_size = batch_size
         self.token_count = token_count
-        self.mode = mode  
+        self.mode = mode
         self.samplings = samplings
         self.input_ids = input_ids
         self.position_ids = position_ids
@@ -159,28 +160,30 @@ class Batch:
         self.mask = mask
         self.qls = qls
         self.kls = kls
-        self.spec = spec 
+        self.spec = spec
         self.draft_offsets = draft_offsets
         self.retrieve_count = retrieve_count
         self.embeddings = embeddings
         self.emb_idx_list = emb_idx_list
 
-        self.cache_src_indices = None 
+        self.cache_src_indices = None
         self.cache_dst_indices = None
 
     @staticmethod
-    def prefill_batching(reqs,
-                         slots,
-                         fix_slots=None,
-                         device=torch.device(0),
-                         cache_size=None,
-                         buffer_size=0,
-                         min_rate=0.95,
-                         fully_alloc_under=None,
-                         embeddings=None):
+    def prefill_batching(
+        reqs,
+        slots,
+        fix_slots=None,
+        device=torch.device(0),
+        cache_size=None,
+        buffer_size=0,
+        min_rate=0.95,
+        fully_alloc_under=None,
+        embeddings=None,
+    ):
         assert len(reqs) > 0
         if fully_alloc_under is None:
-            fully_alloc_under = 2 ** 16
+            fully_alloc_under = 2**16
         if embeddings is not None and all([x is None for x in embeddings]):
             embeddings = None
 
@@ -195,7 +198,7 @@ class Batch:
         k_lengths = []
         logit_indices = []
         logit_counts = []
-        allocated = [] # allocated samples should be recycle if failed in a batch
+        allocated = []  # allocated samples should be recycle if failed in a batch
         samplings = []
         emb_idx_list = []
         for i, req in enumerate(reqs):
@@ -206,19 +209,22 @@ class Batch:
                 else:
                     ql = req.input_length
                 output_alloc_length = min(req.output_length, fully_alloc_under)
-                total_alloc_length = Batch.cround(req.input_length + output_alloc_length + buffer_size, 16)
+                total_alloc_length = Batch.cround(
+                    req.input_length + output_alloc_length + buffer_size, 16
+                )
                 if output_alloc_length < req.output_length:
                     reserve = Batch.cround(req.output_length - output_alloc_length, 16)
                 else:
                     reserve = buffer_size
-                cache_offset, slot_index, s_offset = Batch.allocate(slots, 
-                                                            total_alloc_length,
-                                                            fix_slots=fix_slots,
-                                                            reserve=reserve,
-                                                            cache_size=cache_size,
-                                                            min_rate=min_rate)
+                cache_offset, slot_index, s_offset = Batch.allocate(
+                    slots,
+                    total_alloc_length,
+                    fix_slots=fix_slots,
+                    reserve=reserve,
+                    cache_size=cache_size,
+                    min_rate=min_rate,
+                )
 
-                
                 if cache_offset == -1:  # failed
                     for r in allocated:
                         Batch.recycle(slots, r.segs, fix_slots, r.fix_size_slot_index)
@@ -226,16 +232,16 @@ class Batch:
                         r.done = 0
                     return Batch(batch_size=0)
                 req.segs = [
-                    (cache_offset, cache_offset + total_alloc_length, slot_index)]
+                    (cache_offset, cache_offset + total_alloc_length, slot_index)
+                ]
                 req.fix_size_slot_index = s_offset
                 allocated.append(req)
-                s_scale = 0.0  # 
+                s_scale = 0.0  #
             else:  # done > 0, second trunk
                 ql = req.todo
                 cache_offset = req.segs[0][0]
                 s_offset = req.fix_size_slot_index
                 s_scale = 1.0
-                
 
             q_lengths.append(ql)
             sum_ql = sum(q_lengths)
@@ -249,25 +255,32 @@ class Batch:
             # token of a prompt does not need to calculate logits
             if targeted:
                 pos = req.iterate_target()[1]
-                cache_indices.extend(range(cache_offset + req.input_length + pos, cache_offset + req.input_length + pos + ql))
-                logit_indices.extend(range(sum_ql-ql, sum_ql))
+                cache_indices.extend(
+                    range(
+                        cache_offset + req.input_length + pos,
+                        cache_offset + req.input_length + pos + ql,
+                    )
+                )
+                logit_indices.extend(range(sum_ql - ql, sum_ql))
                 logit_counts.append(ql)
             else:
-                # chunked 
-                cache_indices.extend(range(cache_offset + req.done, cache_offset + req.done + ql))
-                if req.done + ql == req.input_length:  
-                    logit_indices.append(sum_ql-1)
+                # chunked
+                cache_indices.extend(
+                    range(cache_offset + req.done, cache_offset + req.done + ql)
+                )
+                if req.done + ql == req.input_length:
+                    logit_indices.append(sum_ql - 1)
                     logit_counts.append(1)
                 else:
                     logit_counts.append(0)
 
             if req.todo > 0:  # chunked or targeted
                 if req.done < req.input_length:  # chunked
-                    ids = req.input_ids[req.done:req.done + req.todo]
+                    ids = req.input_ids[req.done : req.done + req.todo]
                     position_id = req.done
                 else:  # targeted
                     _, pos, ids = req.iterate_target()
-                    ids = ids[:req.todo]
+                    ids = ids[: req.todo]
                     position_id = req.input_length + pos
                 input_ids.extend(ids)
             else:  # complelte req
@@ -278,11 +291,15 @@ class Batch:
             k_lengths.append(position_id + ql)
 
             if req.target_ids or req.temperature or req.top_k or req.top_p or req.min_p:
-                samplings.append(Sampling(target_ids=req.target_ids,
-                                          temperature=req.temperature,
-                                          top_k=req.top_k, 
-                                          top_p=req.top_p,
-                                          min_p=req.min_p))
+                samplings.append(
+                    Sampling(
+                        target_ids=req.target_ids,
+                        temperature=req.temperature,
+                        top_k=req.top_k,
+                        top_p=req.top_p,
+                        min_p=req.min_p,
+                    )
+                )
             else:
                 samplings.append(None)
 
@@ -295,7 +312,10 @@ class Batch:
                     ds = start + req.emb_idx
                     de = start + req.emb_idx + req.emb_size
                     emb_idx = (ss, se, ds, de)
-                elif req.done >= req.emb_idx + req.emb_size or req.done + req.todo <= req.emb_idx:
+                elif (
+                    req.done >= req.emb_idx + req.emb_size
+                    or req.done + req.todo <= req.emb_idx
+                ):
                     emb_idx = None
                 else:
                     ss = max(req.done - req.emb_idx, 0)
@@ -311,7 +331,7 @@ class Batch:
         if all([x is None for x in emb_idx_list]):
             emb_idx_list = None
 
-        k_offsets.append(cache_indices[-1]+q_lengths[-1])
+        k_offsets.append(cache_indices[-1] + q_lengths[-1])
         token_count = sum(q_lengths)
         kls = k_lengths
         qls = q_lengths
@@ -326,37 +346,36 @@ class Batch:
         s_scales = torch.tensor(s_scales, dtype=torch.float32, device=device)
         q_lengths = torch.tensor(q_lengths, dtype=torch.int32, device=device)
         k_lengths = torch.tensor(k_lengths, dtype=torch.int32, device=device)
-        cache_indices = torch.tensor(cache_indices,
-                                              dtype=torch.int32, device=device)
+        cache_indices = torch.tensor(cache_indices, dtype=torch.int32, device=device)
         # NOTE: may be empty
-        logit_indices = torch.tensor(logit_indices, dtype=torch.int32,
-                                     device=device)
+        logit_indices = torch.tensor(logit_indices, dtype=torch.int32, device=device)
 
-        return Batch(reqs=reqs,
-                     batch_size=len(q_lengths),
-                     token_count=token_count,
-                     mode=0,
-                     input_ids=input_ids,
-                     position_ids=position_ids,
-                     q_offsets=q_offsets,
-                     k_offsets=k_offsets,
-                     s_offsets=s_offsets,
-                     s_scales=s_scales,
-                     max_q_length=max_q_length,
-                     max_k_length=max_k_length,
-                     q_lengths=q_lengths,
-                     k_lengths=k_lengths,
-                     cache_indices=cache_indices,
-                     logit_indices=logit_indices,
-                     logit_counts=logit_counts,
-                     samplings=samplings,
-                     embeddings=embeddings,
-                     emb_idx_list=emb_idx_list,
-                     max_seg=1,
-                     mask=None,
-                     qls=qls,
-                     kls=kls
-                     )
+        return Batch(
+            reqs=reqs,
+            batch_size=len(q_lengths),
+            token_count=token_count,
+            mode=0,
+            input_ids=input_ids,
+            position_ids=position_ids,
+            q_offsets=q_offsets,
+            k_offsets=k_offsets,
+            s_offsets=s_offsets,
+            s_scales=s_scales,
+            max_q_length=max_q_length,
+            max_k_length=max_k_length,
+            q_lengths=q_lengths,
+            k_lengths=k_lengths,
+            cache_indices=cache_indices,
+            logit_indices=logit_indices,
+            logit_counts=logit_counts,
+            samplings=samplings,
+            embeddings=embeddings,
+            emb_idx_list=emb_idx_list,
+            max_seg=1,
+            mask=None,
+            qls=qls,
+            kls=kls,
+        )
 
     @staticmethod
     def decoding_batching(reqs, device=torch.device(0)):
@@ -387,10 +406,15 @@ class Batch:
                 k_length = kl
             else:
                 k_offset = [x[0] for x in segs] + [0] * (max_seg - n_seg)
-                pre_length = sum([x[1]-x[0] for x in segs[:-1]])
-                cur_length = kl - pre_length 
+                pre_length = sum([x[1] - x[0] for x in segs[:-1]])
+                cur_length = kl - pre_length
                 cache_index = segs[-1][0] + cur_length - 1
-                k_length = [x[1] - x[0] for x in segs[:-1]] + [cur_length] + [0] * (max_seg - n_seg) + [kl]
+                k_length = (
+                    [x[1] - x[0] for x in segs[:-1]]
+                    + [cur_length]
+                    + [0] * (max_seg - n_seg)
+                    + [kl]
+                )
 
             k_offsets.append(k_offset)
             if i == bs - 1 and max_seg == 1:  # for flash-attn
@@ -400,79 +424,79 @@ class Batch:
             s_offsets.append(s_offset)
 
         max_q_length = 1
-        max_k_length = max(position_ids) + 1 
+        max_k_length = max(position_ids) + 1
 
         qls = [1] * bs
         kls = k_lengths
         input_ids = torch.tensor(input_ids, dtype=torch.int32, device=device)
-        position_ids = torch.tensor(position_ids, dtype=torch.int32,
-                                    device=device)
+        position_ids = torch.tensor(position_ids, dtype=torch.int32, device=device)
         q_offsets = torch.arange(bs + 1, dtype=torch.int32, device=device)
         k_offsets = torch.tensor(k_offsets, dtype=torch.int32, device=device)
         q_lengths = torch.tensor(qls, dtype=torch.int32, device=device)
         k_lengths = torch.tensor(k_lengths, dtype=torch.int32, device=device)
         k_segs = torch.tensor(k_segs, dtype=torch.int32, device=device)
-        cache_indices = torch.tensor(cache_indices,
-                                              dtype=torch.int32, device=device)
+        cache_indices = torch.tensor(cache_indices, dtype=torch.int32, device=device)
         s_offsets = torch.tensor(s_offsets, dtype=torch.int32, device=device)
         s_scales = torch.ones((bs,), dtype=torch.float32, device=device)
         for _, req in enumerate(reqs):
-            if req.target_ids or req.temperature \
-                 or req.top_k or req.top_p or req.min_p:
-                samplings.append(Sampling(target_ids=req.target_ids,
-                                          temperature=req.temperature,
-                                          top_k=req.top_k, 
-                                          top_p=req.top_p,
-                                          min_p=req.min_p))
+            if req.target_ids or req.temperature or req.top_k or req.top_p or req.min_p:
+                samplings.append(
+                    Sampling(
+                        target_ids=req.target_ids,
+                        temperature=req.temperature,
+                        top_k=req.top_k,
+                        top_p=req.top_p,
+                        min_p=req.min_p,
+                    )
+                )
             else:
                 samplings.append(None)
 
         if all([x is None for x in samplings]):
             samplings = None
 
-        return Batch(reqs=reqs,
-                     batch_size=bs,
-                     token_count=bs,
-                     mode=1,
-                     input_ids=input_ids,
-                     position_ids=position_ids,
-                     q_offsets=q_offsets,
-                     k_offsets=k_offsets,
-                     s_offsets=s_offsets,
-                     s_scales=s_scales,
-                     max_q_length=max_q_length,
-                     max_k_length=max_k_length,
-                     q_lengths=q_lengths,
-                     k_lengths=k_lengths,
-                     cache_indices=cache_indices,
-                     samplings=samplings,
-                     k_segs=k_segs,
-                     max_seg=max_seg,
-                     mask=None,
-                     qls=qls,
-                     kls=kls
-                     )
-
+        return Batch(
+            reqs=reqs,
+            batch_size=bs,
+            token_count=bs,
+            mode=1,
+            input_ids=input_ids,
+            position_ids=position_ids,
+            q_offsets=q_offsets,
+            k_offsets=k_offsets,
+            s_offsets=s_offsets,
+            s_scales=s_scales,
+            max_q_length=max_q_length,
+            max_k_length=max_k_length,
+            q_lengths=q_lengths,
+            k_lengths=k_lengths,
+            cache_indices=cache_indices,
+            samplings=samplings,
+            k_segs=k_segs,
+            max_seg=max_seg,
+            mask=None,
+            qls=qls,
+            kls=kls,
+        )
 
     @staticmethod
-    def lookahead_batching(reqs, 
-                           spec, 
-                           device=torch.device(0), 
-                           retrieve_count=4):
+    def lookahead_batching(reqs, spec, device=torch.device(0), retrieve_count=4):
 
         bs = len(reqs)
         max_seg = max([len(x.segs) for x in reqs])
         l = retrieve_count * spec.branch_length
 
-        retrieve_key_ids = [x.output_ids[-2:] if len(x.output_ids) >= 2 else [0,
-                                                                              x.output_ids[
-                                                                                  0]]
-                            for x in reqs]
-        input_ids, masks = spec.proposal_draft(retrieve_key_ids, retrieve_count=retrieve_count)
+        retrieve_key_ids = [
+            x.output_ids[-2:] if len(x.output_ids) >= 2 else [0, x.output_ids[0]]
+            for x in reqs
+        ]
+        input_ids, masks = spec.proposal_draft(
+            retrieve_key_ids, retrieve_count=retrieve_count
+        )
         input_ids = input_ids.view(-1)
 
         samplings = []
-        qls = [l] * bs 
+        qls = [l] * bs
         position_ids = []  # a position id for a seg
         draft_offsets = [0]  # act as q_offsets in rope
         cache_indices = []
@@ -484,12 +508,12 @@ class Batch:
             n_seg = len(req.segs)
             k_segs.append(n_seg)
             offset = req.segs[-1][0]
-            position_ids.extend([s-1] + [s]*(retrieve_count-1))
+            position_ids.extend([s - 1] + [s] * (retrieve_count - 1))
             for j in range(retrieve_count):
                 if retrieve_count > 1:
                     if j == 0:
                         bl = spec.branch_length + 1
-                    elif j == retrieve_count-1:
+                    elif j == retrieve_count - 1:
                         bl = spec.branch_length - 1
                     else:
                         bl = spec.branch_length
@@ -503,16 +527,20 @@ class Batch:
                 if i == bs - 1:
                     k_offsets.append(offset + s + l - 1)
             else:
-                k_offsets.extend([x[0] for x in req.segs]+[0]*(max_seg-n_seg))
+                k_offsets.extend([x[0] for x in req.segs] + [0] * (max_seg - n_seg))
                 pre_lengths = [x[1] - x[0] for x in req.segs[:-1]]
                 pre_length = sum(pre_lengths)
                 cur_length = s + l - 1 - pre_length
-                k_length = pre_lengths + [cur_length] + \
-                     [0] * (max_seg - len(req.segs)) + [s + l - 1]
+                k_length = (
+                    pre_lengths
+                    + [cur_length]
+                    + [0] * (max_seg - len(req.segs))
+                    + [s + l - 1]
+                )
                 k_lengths.extend(k_length)
 
         max_q_length = l
-        max_k_length = max(k_lengths)  # NOTE: CHANGED AND NOT VERIFY 
+        max_k_length = max(k_lengths)  # NOTE: CHANGED AND NOT VERIFY
 
         kls = k_lengths
         q_offsets = l * torch.arange(bs + 1, dtype=torch.int32, device=device)
@@ -520,54 +548,61 @@ class Batch:
         q_lengths = torch.tensor(qls, dtype=torch.int32, device=device)
         k_lengths = torch.tensor(k_lengths, dtype=torch.int32, device=device)
         k_segs = torch.tensor(k_segs, dtype=torch.int32, device=device)
-        cache_indices = torch.tensor(cache_indices,
-                                              dtype=torch.int32, device=device)
-        draft_offsets = torch.tensor(draft_offsets, dtype=torch.int32,
-                                    device=device)
-        position_ids = torch.tensor(position_ids, dtype=torch.int32,
-                                    device=device)
+        cache_indices = torch.tensor(cache_indices, dtype=torch.int32, device=device)
+        draft_offsets = torch.tensor(draft_offsets, dtype=torch.int32, device=device)
+        position_ids = torch.tensor(position_ids, dtype=torch.int32, device=device)
 
         for _, req in enumerate(reqs):
             if req.target_ids or req.temperature or req.top_k or req.top_p or req.min_p:
                 samplings.append(
-                    Sampling(target_ids=req.target_ids,
-                             temperature=req.temperature, top_k=req.top_k,
-                             top_p=req.top_p,
-                             min_p=req.min_p))
+                    Sampling(
+                        target_ids=req.target_ids,
+                        temperature=req.temperature,
+                        top_k=req.top_k,
+                        top_p=req.top_p,
+                        min_p=req.min_p,
+                    )
+                )
             else:
                 samplings.append(None)
 
         if all([x is None for x in samplings]):
             samplings = None
 
-        return Batch(reqs=reqs,
-                     batch_size=bs,
-                     token_count=bs*l,
-                     mode=2,
-                     input_ids=input_ids,
-                     position_ids=position_ids,
-                     q_offsets=q_offsets,
-                     k_offsets=k_offsets,
-                     max_q_length=max_q_length,
-                     max_k_length=max_k_length,
-                     q_lengths=q_lengths,
-                     k_lengths=k_lengths,
-                     cache_indices=cache_indices,
-                     k_segs=k_segs,
-                     max_seg=max_seg,
-                     samplings=samplings,
-                     mask=masks,
-                     qls=qls,
-                     kls=kls,
-                     spec=spec, 
-                     draft_offsets=draft_offsets, 
-                     retrieve_count=retrieve_count
-                     )
-
+        return Batch(
+            reqs=reqs,
+            batch_size=bs,
+            token_count=bs * l,
+            mode=2,
+            input_ids=input_ids,
+            position_ids=position_ids,
+            q_offsets=q_offsets,
+            k_offsets=k_offsets,
+            max_q_length=max_q_length,
+            max_k_length=max_k_length,
+            q_lengths=q_lengths,
+            k_lengths=k_lengths,
+            cache_indices=cache_indices,
+            k_segs=k_segs,
+            max_seg=max_seg,
+            samplings=samplings,
+            mask=masks,
+            qls=qls,
+            kls=kls,
+            spec=spec,
+            draft_offsets=draft_offsets,
+            retrieve_count=retrieve_count,
+        )
 
     @staticmethod
-    def mix_batching(reqs, slots, device=torch.device(0), min_rate=0.95,
-                     allocate_rate=1.0, fully_alloc_under=2 ** 16):
+    def mix_batching(
+        reqs,
+        slots,
+        device=torch.device(0),
+        min_rate=0.95,
+        allocate_rate=1.0,
+        fully_alloc_under=2**16,
+    ):
         assert len(reqs) > 0
 
         input_ids = []
@@ -584,18 +619,24 @@ class Batch:
                 position_ids.append(req.input_length + len(req.output_ids) - 1)
             else:
 
-                if req.done == 0:  # complete sample or first chunk, should allocate slot
+                if (
+                    req.done == 0
+                ):  # complete sample or first chunk, should allocate slot
                     if req.todo > 0:  # trunked
                         ql = req.todo
                     else:  # complete sample
                         ql = req.input_length
-                    output_alloc_length = req.output_length if req.output_length <= fully_alloc_under else allocate_rate * req.output_length
-                    alloc_length = ((req.input_length + int(
-                        output_alloc_length) - 1) // 16 + 1) * 16
-                    cache_offset, slot_index, fix_size_slot_index = Batch.allocate(slots,
-                                                                                fix_slots,
-                                                                                alloc_length,
-                                                                                min_rate=min_rate)
+                    output_alloc_length = (
+                        req.output_length
+                        if req.output_length <= fully_alloc_under
+                        else allocate_rate * req.output_length
+                    )
+                    alloc_length = (
+                        (req.input_length + int(output_alloc_length) - 1) // 16 + 1
+                    ) * 16
+                    cache_offset, slot_index, fix_size_slot_index = Batch.allocate(
+                        slots, fix_slots, alloc_length, min_rate=min_rate
+                    )
                     if cache_offset == -1:
                         for r in rs:
                             Batch.recycle(slots, r.segs)
@@ -603,8 +644,7 @@ class Batch:
                             r.done = 0
                             r.segs = None
                         return Batch(batch_size=0)
-                    req.segs = (
-                    cache_offset, cache_offset + alloc_length, slot_index)
+                    req.segs = (cache_offset, cache_offset + alloc_length, slot_index)
                     rs.append(req)
                 else:  # done > 0, i.e., second trunk
                     ql = req.todo
@@ -613,7 +653,7 @@ class Batch:
                 qls.append(ql)
                 cache_offsets.append(cache_offset)
                 if req.todo > 0:  # chunked
-                    ids = req.input_ids[req.done:req.done + req.todo]
+                    ids = req.input_ids[req.done : req.done + req.todo]
                     input_ids.extend(ids)
                     position_ids.append(req.done)
                 else:
@@ -651,27 +691,27 @@ class Batch:
         k_offsets = torch.tensor(k_offsets, dtype=torch.int32, device=device)
         q_lengths = torch.tensor(q_lengths, dtype=torch.int32, device=device)
         k_lengths = torch.tensor(k_lengths, dtype=torch.int32, device=device)
-        cache_indices = torch.tensor(cache_indices,
-                                              dtype=torch.int32, device=device)
+        cache_indices = torch.tensor(cache_indices, dtype=torch.int32, device=device)
 
-        return Batch(reqs=reqs,
-                     batch_size=len(qls),
-                     token_count=sum(qls),
-                     mode=10,
-                     input_ids=input_ids,
-                     position_ids=position_ids,
-                     q_offsets=q_offsets,
-                     k_offsets=k_offsets,
-                     max_q_length=max_q_length,
-                     max_k_length=max_k_length,
-                     q_lengths=q_lengths,
-                     k_lengths=k_lengths,
-                     cache_indices=cache_indices,
-                     max_seg=1,
-                     mask=None,
-                     qls=qls,
-                     kls=kls
-                     )
+        return Batch(
+            reqs=reqs,
+            batch_size=len(qls),
+            token_count=sum(qls),
+            mode=10,
+            input_ids=input_ids,
+            position_ids=position_ids,
+            q_offsets=q_offsets,
+            k_offsets=k_offsets,
+            max_q_length=max_q_length,
+            max_k_length=max_k_length,
+            q_lengths=q_lengths,
+            k_lengths=k_lengths,
+            cache_indices=cache_indices,
+            max_seg=1,
+            mask=None,
+            qls=qls,
+            kls=kls,
+        )
 
     def to(self, device, non_blocking=False):
         self.input_ids = self.input_ids.to(device, non_blocking=non_blocking)
@@ -680,49 +720,56 @@ class Batch:
         self.k_offsets = self.k_offsets.to(device, non_blocking=non_blocking)
         self.q_lengths = self.q_lengths.to(device, non_blocking=non_blocking)
         self.k_lengths = self.k_lengths.to(device, non_blocking=non_blocking)
-        self.cache_indices = self.cache_indices.to(device, non_blocking=non_blocking)      
+        self.cache_indices = self.cache_indices.to(device, non_blocking=non_blocking)
         if isinstance(self.k_segs, torch.Tensor):
-            self.k_segs = self.k_segs.to(device, non_blocking=non_blocking)    
+            self.k_segs = self.k_segs.to(device, non_blocking=non_blocking)
         if isinstance(self.logit_indices, torch.Tensor):
-            self.logit_indices = self.logit_indices.to(device, non_blocking=non_blocking)
+            self.logit_indices = self.logit_indices.to(
+                device, non_blocking=non_blocking
+            )
         if isinstance(self.mask, torch.Tensor) and self.mask.device != device:
             self.mask = self.mask.to(device, non_blocking=non_blocking)
         if isinstance(self.draft_offsets, torch.Tensor):
-            self.draft_offsets = self.draft_offsets.to(device, non_blocking=non_blocking)
+            self.draft_offsets = self.draft_offsets.to(
+                device, non_blocking=non_blocking
+            )
         if isinstance(self.s_offsets, torch.Tensor):
-            self.s_offsets = self.s_offsets.to(device, non_blocking=non_blocking) 
+            self.s_offsets = self.s_offsets.to(device, non_blocking=non_blocking)
         if isinstance(self.s_scales, torch.Tensor):
-            self.s_scales = self.s_scales.to(device, non_blocking=non_blocking)   
+            self.s_scales = self.s_scales.to(device, non_blocking=non_blocking)
 
     def send(self, hidden_states, dst=1, group=None, light=False, log=False):
         dim = hidden_states.size(-1)
         dtype = 0 if hidden_states.dtype == torch.float16 else 1
-        mask_shape = None if self.mask is None else self.mask.shape 
-        draft_offfets_shape = None if self.draft_offsets is None else self.draft_offsets.shape
+        mask_shape = None if self.mask is None else self.mask.shape
+        draft_offfets_shape = (
+            None if self.draft_offsets is None else self.draft_offsets.shape
+        )
         device = hidden_states.device
         torch.cuda.set_device(device)
         comm_device = None
         objects = [
-            [self.reqs, 
-             self.batch_size, 
-             self.token_count, 
-             self.mode, 
-             self.samplings, 
-             self.max_q_length, 
-             self.max_k_length, 
-             self.max_seg,
-             self.qls, 
-             self.kls, 
-             self.logit_counts,
-             self.retrieve_count,
-             dtype, 
-             dim,
-             mask_shape,
-             draft_offfets_shape
-             ]
-             ]
+            [
+                self.reqs,
+                self.batch_size,
+                self.token_count,
+                self.mode,
+                self.samplings,
+                self.max_q_length,
+                self.max_k_length,
+                self.max_seg,
+                self.qls,
+                self.kls,
+                self.logit_counts,
+                self.retrieve_count,
+                dtype,
+                dim,
+                mask_shape,
+                draft_offfets_shape,
+            ]
+        ]
         if log:
-            print(f'start send objects:{objects}')
+            print(f"start send objects:{objects}")
         dist.send_object_list(objects, dst=dst, group=group, device=comm_device)
 
         if light:
@@ -731,7 +778,7 @@ class Batch:
         torch.cuda.synchronize(device=device)
 
         if log:
-            print(f'start send input_ids:{self.input_ids}')
+            print(f"start send input_ids:{self.input_ids}")
         dist.send(self.input_ids, dst, group=group)
         dist.send(self.position_ids, dst, group=group)
         dist.send(self.q_offsets, dst, group=group)
@@ -750,38 +797,39 @@ class Batch:
             dist.send(self.draft_offsets, dst, group=group)
 
         if log:
-            print(f'start send hidden_states:{hidden_states[0, :3]}')
+            print(f"start send hidden_states:{hidden_states[0, :3]}")
         dist.send(hidden_states, dst, group=group)
         torch.cuda.synchronize(device=device)
 
     def recv(self, src=0, group=None, light=False, log=False):
         objects = [None]
-        device = 'cuda:0'
+        device = "cuda:0"
         comm_device = None
         torch.cuda.set_device(device)
         dist.recv_object_list(objects, src=src, group=group, device=comm_device)
         objects = objects[0]
 
-        (self.reqs, 
-             self.batch_size, 
-             self.token_count, 
-             self.mode, 
-             self.samplings, 
-             self.max_q_length, 
-             self.max_k_length, 
-             self.max_seg,
-             self.qls, 
-             self.kls, 
-             self.logit_counts,
-             self.retrieve_count,
-             dtype, 
-             dim,
-             mask_shape,
-             draft_offsets_shape
-             ) = objects
+        (
+            self.reqs,
+            self.batch_size,
+            self.token_count,
+            self.mode,
+            self.samplings,
+            self.max_q_length,
+            self.max_k_length,
+            self.max_seg,
+            self.qls,
+            self.kls,
+            self.logit_counts,
+            self.retrieve_count,
+            dtype,
+            dim,
+            mask_shape,
+            draft_offsets_shape,
+        ) = objects
 
         if log:
-            print(f'finish recv objects:{objects}')
+            print(f"finish recv objects:{objects}")
 
         if light:
             return
@@ -789,43 +837,35 @@ class Batch:
         token_count = self.token_count
         batch_size = self.batch_size
 
-        self.input_ids = torch.empty([token_count], device=device,
-                                     dtype=torch.int32)
-        self.position_ids = torch.empty([batch_size], device=device,
-                                        dtype=torch.int32)
-        self.q_offsets = torch.empty([batch_size + 1], device=device,
-                                     dtype=torch.int32)
-        self.k_offsets = torch.empty([batch_size + 1], device=device,
-                                     dtype=torch.int32)
-        self.q_lengths = torch.empty([batch_size], device=device,
-                                     dtype=torch.int32)
-        self.k_lengths = torch.empty([batch_size], device=device,
-                                     dtype=torch.int32)
-        self.cache_indices = torch.empty([token_count], device=device,
-                                         dtype=torch.int32)
-        self.s_offsets = torch.empty([batch_size], device=device,
-                                     dtype=torch.int32)
-        self.s_scales = torch.empty([batch_size], device=device,
-                                     dtype=torch.float32)
+        self.input_ids = torch.empty([token_count], device=device, dtype=torch.int32)
+        self.position_ids = torch.empty([batch_size], device=device, dtype=torch.int32)
+        self.q_offsets = torch.empty([batch_size + 1], device=device, dtype=torch.int32)
+        self.k_offsets = torch.empty([batch_size + 1], device=device, dtype=torch.int32)
+        self.q_lengths = torch.empty([batch_size], device=device, dtype=torch.int32)
+        self.k_lengths = torch.empty([batch_size], device=device, dtype=torch.int32)
+        self.cache_indices = torch.empty(
+            [token_count], device=device, dtype=torch.int32
+        )
+        self.s_offsets = torch.empty([batch_size], device=device, dtype=torch.int32)
+        self.s_scales = torch.empty([batch_size], device=device, dtype=torch.float32)
         if self.max_seg > 1:
-            self.k_segs = torch.empty([batch_size], device=device,
-                                     dtype=torch.int32)
+            self.k_segs = torch.empty([batch_size], device=device, dtype=torch.int32)
         if self.logit_counts is not None:
-            self.logit_indices = torch.empty([sum(self.logit_counts)], device=device,
-                                         dtype=torch.int32)
+            self.logit_indices = torch.empty(
+                [sum(self.logit_counts)], device=device, dtype=torch.int32
+            )
         if mask_shape is not None:
-            self.mask = torch.empty(mask_shape, device=device,
-                                         dtype=torch.int8)
-            self.draft_offsets = torch.empty(draft_offsets_shape, device=device,
-                                         dtype=torch.int32)
+            self.mask = torch.empty(mask_shape, device=device, dtype=torch.int8)
+            self.draft_offsets = torch.empty(
+                draft_offsets_shape, device=device, dtype=torch.int32
+            )
 
-        hidden_states = torch.empty([token_count, dim], device=device,
-                                    dtype=dtype)
+        hidden_states = torch.empty([token_count, dim], device=device, dtype=dtype)
         torch.cuda.synchronize(device=device)
 
         dist.recv(self.input_ids, src=src, group=group)
         if log:
-            print(f'finish recv input_ids:{self.input_ids}')
+            print(f"finish recv input_ids:{self.input_ids}")
 
         dist.recv(self.position_ids, src=src, group=group)
         dist.recv(self.q_offsets, src=src, group=group)
@@ -845,14 +885,16 @@ class Batch:
 
         dist.recv(hidden_states, src=src, group=group)
         if log:
-            print(f'finish recv hidden_states:{hidden_states[0, :4]}')
+            print(f"finish recv hidden_states:{hidden_states[0, :4]}")
 
         torch.cuda.synchronize(device=device)
         return hidden_states
 
     @staticmethod
-    def allocate(slots, length, fix_slots=None, reserve=None, cache_size=None, min_rate=0.95):
-        max_end_idx = cache_size - reserve if reserve is not None else 2 ** 30
+    def allocate(
+        slots, length, fix_slots=None, reserve=None, cache_size=None, min_rate=0.95
+    ):
+        max_end_idx = cache_size - reserve if reserve is not None else 2**30
         with slots.get_lock():
             rates = np.zeros(len(slots), dtype=np.float32)
             max_idx = -1
@@ -877,7 +919,7 @@ class Batch:
                         break
 
             if fix_slots is not None and fix_slot_index == -1:
-                return  -1, -1, -1
+                return -1, -1, -1
 
             if max_idx == -1:
                 max_idx = np.argmax(rates)
@@ -903,7 +945,9 @@ class Batch:
                 return -1, -1, -1
 
     @staticmethod
-    def recycle(slots, segs, fix_slots=None, fix_size_slot_index=None):  # be carefull with prefix cache
+    def recycle(
+        slots, segs, fix_slots=None, fix_size_slot_index=None
+    ):  # be carefull with prefix cache
         with slots.get_lock():
             for ts, te, idx in segs:
                 if slots[idx].share:
@@ -947,7 +991,7 @@ class Batch:
                 if hit is False:
                     raise ValueError("Recycle error! No slot available!")
             if fix_slots is not None and fix_size_slot_index is not None:
-                fix_slots[fix_size_slot_index] = 1 # available
+                fix_slots[fix_size_slot_index] = 1  # available
 
     @staticmethod
     def extend_slot(slots, old_segs, length, contiguous=False):
@@ -1036,8 +1080,7 @@ class Batch:
                                             iter_slot.e = slot.e
                                             iter_slot.state = 1  # available
                                             break
-                                return old_segs + [
-                                    (slot.s, slot.s + length, idx)]
+                                return old_segs + [(slot.s, slot.s + length, idx)]
                             else:
                                 slot.state = 2
                                 return old_segs + [(slot.s, slot.e, idx)]
@@ -1051,6 +1094,6 @@ class Batch:
             sizes[slot.state] += slot.e - slot.s
         return {"counts": counts, "sizes": sizes}
 
-    @staticmethod 
+    @staticmethod
     def cround(x, b):
-        return ((x-1)//b+1)*b
+        return ((x - 1) // b + 1) * b
