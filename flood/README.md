@@ -81,9 +81,9 @@ Performance is measured by token/s(tokens per second) of generated tokens. The v
 | Ring-Mini-Linear-V2 | shareGPT | 1 * H20 | 6016.04 | 9117.56 | 1.52 | 
 
 ### Kernels
-
-Performance is measured by TFLOPS (TFLOPs/second). Attention head number is 64, kv head number is 8, and kv head dimension is 128. We use `flash_attn_2_cuda.varlen_fwd` of flash-attn-2 in A100 and `flash_attn_3_cuda.fwd` of flash-attn-3 in H20. 
-More detail can be found in benchmark/bench_seg_attn.py.
+#### Seg-attn
+Performance of Seg-attn is measured by TFLOPS (TFLOPs/second). Attention head number is 64, kv head number is 8, and kv head dimension is 128. We use `flash_attn_2_cuda.varlen_fwd` of flash-attn-2 in A100 and `flash_attn_3_cuda.fwd` of flash-attn-3 in H20. 
+More detail can be found in benchmark/ops/bench_seg_attn.py.
 
 | Device | BatchSize  |  Q_len   | K_len  | flash-attn | seg-attn | speedup |
 |---------|----------|----------|--------|-----------|---------|----------|
@@ -92,6 +92,17 @@ More detail can be found in benchmark/bench_seg_attn.py.
 |H20|  1  | 1024  | 1024 |   90.28   | 96.05 | 1.06 |
 |H20 | 128 | 1|  1024  | 7.16  |  22.63 | 3.16 |
 
+#### Seg-linear-attn
+Performance of Seg-linear-attn is measured by microseconds(µs). Attention head number is 16, kv head number is 16, and kv head dimension is 128. 
+We use `fla.ops.simple_gla.chunk_simple_gla` of flash-linear-attention in prefilling and `fla.ops.simple_gla.fused_recurrent.fused_recurrent_simple_gla` of flash-linear-attention in decoding. The test device is H20.
+More detail can be found in benchmark/ops/bench_seg_la.py.
+
+| BatchSize | Seq_len | flash-linear-attention (µs) | seg-linear-attn (µs) | speedup |
+|:---------|:-------:|---------------------------:|---------------------:|-------:|
+| 1         | 1024    | 245.5                     | 180.1                | 1.36    |
+| 2         | 1024    | 227.4                     | 132.5                | 1.72    |
+| 64        | 1       | 129.5                     | 51.8                 | 2.50    |
+| 256       | 1       | 190.4                     | 132.0                | 1.44    |
 
 ## Installation
 
@@ -113,7 +124,7 @@ We mainly develop and benchmark on the environment below, lower version may also
 - torch >= 2.5.0 (higher is better)
 - triton >= 3.1.0 (higher is better) 
 - accelerate >= 1.4.0
-- transformers >= 4.47.1
+- transformers >= 4.54.0
 - flash-attn >= 2.6.3 is required if use `fa2` kernel 
 - flash-attn-3 >= 3.0.0 is required if use `fa3` kernel
 - vLLM >= 0.6.2 is required if use INT8 quantization
