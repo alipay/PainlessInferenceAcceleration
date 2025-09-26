@@ -87,6 +87,30 @@ def benchmark_func(fn, *args, n_warmup=10, n_repeat=100, ref_flops=None,
     return average_event_time
 
 
+def torch_profile_decorator(enabled: bool = False, trace_file: str = "profile_task.json"):
+    def decorator(func):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            if not enabled:
+                return func(*args, **kwargs)
+
+            with torch.profiler.profile(
+                activities=[
+                    torch.profiler.ProfilerActivity.CPU,
+                    torch.profiler.ProfilerActivity.CUDA,
+                    torch.profiler.ProfilerActivity.XPU
+                ],
+            ) as prof:
+                result = func(*args, **kwargs)
+                if trace_file is not None:
+                    assert trace_file.endswith('.json')
+                    prof.export_chrome_trace(trace_file)
+                return result
+        return wrapper
+    return decorator
+
+
+
 def torch_attn(q, k, v, causal=True, mask=None):
     bs, q_len, q_head, head_dim = q.shape
     k_head = k.shape[2]
