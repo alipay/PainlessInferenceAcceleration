@@ -1,3 +1,8 @@
+# -*- coding: utf-8 -*-
+"""
+Copyright (c) Ant Financial Service Group and its affiliates.
+"""
+
 import random
 import torch
 from flood.ops.rope import triton_qk_norm_and_rope_forward, triton_q_k_norm_and_rope_forward
