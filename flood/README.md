@@ -10,8 +10,9 @@
 
 
 ## *News or Update* 🔥
-- [2025/09] We provide efficient kernels for linear attention.
-- [2025/09] We support bailing moe v1 and v2.
+- [2025/09] We release segment linear attention for better performance.
+- [2025/06] We fix errors for multi-node infenrence.
+- [2025/05] We integrade Lookahead into FLOOD.
 - [2025/03] We release the code of our inference framework `FLOOD`.
 
 
@@ -44,25 +45,23 @@ Additionally, we have developed an attention kernel, termed SegmentAttention, to
 Our framework is undergoing rapid iteration, which may result in some features having bugs. If you encounter any issues, please feel free to report them.
 
 ## Models we support
-
-- Ling MoE
+- Ling MoE Linear V1, V2
+- Ling MoE V1, V2
 - Ling
 - Llama
 - Qwen
-- Deepseek v1
+- Qwen3
+- Deepseek V1, V2, V3
 
 ## Roadmap
-
-- Integrate our previous work `LOOKAHEAD`. 
 
 - Improve prefill performance with Prefix caching.
 
 - Improve performance with CUDA-Graph.
 
-- Support more models, include Deepseek R1, etc.
-
 - Implement segment attention with `CUTE` for better performance, especially with FP8 kvcache.
 
+- Reduce pickle/unpickle overhead in `multiprocessing.queue`.
 
 ## Performance Comparison
 
@@ -78,6 +77,8 @@ Performance is measured by token/s(tokens per second) of generated tokens. The v
 | Ling-Lite | shareGPT|  1 * H20  |  4355 | 5869 | 1.35 |
 | Ling-Lite | shareGPT|  1 * A100 | 3576 | 5451 | 1.52 |
 | Ling-Plus(FP8)| shareGPT | 8 * H20 | 2742 | 6569 | 2.40 |
+| Ring-Mini-Linear-V2 | shareGPT | 1 * A100 | 4992.03 | 6777.64 | 1.36 | 
+| Ring-Mini-Linear-V2 | shareGPT | 1 * H20 | 6016.04 | 9117.56 | 1.52 | 
 
 ### Kernels
 
