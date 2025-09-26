@@ -1,4 +1,4 @@
-""" Bailing MoE model configuration """
+"""Bailing MoE model configuration"""
 
 from transformers.configuration_utils import PretrainedConfig
 
@@ -87,4 +87,6 @@ class BailingMoeV2Config(PretrainedConfig):
         self.output_router_logits = output_router_logits
         self.moe_router_topk_scaling_factor = moe_router_topk_scaling_factor
 
-        super().__init__(pad_token_id=pad_token_id, tie_word_embeddings=tie_word_embeddings, **kwargs)
+        super().__init__(
+            pad_token_id=pad_token_id, tie_word_embeddings=tie_word_embeddings, **kwargs
+        )

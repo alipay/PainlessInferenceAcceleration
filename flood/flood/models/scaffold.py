@@ -4,29 +4,30 @@ Copyright (c) Ant Financial Service Group and its affiliates.
 """
 
 
-class Scaffold():
-    def __init__(self,
-                 model_name='Llama',
-                 emb_name='embed_tokens',
-                 head_name='lm_head',
-                 attn_name='self_attn',
-                 mlp_name='mlp',
-                 mlp_norm_name='input_layernorm',
-                 attn_norm_name='post_attention_layernorm',
-                 final_norm_name='norm',
-                 norm_type='rms',
-                 qkv_proj_name='q_proj,k_proj,v_proj',
-                 o_proj_name='o_proj',
-                 gate_up_proj_name='gate_proj,up_proj',
-                 down_proj_name='down_proj',
-                 act_type='silu_and_mul',
-                 eps_name='rms_norm_eps',
-                 num_layers_name='num_hidden_layers',
-                 use_bias=(False, False, False, False),
-                 moe=False,
-                 num_experts_name='num_experts',
-                 num_shared_experts_name='num_shared_experts'
-                 ):
+class Scaffold:
+    def __init__(
+        self,
+        model_name="Llama",
+        emb_name="embed_tokens",
+        head_name="lm_head",
+        attn_name="self_attn",
+        mlp_name="mlp",
+        mlp_norm_name="input_layernorm",
+        attn_norm_name="post_attention_layernorm",
+        final_norm_name="norm",
+        norm_type="rms",
+        qkv_proj_name="q_proj,k_proj,v_proj",
+        o_proj_name="o_proj",
+        gate_up_proj_name="gate_proj,up_proj",
+        down_proj_name="down_proj",
+        act_type="silu_and_mul",
+        eps_name="rms_norm_eps",
+        num_layers_name="num_hidden_layers",
+        use_bias=(False, False, False, False),
+        moe=False,
+        num_experts_name="num_experts",
+        num_shared_experts_name="num_shared_experts",
+    ):
         self.model_name = model_name
         self.emb_name = emb_name
         self.head_name = head_name
@@ -49,8 +50,8 @@ class Scaffold():
         self.num_shared_experts_name = num_shared_experts_name
 
     def generate_import(self):
-        if self.model_name in ('Bailing', 'BailingMoe', 'Deepseek'):
-            mn = self.model_name.lower().replace('moe','_moe')
+        if self.model_name in ("Bailing", "BailingMoe", "Deepseek"):
+            mn = self.model_name.lower().replace("moe", "_moe")
             conf = f"from .configuration_{mn} import {self.model_name}Config"
         else:
             conf = f"from transformers.models.{self.model_name.lower()}.configuration_{self.model_name.lower()} import {self.model_name}Config"
@@ -58,7 +59,7 @@ class Scaffold():
         if self.moe:
             moe_line = """from flood.layers.moe import AutoExperts"""
         else:
-            moe_line = ''
+            moe_line = ""
 
         line = f"""# -*- coding: utf-8 -*-
 # Copyright (c) Ant Financial Service Group and its affiliates.
@@ -92,11 +93,11 @@ from flood.layers.sampler import Sampler
         return line
 
     def generate_mlp(self):
-        inner_line = '_' if self.moe else ''
+        inner_line = "_" if self.moe else ""
 
-        if ',' in self.gate_up_proj_name:
-            gate_name, up_name = self.gate_up_proj_name.split(',')
-            gate_up_name = 'gate_up_proj'
+        if "," in self.gate_up_proj_name:
+            gate_name, up_name = self.gate_up_proj_name.split(",")
+            gate_up_name = "gate_up_proj"
 
             gate_up_linear = f"""
         self.{gate_name} = AutoLinear.from_pretrained(self.hidden_size, 
@@ -131,7 +132,7 @@ from flood.layers.sampler import Sampler
                                                     config=config, 
                                                     name='{gate_up_name}')
             """
-            gate_up_patch = ''
+            gate_up_patch = ""
         act = self.get_act_line()
         line = f"""
 class {self.model_name}MLP(torch.nn.Module):
@@ -159,10 +160,9 @@ class {self.model_name}MLP(torch.nn.Module):
 """
         return line
 
-
     def generate_moe(self):
         if not self.moe:
-            return ''
+            return ""
         line = f"""
 class {self.model_name}MoE(torch.nn.Module):
     def __init__(
@@ -222,19 +222,18 @@ class {self.model_name}MoE(torch.nn.Module):
 """
         return line
 
-
     def generate_attn(self):
         attn = self.generate_attn_class()
 
         forward = self.generate_attn_forward()
 
-        return attn + '\n' + forward
+        return attn + "\n" + forward
 
     def generate_attn_class(self):
 
-        if ',' in self.qkv_proj_name:
-            qkv_name = 'qkv_proj'
-            q_name, k_name, v_name = self.qkv_proj_name.split(',')
+        if "," in self.qkv_proj_name:
+            qkv_name = "qkv_proj"
+            q_name, k_name, v_name = self.qkv_proj_name.split(",")
             qkv_linear = f"""
         self.{q_name} = AutoLinear.from_pretrained(self.hidden_size, 
                                                  self.num_heads * self.head_dim, 
@@ -278,7 +277,7 @@ class {self.model_name}MoE(torch.nn.Module):
                                                  config=config, 
                                                  name='{qkv_name}')
 """
-            qkv_patch = ''
+            qkv_patch = ""
 
         line = f"""
 class {self.model_name}Attention(torch.nn.Module):
@@ -333,10 +332,9 @@ class {self.model_name}Attention(torch.nn.Module):
 """
         return line
 
-
     def generate_attn_forward(self):
 
-        qkv_name = 'qkv_proj' if ',' in self.qkv_proj_name else self.qkv_proj_name
+        qkv_name = "qkv_proj" if "," in self.qkv_proj_name else self.qkv_proj_name
 
         line = f"""
     def forward(
@@ -380,7 +378,7 @@ class {self.model_name}Attention(torch.nn.Module):
     def generate_layer(self):
 
         norm_line = self.get_norm_line()
-        mlp_name = self.model_name + ('MoE' if self.moe else 'MLP')
+        mlp_name = self.model_name + ("MoE" if self.moe else "MLP")
         line = f"""
 class {self.model_name}DecoderLayer(torch.nn.Module):
     def __init__(self, config: PretrainedConfig, layer_idx: int = 0):
@@ -486,7 +484,7 @@ class {self.model_name}Model(PreTrainedModel):
 
     def generate_facade(self):
 
-        if self.model_name == 'Bailing':
+        if self.model_name == "Bailing":
             norm_head_line = """
     def flood_patch_func(self, kwargs=None):
         if hasattr(self.config, 'norm_head') and self.config.norm_head:
@@ -615,21 +613,21 @@ class {self.model_name}ForCausalLM(PreTrainedModel):
         return line
 
     def get_norm_line(self):
-        if self.norm_type == 'rms':
+        if self.norm_type == "rms":
             norm_line = f"RMSNorm(config.hidden_size, eps=config.{self.eps_name})"
-        elif self.norm_type == 'layer':
+        elif self.norm_type == "layer":
             norm_line = f"LayerNorm(config.hidden_size, eps=config.{self.eps_name})"
         else:
-            raise ValueError(f'unknown norm_type:{self.norm_type}')
+            raise ValueError(f"unknown norm_type:{self.norm_type}")
         return norm_line
 
     def get_act_line(self):
-        if self.act_type == 'silu_and_mul':
-            line = 'silu_and_mul'
-        elif self.act_type == 'gelu':
-            line = 'F.gelu'
+        if self.act_type == "silu_and_mul":
+            line = "silu_and_mul"
+        elif self.act_type == "gelu":
+            line = "F.gelu"
         else:
-            raise ValueError(f'unknown act:{self.act_type}')
+            raise ValueError(f"unknown act:{self.act_type}")
         return line
 
     def generate(self, filename):
@@ -641,131 +639,138 @@ class {self.model_name}ForCausalLM(PreTrainedModel):
         lines.append(self.generate_layer())
         lines.append(self.generate_model())
         lines.append(self.generate_facade())
-        line = '\n'.join(lines)
+        line = "\n".join(lines)
 
-        with open(filename, 'w+') as f:
+        with open(filename, "w+") as f:
             f.write(line)
 
 
-
-
 # NOTE: file with `_ignore` will not be recorded by git
-postfix = '.py'   # '_ignore.py' or '.py'
+postfix = ".py"  # '_ignore.py' or '.py'
 
 # llama
-scaffold = Scaffold(model_name='Llama',
-                    emb_name='embed_tokens',
-                    head_name='lm_head',
-                    attn_name='self_attn',
-                    mlp_name='mlp',
-                    attn_norm_name='input_layernorm',
-                    mlp_norm_name='post_attention_layernorm',
-                    final_norm_name='norm',
-                    norm_type='rms',
-                    qkv_proj_name='q_proj,k_proj,v_proj',
-                    o_proj_name='o_proj',
-                    gate_up_proj_name='gate_proj,up_proj',
-                    down_proj_name='down_proj',
-                    act_type='silu_and_mul',
-                    eps_name='rms_norm_eps',
-                    num_layers_name='num_hidden_layers',
-                    use_bias=(
-                    'config.qkv_bias if hasattr(config, "qkv_bias") else config.attention_bias',
-                    'config.o_bias if hasattr(config, "o_bias") else config.attention_bias',
-                    'config.mlp_bias', 'config.mlp_bias'),
-                    )
-scaffold.generate(f'modeling_llama{postfix}')
+scaffold = Scaffold(
+    model_name="Llama",
+    emb_name="embed_tokens",
+    head_name="lm_head",
+    attn_name="self_attn",
+    mlp_name="mlp",
+    attn_norm_name="input_layernorm",
+    mlp_norm_name="post_attention_layernorm",
+    final_norm_name="norm",
+    norm_type="rms",
+    qkv_proj_name="q_proj,k_proj,v_proj",
+    o_proj_name="o_proj",
+    gate_up_proj_name="gate_proj,up_proj",
+    down_proj_name="down_proj",
+    act_type="silu_and_mul",
+    eps_name="rms_norm_eps",
+    num_layers_name="num_hidden_layers",
+    use_bias=(
+        'config.qkv_bias if hasattr(config, "qkv_bias") else config.attention_bias',
+        'config.o_bias if hasattr(config, "o_bias") else config.attention_bias',
+        "config.mlp_bias",
+        "config.mlp_bias",
+    ),
+)
+scaffold.generate(f"modeling_llama{postfix}")
 
 # # # bailing
-scaffold = Scaffold(model_name='Bailing',
-                    emb_name='word_embeddings',
-                    head_name='lm_head',
-                    attn_name='attention',
-                    mlp_name='mlp',
-                    attn_norm_name='input_layernorm',
-                    mlp_norm_name='post_attention_layernorm',
-                    final_norm_name='norm',
-                    norm_type='rms',
-                    qkv_proj_name='query_key_value',
-                    o_proj_name='dense',
-                    gate_up_proj_name='gate_proj,up_proj',
-                    down_proj_name='down_proj',
-                    act_type='silu_and_mul',
-                    eps_name='rms_norm_eps',
-                    num_layers_name='num_layers',
-                    use_bias=(
-                    'config.use_qkv_bias', 'config.use_bias', 'config.use_bias',
-                    'config.use_bias'),
-                    )
-scaffold.generate(f'modeling_bailing{postfix}')
+scaffold = Scaffold(
+    model_name="Bailing",
+    emb_name="word_embeddings",
+    head_name="lm_head",
+    attn_name="attention",
+    mlp_name="mlp",
+    attn_norm_name="input_layernorm",
+    mlp_norm_name="post_attention_layernorm",
+    final_norm_name="norm",
+    norm_type="rms",
+    qkv_proj_name="query_key_value",
+    o_proj_name="dense",
+    gate_up_proj_name="gate_proj,up_proj",
+    down_proj_name="down_proj",
+    act_type="silu_and_mul",
+    eps_name="rms_norm_eps",
+    num_layers_name="num_layers",
+    use_bias=(
+        "config.use_qkv_bias",
+        "config.use_bias",
+        "config.use_bias",
+        "config.use_bias",
+    ),
+)
+scaffold.generate(f"modeling_bailing{postfix}")
 
 # # qwen
-scaffold = Scaffold(model_name='Qwen2',
-                    emb_name='embed_tokens',
-                    head_name='lm_head',
-                    attn_name='self_attn',
-                    mlp_name='mlp',
-                    attn_norm_name='input_layernorm',
-                    mlp_norm_name='post_attention_layernorm',
-                    final_norm_name='norm',
-                    norm_type='rms',
-                    qkv_proj_name='q_proj,k_proj,v_proj',
-                    o_proj_name='o_proj',
-                    gate_up_proj_name='gate_proj,up_proj',
-                    down_proj_name='down_proj',
-                    act_type='silu_and_mul',
-                    eps_name='rms_norm_eps',
-                    num_layers_name='num_hidden_layers',
-                    use_bias=(True, False, False, False),
-                    )
+scaffold = Scaffold(
+    model_name="Qwen2",
+    emb_name="embed_tokens",
+    head_name="lm_head",
+    attn_name="self_attn",
+    mlp_name="mlp",
+    attn_norm_name="input_layernorm",
+    mlp_norm_name="post_attention_layernorm",
+    final_norm_name="norm",
+    norm_type="rms",
+    qkv_proj_name="q_proj,k_proj,v_proj",
+    o_proj_name="o_proj",
+    gate_up_proj_name="gate_proj,up_proj",
+    down_proj_name="down_proj",
+    act_type="silu_and_mul",
+    eps_name="rms_norm_eps",
+    num_layers_name="num_hidden_layers",
+    use_bias=(True, False, False, False),
+)
 
-scaffold.generate(f'modeling_qwen2{postfix}')
+scaffold.generate(f"modeling_qwen2{postfix}")
 
 # deepseek_moe
-scaffold = Scaffold(model_name='Deepseek',
-                    emb_name='embed_tokens',
-                    head_name='lm_head',
-                    attn_name='self_attn',
-                    mlp_name='mlp',
-                    attn_norm_name='input_layernorm',
-                    mlp_norm_name='post_attention_layernorm',
-                    final_norm_name='norm',
-                    norm_type='rms',
-                    qkv_proj_name='q_proj,k_proj,v_proj',
-                    o_proj_name='o_proj',
-                    gate_up_proj_name='gate_proj,up_proj',
-                    down_proj_name='down_proj',
-                    act_type='silu_and_mul',
-                    eps_name='rms_norm_eps',
-                    num_layers_name='num_hidden_layers',
-                    use_bias=(False, False, False, False),
-                    moe=True,
-                    num_experts_name='n_routed_experts',
-                    num_shared_experts_name='n_shared_experts'
-                    )
-scaffold.generate(f'modeling_deepseek{postfix}')
+scaffold = Scaffold(
+    model_name="Deepseek",
+    emb_name="embed_tokens",
+    head_name="lm_head",
+    attn_name="self_attn",
+    mlp_name="mlp",
+    attn_norm_name="input_layernorm",
+    mlp_norm_name="post_attention_layernorm",
+    final_norm_name="norm",
+    norm_type="rms",
+    qkv_proj_name="q_proj,k_proj,v_proj",
+    o_proj_name="o_proj",
+    gate_up_proj_name="gate_proj,up_proj",
+    down_proj_name="down_proj",
+    act_type="silu_and_mul",
+    eps_name="rms_norm_eps",
+    num_layers_name="num_hidden_layers",
+    use_bias=(False, False, False, False),
+    moe=True,
+    num_experts_name="n_routed_experts",
+    num_shared_experts_name="n_shared_experts",
+)
+scaffold.generate(f"modeling_deepseek{postfix}")
 
 # # bailing_moe
-scaffold = Scaffold(model_name='BailingMoe',
-                    emb_name='word_embeddings',
-                    head_name='lm_head',
-                    attn_name='attention',
-                    mlp_name='mlp',
-                    attn_norm_name='input_layernorm',
-                    mlp_norm_name='post_attention_layernorm',
-                    final_norm_name='norm',
-                    norm_type='rms',
-                    qkv_proj_name='query_key_value',
-                    o_proj_name='dense',
-                    gate_up_proj_name='gate_proj,up_proj',
-                    down_proj_name='down_proj',
-                    act_type='silu_and_mul',
-                    eps_name='rms_norm_eps',
-                    num_layers_name='num_hidden_layers',
-                    use_bias=(
-                    'config.use_qkv_bias', 'config.use_bias', False, False),
-                    moe=True,
-                    num_experts_name='num_experts',
-                    num_shared_experts_name='num_shared_experts'
-                    )
-scaffold.generate(f'modeling_bailing_moe{postfix}')
+scaffold = Scaffold(
+    model_name="BailingMoe",
+    emb_name="word_embeddings",
+    head_name="lm_head",
+    attn_name="attention",
+    mlp_name="mlp",
+    attn_norm_name="input_layernorm",
+    mlp_norm_name="post_attention_layernorm",
+    final_norm_name="norm",
+    norm_type="rms",
+    qkv_proj_name="query_key_value",
+    o_proj_name="dense",
+    gate_up_proj_name="gate_proj,up_proj",
+    down_proj_name="down_proj",
+    act_type="silu_and_mul",
+    eps_name="rms_norm_eps",
+    num_layers_name="num_hidden_layers",
+    use_bias=("config.use_qkv_bias", "config.use_bias", False, False),
+    moe=True,
+    num_experts_name="num_experts",
+    num_shared_experts_name="num_shared_experts",
+)
+scaffold.generate(f"modeling_bailing_moe{postfix}")

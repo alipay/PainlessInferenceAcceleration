@@ -12,16 +12,16 @@ import triton.language as tl
 
 @triton.jit
 def sample_from_logit_kernel(
-        topk_values,
-        topk_indices,
-        temperature,
-        top_k,
-        top_p,
-        min_p,
-        buffers,
-        outputs,
-        max_top_k,
-        B: tl.constexpr
+    topk_values,
+    topk_indices,
+    temperature,
+    top_k,
+    top_p,
+    min_p,
+    buffers,
+    outputs,
+    max_top_k,
+    B: tl.constexpr,
 ):
     bid = tl.program_id(0)
     k = tl.load(top_k + bid)
@@ -34,8 +34,9 @@ def sample_from_logit_kernel(
     t = tl.load(temperature + bid)
     mp = tl.load(min_p + bid)
     indices = tl.arange(0, B)
-    values = tl.load(topk_values + bid * max_top_k + indices, mask=indices < k,
-                     other=-10000.0)
+    values = tl.load(
+        topk_values + bid * max_top_k + indices, mask=indices < k, other=-10000.0
+    )
     values = values / t
 
     others = tl.full((1,), 0.0, dtype=values.dtype)
@@ -75,11 +76,11 @@ def sample_from_logit_kernel(
 def sample_from_logit(logits, temperature, top_k, top_p, min_p, max_top_k):
     bs = logits.size(0)
     B = 2 ** int(math.log2(max_top_k - 1) + 1)
-    topk_values, topk_indices = torch.topk(logits, max_top_k, dim=-1,
-                                           largest=True, sorted=True)
+    topk_values, topk_indices = torch.topk(
+        logits, max_top_k, dim=-1, largest=True, sorted=True
+    )
     outputs = torch.zeros((bs,), dtype=topk_indices.dtype, device=logits.device)
-    buffers = -10000 * torch.ones((bs, B), dtype=logits.dtype,
-                                  device=logits.device)
+    buffers = -10000 * torch.ones((bs, B), dtype=logits.dtype, device=logits.device)
     grid = lambda META: (bs,)
     sample_from_logit_kernel[grid](
         topk_values,
@@ -93,6 +94,6 @@ def sample_from_logit(logits, temperature, top_k, top_p, min_p, max_top_k):
         max_top_k,
         B=B,
         num_warps=1,
-        num_stages=1
+        num_stages=1,
     )
     return outputs

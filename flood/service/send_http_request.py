@@ -13,8 +13,8 @@ url = "http://localhost:30010/generate"
 data = {"prompt": "hi" * 60, "max_length": 100}
 
 for response in requests.post(url, json=data, stream=True):
-    text = response.decode('utf-8').replace('\n\n', '')
-    print(text, flush=True, end='')
+    text = response.decode("utf-8").replace("\n\n", "")
+    print(text, flush=True, end="")
 
 
 # with requests.post(url, json=data, stream=True) as r:

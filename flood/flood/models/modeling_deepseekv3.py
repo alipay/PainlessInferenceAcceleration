@@ -28,29 +28,37 @@ from transformers.models.deepseek_v3.configuration_deepseek_v3 import DeepseekV3
 
 
 class DeepseekV3MLP(torch.nn.Module):
-    def __init__(self, config: PretrainedConfig, intermediate_size=None, layer_idx: int = 0):
+    def __init__(
+        self, config: PretrainedConfig, intermediate_size=None, layer_idx: int = 0
+    ):
         super().__init__()
         self.config = config
         self.layer_idx = layer_idx
         self.hidden_size = config.hidden_size
         self.intermediate_size = intermediate_size or config.intermediate_size
 
-        self.gate_proj = AutoLinear.from_pretrained(self.hidden_size, 
-                                                    self.intermediate_size, 
-                                                    bias=False, 
-                                                    config=config, 
-                                                    name='gate_proj')
-        self.up_proj = AutoLinear.from_pretrained(self.hidden_size, 
-                                                  self.intermediate_size, 
-                                                  bias=False, 
-                                                  config=config, 
-                                                  name='up_proj')
-            
-        self.down_proj = AutoLinear.from_pretrained(self.intermediate_size, 
-                                                    self.hidden_size, 
-                                                    bias=False, 
-                                                    config=config, 
-                                                    name='down_proj')
+        self.gate_proj = AutoLinear.from_pretrained(
+            self.hidden_size,
+            self.intermediate_size,
+            bias=False,
+            config=config,
+            name="gate_proj",
+        )
+        self.up_proj = AutoLinear.from_pretrained(
+            self.hidden_size,
+            self.intermediate_size,
+            bias=False,
+            config=config,
+            name="up_proj",
+        )
+
+        self.down_proj = AutoLinear.from_pretrained(
+            self.intermediate_size,
+            self.hidden_size,
+            bias=False,
+            config=config,
+            name="down_proj",
+        )
 
     def _flood_patch_func(self, kwargs=None):
         # if self.layer_idx == 0:
@@ -60,11 +68,11 @@ class DeepseekV3MLP(torch.nn.Module):
         self.down_proj.patch()
 
         self.gate_proj = None
-        delattr(self, 'gate_proj')
+        delattr(self, "gate_proj")
 
         self.up_proj = None
-        delattr(self, 'up_proj')
-            
+        delattr(self, "up_proj")
+
     def forward(self, x):
         gate_up = self.gate_up_proj(x)
         act = silu_and_mul(gate_up)
@@ -72,11 +80,7 @@ class DeepseekV3MLP(torch.nn.Module):
 
 
 class DeepseekV3MoE(torch.nn.Module):
-    def __init__(
-        self,
-        config: PretrainedConfig,
-        layer_idx: int = 0
-    ):
+    def __init__(self, config: PretrainedConfig, layer_idx: int = 0):
         super().__init__()
         self.config = config
         self.layer_idx = layer_idx
@@ -91,24 +95,33 @@ class DeepseekV3MoE(torch.nn.Module):
         exp_conf = copy.deepcopy(config)
         exp_conf.intermediate_size = config.moe_intermediate_size
 
-        modules = torch.nn.ModuleList([DeepseekV3MLP(exp_conf, layer_idx=-1)
-                                        for _ in range(self.n_routed_experts)])
-        self.experts = AutoExperts.from_pretrained(module_list=modules,
-                                                    hidden_size=exp_conf.hidden_size,
-                                                    intermediate_size=exp_conf.intermediate_size,
-                                                    num_expert=self.n_routed_experts,
-                                                    scoring_func='sigmoid',
-                                                    num_expert_group=self.num_expert_group,
-                                                    topk_group=self.topk_group,
-                                                    config=config
-                                                    )
+        modules = torch.nn.ModuleList(
+            [
+                DeepseekV3MLP(exp_conf, layer_idx=-1)
+                for _ in range(self.n_routed_experts)
+            ]
+        )
+        self.experts = AutoExperts.from_pretrained(
+            module_list=modules,
+            hidden_size=exp_conf.hidden_size,
+            intermediate_size=exp_conf.intermediate_size,
+            num_expert=self.n_routed_experts,
+            scoring_func="sigmoid",
+            num_expert_group=self.num_expert_group,
+            topk_group=self.topk_group,
+            config=config,
+        )
 
-        self.gate = AutoLinear.from_pretrained(config.hidden_size, 
-                                                    self.n_routed_experts, 
-                                                    bias=False,
-                                                    config=config, 
-                                                    name='gate')
-        self.gate.e_score_correction_bias = torch.nn.Parameter(torch.zeros(self.n_routed_experts))
+        self.gate = AutoLinear.from_pretrained(
+            config.hidden_size,
+            self.n_routed_experts,
+            bias=False,
+            config=config,
+            name="gate",
+        )
+        self.gate.e_score_correction_bias = torch.nn.Parameter(
+            torch.zeros(self.n_routed_experts)
+        )
 
         im_sz = config.moe_intermediate_size * config.n_shared_experts
         share_conf = copy.deepcopy(config)
@@ -127,15 +140,19 @@ class DeepseekV3MoE(torch.nn.Module):
 
         router_logits = self.gate(hidden_states)
 
-        final_hidden_states = self.experts(hidden_states,
-                                        router_logits,
-                                        self.top_k,
-                                        renormalize=self.norm_topk_prob,
-                                        e_score_correction_bias=self.gate.e_score_correction_bias,
-                                        )
-        final_hidden_states = final_hidden_states * self.routed_scaling_factor + shared_output
+        final_hidden_states = self.experts(
+            hidden_states,
+            router_logits,
+            self.top_k,
+            renormalize=self.norm_topk_prob,
+            e_score_correction_bias=self.gate.e_score_correction_bias,
+        )
+        final_hidden_states = (
+            final_hidden_states * self.routed_scaling_factor + shared_output
+        )
 
         return final_hidden_states.view(num_tokens, hidden_dim)
+
 
 class DeepseekV3Attention(torch.nn.Module):
     def __init__(self, config: PretrainedConfig, layer_idx: int = 0):
@@ -156,70 +173,84 @@ class DeepseekV3Attention(torch.nn.Module):
         self.qk_nope_head_dim = config.qk_nope_head_dim
         self.q_head_dim = config.qk_nope_head_dim + config.qk_rope_head_dim
 
-
         self.q_a_proj = AutoLinear.from_pretrained(
-                self.hidden_size, config.q_lora_rank, bias=config.attention_bias, config=config
-            )
+            self.hidden_size,
+            config.q_lora_rank,
+            bias=config.attention_bias,
+            config=config,
+        )
         self.q_a_layernorm = RMSNorm(config.q_lora_rank, eps=1e-6)
         self.q_b_proj = AutoLinear.from_pretrained(
-            config.q_lora_rank, self.num_heads * self.q_head_dim, bias=False, config=config
+            config.q_lora_rank,
+            self.num_heads * self.q_head_dim,
+            bias=False,
+            config=config,
         )
-
 
         self.kv_a_proj_with_mqa = AutoLinear.from_pretrained(
             self.hidden_size,
             config.kv_lora_rank + config.qk_rope_head_dim,
             bias=config.attention_bias,
-            config=config
+            config=config,
         )
         self.kv_a_layernorm = RMSNorm(config.kv_lora_rank, eps=1e-6)
         self.kv_b_proj = AutoLinear.from_pretrained(
             config.kv_lora_rank,
-            self.num_heads * (self.q_head_dim - self.qk_rope_head_dim + self.v_head_dim),
-            bias=False, 
-            config=config
+            self.num_heads
+            * (self.q_head_dim - self.qk_rope_head_dim + self.v_head_dim),
+            bias=False,
+            config=config,
         )
 
         self.o_proj = AutoLinear.from_pretrained(
             self.num_heads * self.v_head_dim,
             self.hidden_size,
-            bias=config.attention_bias, 
-            config=config
+            bias=config.attention_bias,
+            config=config,
         )
 
         self.softmax_scale = self.q_head_dim ** (-0.5)
 
         self.rope = AutoRope.from_pretrained(config)
-        
-        self.attention =  None
+
+        self.attention = None
 
     def flood_patch_func(self, kwargs=None):
         if self.layer_idx == 0:
-            print('patch Attention')
+            print("patch Attention")
 
         if kwargs is None:
             kwargs = {}
-        cache_dtype = kwargs.get('cache_dtype', None)
-        interleave_value = kwargs.get('interleave_value', False)
+        cache_dtype = kwargs.get("cache_dtype", None)
+        interleave_value = kwargs.get("interleave_value", False)
         if interleave_value:
-            AutoAttention.interleave(self.qkv_proj, 
-                                     self.num_heads, 
-                                     self.num_key_value_heads, 
-                                     self.head_dim)
+            AutoAttention.interleave(
+                self.qkv_proj, self.num_heads, self.num_key_value_heads, self.head_dim
+            )
 
-        kernels = kwargs.get('kernels', ['sa'])
-        self.attention = AutoAttention.from_pretrained(cache_dtype, 
-                                                       layer_idx=self.layer_idx, 
-                                                       kernels=kernels,
-                                                       softmax_scale=self.softmax_scale)
+        kernels = kwargs.get("kernels", ["sa"])
+        self.attention = AutoAttention.from_pretrained(
+            cache_dtype,
+            layer_idx=self.layer_idx,
+            kernels=kernels,
+            softmax_scale=self.softmax_scale,
+        )
         # dequant the weight
-        if self.kv_b_proj.weight.data.dtype == torch.float8_e4m3fn:     
-            scale_dtype = self.kv_b_proj.weight_scale_inv.dtype  
+        if self.kv_b_proj.weight.data.dtype == torch.float8_e4m3fn:
+            scale_dtype = self.kv_b_proj.weight_scale_inv.dtype
             out_features, in_features = self.kv_b_proj.weight.data.shape
-            weight = self.kv_b_proj.weight.data.view(out_features//128, 128, in_features//128, 128)
-            weight_sacle_inv = self.kv_b_proj.weight_scale_inv.view(out_features//128, 1, in_features//128, 1)
+            weight = self.kv_b_proj.weight.data.view(
+                out_features // 128, 128, in_features // 128, 128
+            )
+            weight_sacle_inv = self.kv_b_proj.weight_scale_inv.view(
+                out_features // 128, 1, in_features // 128, 1
+            )
             dequant_weight = weight.to(scale_dtype) * weight_sacle_inv
-            self.kv_b_proj.weight.data = dequant_weight.view(out_features, in_features).contiguous().to(cache_dtype)
+            self.kv_b_proj.weight.data = (
+                dequant_weight.view(out_features, in_features)
+                .contiguous()
+                .to(cache_dtype)
+            )
             del self.kv_b_proj.weight_scale_inv
 
     def forward(
@@ -232,35 +263,45 @@ class DeepseekV3Attention(torch.nn.Module):
     ) -> torch.Tensor:
 
         q_len = hidden_states.size(0)
-        batch_meta_info = kwargs['batch_meta_info']
+        batch_meta_info = kwargs["batch_meta_info"]
 
         q = self.q_b_proj(self.q_a_layernorm(self.q_a_proj(hidden_states)))
         q = q.view(q_len, self.num_heads, self.q_head_dim)
         q_nope, q_pe = torch.split(
             q, [self.qk_nope_head_dim, self.qk_rope_head_dim], dim=-1
         )
-        qa = torch.empty((q_len, self.num_heads, self.kv_lora_rank+self.qk_rope_head_dim), device=q.device, dtype=q.dtype)
+        qa = torch.empty(
+            (q_len, self.num_heads, self.kv_lora_rank + self.qk_rope_head_dim),
+            device=q.device,
+            dtype=q.dtype,
+        )
 
         kv = self.kv_a_proj_with_mqa(hidden_states)
-        kv[:,:self.kv_lora_rank] = self.kv_a_layernorm(kv[:,:self.kv_lora_rank])
-        self.rope(q_pe, kv[:,None,self.kv_lora_rank:], batch_meta_info.q_offsets, batch_meta_info.position_ids)
-        qa[:,:,self.kv_lora_rank:] = q_pe
+        kv[:, : self.kv_lora_rank] = self.kv_a_layernorm(kv[:, : self.kv_lora_rank])
+        self.rope(
+            q_pe,
+            kv[:, None, self.kv_lora_rank :],
+            batch_meta_info.q_offsets,
+            batch_meta_info.position_ids,
+        )
+        qa[:, :, self.kv_lora_rank :] = q_pe
 
-        w = self.kv_b_proj.weight.data.view(128,2,128, self.kv_lora_rank).to(q_nope.dtype)
-        w0 = w[:,0]
-        w1 = w[:,1]
+        w = self.kv_b_proj.weight.data.view(128, 2, 128, self.kv_lora_rank).to(
+            q_nope.dtype
+        )
+        w0 = w[:, 0]
+        w1 = w[:, 1]
         # q_nope: [q_len, head_num, dim]
         # w0: [head_num, dim, lora]
-        qa[:,:,:self.kv_lora_rank] = torch.einsum("lhd,hdr->lhr", q_nope, w0)
+        qa[:, :, : self.kv_lora_rank] = torch.einsum("lhd,hdr->lhr", q_nope, w0)
 
         # attn_output:[q_len,head_num,lora]
-        attn_output = self.attention(qa, kv, 
-                                     batch_meta_info, past_key_value)
+        attn_output = self.attention(qa, kv, batch_meta_info, past_key_value)
         # attn_output:[q_len,head_num,dim]
         attn_output = torch.einsum("lhr,hdr->lhd", attn_output, w1)
 
         # model may have different hidden_size
-        attn_output = attn_output.reshape(q_len, self.num_heads*self.v_head_dim)  
+        attn_output = attn_output.reshape(q_len, self.num_heads * self.v_head_dim)
         attn_output = self.o_proj(attn_output)
 
         return attn_output
@@ -273,14 +314,20 @@ class DeepseekV3DecoderLayer(torch.nn.Module):
         self.layer_idx = layer_idx
         self.n_layer = config.num_hidden_layers
 
-        # use layer_idx==None to indicate that the layer does not 
+        # use layer_idx==None to indicate that the layer does not
         # initialized on the current node, and use layer_idx==-1
         # to indicate the final layer of the model
         if self.layer_idx is not None:
             self.self_attn = DeepseekV3Attention(config, layer_idx=layer_idx)
-            self.mlp = DeepseekV3MoE(config, layer_idx=layer_idx) if self.layer_idx >= config.first_k_dense_replace else DeepseekV3MLP(config, layer_idx=layer_idx)
+            self.mlp = (
+                DeepseekV3MoE(config, layer_idx=layer_idx)
+                if self.layer_idx >= config.first_k_dense_replace
+                else DeepseekV3MLP(config, layer_idx=layer_idx)
+            )
             self.input_layernorm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
-            self.post_attention_layernorm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
+            self.post_attention_layernorm = RMSNorm(
+                config.hidden_size, eps=config.rms_norm_eps
+            )
 
     def forward(
         self,
@@ -303,12 +350,15 @@ class DeepseekV3DecoderLayer(torch.nn.Module):
             attention_mask=attention_mask,
             position_ids=position_ids,
             past_key_value=past_key_value,
-            batch_meta_info=batch_meta_info
+            batch_meta_info=batch_meta_info,
         )
 
         hidden_states += residual
 
-        if self.layer_idx == self.n_layer - 1 and batch_meta_info.logit_indices is not None:
+        if (
+            self.layer_idx == self.n_layer - 1
+            and batch_meta_info.logit_indices is not None
+        ):
             if batch_meta_info.logit_indices.numel() == 0:
                 return
             hidden_states = hidden_states[batch_meta_info.logit_indices]
@@ -337,16 +387,18 @@ class DeepseekV3Model(PreTrainedModel):
         self.padding_idx = config.pad_token_id
         self.vocab_size = config.vocab_size
 
-        self.rank = int(os.environ.get('FLOOD_RANK', '0'))
-        self.world_size = int(os.environ.get('FLOOD_WORLD_SIZE', '1'))
+        self.rank = int(os.environ.get("FLOOD_RANK", "0"))
+        self.world_size = int(os.environ.get("FLOOD_WORLD_SIZE", "1"))
 
         if self.rank == 0:
-            self.embed_tokens = AutoEmbedding.from_pretrained(config, 
-                                                                config.vocab_size, 
-                                                                config.hidden_size, 
-                                                                padding_idx=self.padding_idx)
+            self.embed_tokens = AutoEmbedding.from_pretrained(
+                config,
+                config.vocab_size,
+                config.hidden_size,
+                padding_idx=self.padding_idx,
+            )
         else:
-            self.embed_tokens = None 
+            self.embed_tokens = None
 
         n_layer = config.num_hidden_layers
         layers = []
@@ -374,14 +426,16 @@ class DeepseekV3ForCausalLM(PreTrainedModel):
         self.model = DeepseekV3Model(config)
         self.vocab_size = config.vocab_size
 
-        self.rank = int(os.environ.get('FLOOD_RANK', '0'))
-        self.world_size = int(os.environ.get('FLOOD_WORLD_SIZE', '1'))
+        self.rank = int(os.environ.get("FLOOD_RANK", "0"))
+        self.world_size = int(os.environ.get("FLOOD_WORLD_SIZE", "1"))
         if self.rank == self.world_size - 1:
-            self.lm_head = AutoLinear.from_pretrained(config.hidden_size, 
-                                                    config.vocab_size, 
-                                                    bias=False, 
-                                                    config=config, 
-                                                    name='lm_head')        
+            self.lm_head = AutoLinear.from_pretrained(
+                config.hidden_size,
+                config.vocab_size,
+                bias=False,
+                config=config,
+                name="lm_head",
+            )
         else:
             self.lm_head = None
         self.sampler = Sampler()
@@ -405,10 +459,9 @@ class DeepseekV3ForCausalLM(PreTrainedModel):
         return self.model
 
     def flood_patch_func(self, kwargs=None):
-        if hasattr(self.lm_head, 'patch'):
-            print('patch lm_head')            
+        if hasattr(self.lm_head, "patch"):
+            print("patch lm_head")
             self.lm_head.patch()
-
 
     @torch.inference_mode()
     def forward(
@@ -419,10 +472,10 @@ class DeepseekV3ForCausalLM(PreTrainedModel):
         position_ids: Optional[torch.LongTensor] = None,
         past_key_values: Optional[Cache] = None,
         inputs_embeds: Optional[torch.FloatTensor] = None,
-        batch_meta_info : Batch = None,
-        device_list : List = None,
-        sync_layers : List = None,
-        streams : List = None
+        batch_meta_info: Batch = None,
+        device_list: List = None,
+        sync_layers: List = None,
+        streams: List = None,
     ) -> List:
 
         n_devices = len(device_list)
@@ -451,7 +504,7 @@ class DeepseekV3ForCausalLM(PreTrainedModel):
                         past_key_value=past_key_values,
                         batch_meta_info=batch_meta_info,
                     )
-                if i < n_devices-1:
+                if i < n_devices - 1:
                     device = torch.device(i + 1)
                     hidden_states = hidden_states.to(device, non_blocking=True)
                     batch_meta_info.to(device, non_blocking=True)

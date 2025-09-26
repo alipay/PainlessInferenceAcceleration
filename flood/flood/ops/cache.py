@@ -50,46 +50,49 @@ import flood_cuda
 #     return kv_out
 
 
-
 def update_cache(
-        k_out: torch.Tensor,
-        v_out: torch.Tensor,
-        key_states: torch.Tensor,
-        value_states: torch.Tensor,
-        indices: torch.Tensor
+    k_out: torch.Tensor,
+    v_out: torch.Tensor,
+    key_states: torch.Tensor,
+    value_states: torch.Tensor,
+    indices: torch.Tensor,
 ):
-    flood_cuda.update_cache(k_out, v_out,
-                            key_states, value_states,
-                            indices, 
-                            key_states.size(0),
-                            key_states.size(1) * key_states.size(2),
-                            key_states.stride(0) // 8,
-                            value_states.stride(0) // 8,
-                            k_out.stride(0) // 8
-                            )
+    flood_cuda.update_cache(
+        k_out,
+        v_out,
+        key_states,
+        value_states,
+        indices,
+        key_states.size(0),
+        key_states.size(1) * key_states.size(2),
+        key_states.stride(0) // 8,
+        value_states.stride(0) // 8,
+        k_out.stride(0) // 8,
+    )
 
 
 def update_fusion_cache(
-        kv_out: torch.Tensor,
-        kv_states: torch.Tensor,
-        indices: torch.Tensor
+    kv_out: torch.Tensor, kv_states: torch.Tensor, indices: torch.Tensor
 ):
-    flood_cuda.update_fusion_cache(kv_out, kv_states,
-                                   indices, 
-                                   kv_states.size(0),
-                                   kv_states.size(1),
-                                   kv_states.stride(0) // 8,
-                                   kv_out.stride(0) // 8)
+    flood_cuda.update_fusion_cache(
+        kv_out,
+        kv_states,
+        indices,
+        kv_states.size(0),
+        kv_states.size(1),
+        kv_states.stride(0) // 8,
+        kv_out.stride(0) // 8,
+    )
 
 
 def quant_and_update_cache(
-        q_out: torch.Tensor,
-        k_out: torch.Tensor,
-        v_out: torch.Tensor,
-        query_states: torch.Tensor,
-        key_states: torch.Tensor,
-        value_states: torch.Tensor,
-        indices: torch.Tensor
+    q_out: torch.Tensor,
+    k_out: torch.Tensor,
+    v_out: torch.Tensor,
+    query_states: torch.Tensor,
+    key_states: torch.Tensor,
+    value_states: torch.Tensor,
+    indices: torch.Tensor,
 ):
     n_token = key_states.size(0)
     kv_dim = key_states.size(1) * key_states.size(2)
@@ -98,13 +101,18 @@ def quant_and_update_cache(
     kv_input_stride = key_states.stride(0) // 8
     kv_output_stride = k_out.stride(0) // 8
     q_stride = query_states.stride(0) // 8
-    flood_cuda.quant_to_fp8_and_update_cache(q_out, k_out, v_out,
-                                             query_states, key_states,
-                                             value_states,
-                                             indices,
-                                             n_token, group, kv_dim, 
-                                             q_stride,
-                                             kv_input_stride, 
-                                             kv_output_stride
-                                             )
-
+    flood_cuda.quant_to_fp8_and_update_cache(
+        q_out,
+        k_out,
+        v_out,
+        query_states,
+        key_states,
+        value_states,
+        indices,
+        n_token,
+        group,
+        kv_dim,
+        q_stride,
+        kv_input_stride,
+        kv_output_stride,
+    )

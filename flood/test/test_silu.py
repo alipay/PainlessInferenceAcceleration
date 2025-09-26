@@ -23,7 +23,7 @@ def torch_silu(x: torch.Tensor) -> torch.Tensor:
 
 def flood_silu(x: torch.Tensor) -> torch.Tensor:
     d = x.shape[-1] // 2
-    output_shape = (x.shape[:-1] + (d,))
+    output_shape = x.shape[:-1] + (d,)
     out = torch.empty(output_shape, dtype=x.dtype, device=x.device)
     flood_cuda.silu_and_mul(out, x)
     return out
@@ -33,6 +33,4 @@ torch_out = torch_silu(x)
 
 flood_out = flood_silu(x)
 
-torch.testing.assert_close(
-    torch_out, flood_out, rtol=1e-4, atol=1e-4
-)
+torch.testing.assert_close(torch_out, flood_out, rtol=1e-4, atol=1e-4)

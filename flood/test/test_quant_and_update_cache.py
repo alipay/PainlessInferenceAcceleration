@@ -9,8 +9,8 @@ import torch
 
 from flood.ops import quant_and_update_cache
 
-if __name__ == '__main__':
-    device = torch.device('cuda:0')
+if __name__ == "__main__":
+    device = torch.device("cuda:0")
     dtype = torch.bfloat16
     fp8 = torch.float8_e4m3fn
 
@@ -18,13 +18,12 @@ if __name__ == '__main__':
     qo_head = 28
     kv_head = 4
     dim = 128
-    qkv = torch.randn(ql, qo_head + 2 * kv_head, dim, dtype=dtype,
-                      device=device)
+    qkv = torch.randn(ql, qo_head + 2 * kv_head, dim, dtype=dtype, device=device)
     q = qkv[:, :qo_head]
-    k = qkv[:, qo_head:qo_head + kv_head]
-    v = qkv[:, qo_head + kv_head:]
+    k = qkv[:, qo_head : qo_head + kv_head]
+    v = qkv[:, qo_head + kv_head :]
     # dummy = torch.arange(ql, dtype=torch.int32, device=device).view(-1,1,1).to(dtype)
-    # k[:] = dummy 
+    # k[:] = dummy
     # v[:] = dummy
 
     q8 = q.to(fp8)

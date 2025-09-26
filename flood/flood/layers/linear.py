@@ -7,167 +7,210 @@ import torch
 import torch.nn.functional as F
 from torch.nn import Parameter
 
-from flood.ops.quantization import scaled_fp8_quant, static_int8_quant, dynamic_int8_quant
+from flood.ops.quantization import (
+    scaled_fp8_quant,
+    static_int8_quant,
+    dynamic_int8_quant,
+)
 from flood.ops.quantization import tile_quant, per_token_group_quant_fp8
-from flood.ops.gemm import  dynamic_int8_gemm_nt,static_int8_gemm_nt,fp8_tb_gemm, w8a8_block_fp8_matmul
+from flood.ops.gemm import (
+    dynamic_int8_gemm_nt,
+    static_int8_gemm_nt,
+    fp8_tb_gemm,
+    w8a8_block_fp8_matmul,
+)
 
 
-
-class AutoLinear():
+class AutoLinear:
 
     @classmethod
-    def from_pretrained(cls,
-                        in_features,
-                        out_features,
-                        weight=None,
-                        bias=None,
-                        device=None,
-                        dtype=None,
-                        input_scale=None,
-                        weight_scale=None,
-                        weight_dtype=None,
-                        bias_dtype=None,
-                        config=None,
-                        name=None):
+    def from_pretrained(
+        cls,
+        in_features,
+        out_features,
+        weight=None,
+        bias=None,
+        device=None,
+        dtype=None,
+        input_scale=None,
+        weight_scale=None,
+        weight_dtype=None,
+        bias_dtype=None,
+        config=None,
+        name=None,
+    ):
 
         quant_type = AutoLinear.quant_type(config, name)
 
         if quant_type is None:
-            return NativeLinear(in_features,
-                                out_features,
-                                bias=bias,
-                                weight=weight,
-                                device=device,
-                                dtype=dtype)
-        elif quant_type == 'dynamic_fp8':
-            return DynamicW8A8Fp8Linear(in_features,
-                                        out_features,
-                                        weight=weight,
-                                        bias=bias,
-                                        device=device,
-                                        input_scale=input_scale,
-                                        weight_scale=weight_scale,
-                                        weight_dtype=weight_dtype,
-                                        bias_dtype=bias_dtype,
-                                        config=config)
-        elif quant_type == 'static_fp8':
-            return StaticW8A8Fp8Linear(in_features,
-                                       out_features,
-                                       weight=weight,
-                                       bias=bias,
-                                       device=device,
-                                       input_scale=input_scale,
-                                       weight_scale=weight_scale,
-                                       weight_dtype=weight_dtype,
-                                       bias_dtype=bias_dtype,
-                                       config=config)
-        elif quant_type == 'dynamic_int8':
-            return DynamicW8A8Int8Linear(in_features,
-                                         out_features,
-                                         weight=weight,
-                                         bias=bias,
-                                         device=device,
-                                         input_scale=input_scale,
-                                         weight_scale=weight_scale,
-                                         weight_dtype=weight_dtype,
-                                         bias_dtype=bias_dtype,
-                                         config=config)
-        elif quant_type == 'static_int8':
-            return StaticW8A8Int8Linear(in_features,
-                                        out_features,
-                                        weight=weight,
-                                        bias=bias,
-                                        device=device,
-                                        input_scale=input_scale,
-                                        weight_scale=weight_scale,
-                                        weight_dtype=weight_dtype,
-                                        bias_dtype=bias_dtype,
-                                        config=config)
-        elif quant_type == 'tb_fp8':
-            return DynamicTbW8A8Fp8Linear(in_features,
-                                        out_features,
-                                        weight=weight,
-                                        bias=bias,
-                                        device=device,
-                                        input_scale=input_scale,
-                                        weight_scale_inv=weight_scale,
-                                        weight_dtype=weight_dtype,
-                                        bias_dtype=bias_dtype,
-                                        config=config)
-        elif quant_type == 'block_fp8':
-            return DynamicBlockW8A8Fp8Linear(in_features,
-                                        out_features,
-                                        weight=weight,
-                                        bias=bias,
-                                        device=device,
-                                        input_scale=input_scale,
-                                        weight_scale_inv=weight_scale,
-                                        weight_dtype=weight_dtype,
-                                        bias_dtype=bias_dtype,
-                                        config=config)
+            return NativeLinear(
+                in_features,
+                out_features,
+                bias=bias,
+                weight=weight,
+                device=device,
+                dtype=dtype,
+            )
+        elif quant_type == "dynamic_fp8":
+            return DynamicW8A8Fp8Linear(
+                in_features,
+                out_features,
+                weight=weight,
+                bias=bias,
+                device=device,
+                input_scale=input_scale,
+                weight_scale=weight_scale,
+                weight_dtype=weight_dtype,
+                bias_dtype=bias_dtype,
+                config=config,
+            )
+        elif quant_type == "static_fp8":
+            return StaticW8A8Fp8Linear(
+                in_features,
+                out_features,
+                weight=weight,
+                bias=bias,
+                device=device,
+                input_scale=input_scale,
+                weight_scale=weight_scale,
+                weight_dtype=weight_dtype,
+                bias_dtype=bias_dtype,
+                config=config,
+            )
+        elif quant_type == "dynamic_int8":
+            return DynamicW8A8Int8Linear(
+                in_features,
+                out_features,
+                weight=weight,
+                bias=bias,
+                device=device,
+                input_scale=input_scale,
+                weight_scale=weight_scale,
+                weight_dtype=weight_dtype,
+                bias_dtype=bias_dtype,
+                config=config,
+            )
+        elif quant_type == "static_int8":
+            return StaticW8A8Int8Linear(
+                in_features,
+                out_features,
+                weight=weight,
+                bias=bias,
+                device=device,
+                input_scale=input_scale,
+                weight_scale=weight_scale,
+                weight_dtype=weight_dtype,
+                bias_dtype=bias_dtype,
+                config=config,
+            )
+        elif quant_type == "tb_fp8":
+            return DynamicTbW8A8Fp8Linear(
+                in_features,
+                out_features,
+                weight=weight,
+                bias=bias,
+                device=device,
+                input_scale=input_scale,
+                weight_scale_inv=weight_scale,
+                weight_dtype=weight_dtype,
+                bias_dtype=bias_dtype,
+                config=config,
+            )
+        elif quant_type == "block_fp8":
+            return DynamicBlockW8A8Fp8Linear(
+                in_features,
+                out_features,
+                weight=weight,
+                bias=bias,
+                device=device,
+                input_scale=input_scale,
+                weight_scale_inv=weight_scale,
+                weight_dtype=weight_dtype,
+                bias_dtype=bias_dtype,
+                config=config,
+            )
         else:
-            raise ValueError(f'unknown quant_type:{quant_type}')
+            raise ValueError(f"unknown quant_type:{quant_type}")
 
     @staticmethod
     def quant_type(config, layer_name):
-        if not config or not hasattr(config,
-                                     'quantization_config') or config.quantization_config is None:
+        if (
+            not config
+            or not hasattr(config, "quantization_config")
+            or config.quantization_config is None
+        ):
             return None
 
         conf = config
-        if hasattr(config, '_asdict'):
+        if hasattr(config, "_asdict"):
             conf = config._asdict()
-        if hasattr(config, 'to_dict') and callable(config.to_dict):
+        if hasattr(config, "to_dict") and callable(config.to_dict):
             conf = config.to_dict()
 
-        conf = conf['quantization_config']
-        if hasattr(conf, 'to_dict') and callable(conf.to_dict):
+        conf = conf["quantization_config"]
+        if hasattr(conf, "to_dict") and callable(conf.to_dict):
             conf = conf.to_dict()
-        if layer_name == 'gate':
+        if layer_name == "gate":
             return None
-        if 'weight_block_size' in conf:
-            if layer_name == 'lm_head':
+        if "weight_block_size" in conf:
+            if layer_name == "lm_head":
                 return None
             else:
-                return 'block_fp8'
-        if layer_name in conf.get('ignore',[]):
+                return "block_fp8"
+        if layer_name in conf.get("ignore", []):
             return None
-        conf = conf['config_groups']['group_0']
-        if conf['input_activations']['dynamic'] and not conf['weights'][
-            'dynamic'] and conf['weights']['type'] == 'float' and \
-                conf['weights']['num_bits'] == 8:
-            return 'dynamic_fp8'
-        if not conf['input_activations']['dynamic'] and not conf['weights'][
-            'dynamic'] and conf['weights']['type'] == 'float' and \
-                conf['weights']['num_bits'] == 8:
-            return 'static_fp8'
-        if conf['input_activations']['dynamic'] and not conf['weights'][
-            'dynamic'] and conf['weights']['type'] == 'int' and conf['weights'][
-            'num_bits'] == 8 and conf['input_activations']['symmetric'] and \
-                conf['weights']['symmetric']:
-            return 'dynamic_int8'
-        if not conf['input_activations']['dynamic'] and not conf['weights'][
-            'dynamic'] and conf['weights']['type'] == 'int' and conf['weights'][
-            'num_bits'] == 8 and conf['input_activations']['symmetric'] and \
-                conf['weights']['symmetric']:
-            return 'static_int8'
+        conf = conf["config_groups"]["group_0"]
+        if (
+            conf["input_activations"]["dynamic"]
+            and not conf["weights"]["dynamic"]
+            and conf["weights"]["type"] == "float"
+            and conf["weights"]["num_bits"] == 8
+        ):
+            return "dynamic_fp8"
+        if (
+            not conf["input_activations"]["dynamic"]
+            and not conf["weights"]["dynamic"]
+            and conf["weights"]["type"] == "float"
+            and conf["weights"]["num_bits"] == 8
+        ):
+            return "static_fp8"
+        if (
+            conf["input_activations"]["dynamic"]
+            and not conf["weights"]["dynamic"]
+            and conf["weights"]["type"] == "int"
+            and conf["weights"]["num_bits"] == 8
+            and conf["input_activations"]["symmetric"]
+            and conf["weights"]["symmetric"]
+        ):
+            return "dynamic_int8"
+        if (
+            not conf["input_activations"]["dynamic"]
+            and not conf["weights"]["dynamic"]
+            and conf["weights"]["type"] == "int"
+            and conf["weights"]["num_bits"] == 8
+            and conf["input_activations"]["symmetric"]
+            and conf["weights"]["symmetric"]
+        ):
+            return "static_int8"
         else:
             return None
 
 
 class NativeLinear(torch.nn.Module):
-    def __init__(self,
-                 in_features,
-                 out_features,
-                 weight=None,
-                 bias=None,
-                 dtype=None,
-                 input_scale=None,
-                 weight_scale=None,
-                 device=None,
-                 weight_dtype=None,
-                 bias_dtype=None,
-                 config=None):
+    def __init__(
+        self,
+        in_features,
+        out_features,
+        weight=None,
+        bias=None,
+        dtype=None,
+        input_scale=None,
+        weight_scale=None,
+        device=None,
+        weight_dtype=None,
+        bias_dtype=None,
+        config=None,
+    ):
         super().__init__()
         self.in_features = in_features
         self.out_features = out_features
@@ -187,8 +230,7 @@ class NativeLinear(torch.nn.Module):
         else:
             self.weight = weight
 
-        assert bias is None or isinstance(bias, bool) or isinstance(bias,
-                                                                    Parameter)
+        assert bias is None or isinstance(bias, bool) or isinstance(bias, Parameter)
         if bias is None or isinstance(bias, Parameter):
             self.bias = bias
         elif bias is False:
@@ -221,61 +263,73 @@ class NativeLinear(torch.nn.Module):
         assert min(in_features) == max(in_features)
 
         weight = Parameter(torch.cat(weights, dim=0), requires_grad=False)
-        bias = None if any([b is None for b in biases]) else Parameter(
-            torch.cat(biases, dim=0), requires_grad=False)
+        bias = (
+            None
+            if any([b is None for b in biases])
+            else Parameter(torch.cat(biases, dim=0), requires_grad=False)
+        )
         in_features = in_features[0]
         out_features = sum(out_features)
         config = linears[0].config
 
-        return NativeLinear(in_features,
-                            out_features,
-                            weight=weight,
-                            bias=bias,
-                            device=device,
-                            dtype=dtype,
-                            config=config)
+        return NativeLinear(
+            in_features,
+            out_features,
+            weight=weight,
+            bias=bias,
+            device=device,
+            dtype=dtype,
+            config=config,
+        )
 
     def patch(self):
         pass
 
     def __repr__(self):
-        return (f'Linear(in_features={self.in_features}, '
-                f'out_features={self.out_features}, bias={self.bias is not None})')
+        return (
+            f"Linear(in_features={self.in_features}, "
+            f"out_features={self.out_features}, bias={self.bias is not None})"
+        )
 
-    def retype(self, dtype=torch.float8_e4m3fn, quant_type='dynamic'):
-        if dtype == torch.float8_e4m3fn and quant_type == 'dynamic':
+    def retype(self, dtype=torch.float8_e4m3fn, quant_type="dynamic"):
+        if dtype == torch.float8_e4m3fn and quant_type == "dynamic":
             weight_scale = torch.nn.Parameter(
-                torch.max(self.weight.data.abs(), dim=1,
-                          keepdim=True).values.float() / 448.0)
+                torch.max(self.weight.data.abs(), dim=1, keepdim=True).values.float()
+                / 448.0
+            )
             weight = torch.nn.Parameter(
-                (self.weight / weight_scale.to(self.weight.dtype)).to(
-                    dtype).t(), requires_grad=False)
+                (self.weight / weight_scale.to(self.weight.dtype)).to(dtype).t(),
+                requires_grad=False,
+            )
             self.weight = None
-            delattr(self, 'weight')
-            return DynamicW8A8Fp8Linear(self.in_features,
-                                        self.out_features,
-                                        weight=weight,
-                                        bias=self.bias,
-                                        weight_scale=weight_scale,
-                                        device=self.device)
+            delattr(self, "weight")
+            return DynamicW8A8Fp8Linear(
+                self.in_features,
+                self.out_features,
+                weight=weight,
+                bias=self.bias,
+                weight_scale=weight_scale,
+                device=self.device,
+            )
         else:
-            raise ValueError(
-                f"unknown dtype:{dtype} and quant_type:{quant_type}")
+            raise ValueError(f"unknown dtype:{dtype} and quant_type:{quant_type}")
 
 
 class DynamicW8A8Fp8Linear(torch.nn.Module):
-    def __init__(self,
-                 in_features,
-                 out_features,
-                 weight=None,
-                 bias=None,
-                 dtype=None,
-                 input_scale=None,
-                 weight_scale=None,
-                 device=None,
-                 weight_dtype=None,
-                 bias_dtype=None,
-                 config=None):
+    def __init__(
+        self,
+        in_features,
+        out_features,
+        weight=None,
+        bias=None,
+        dtype=None,
+        input_scale=None,
+        weight_scale=None,
+        device=None,
+        weight_dtype=None,
+        bias_dtype=None,
+        config=None,
+    ):
         super().__init__()
         self.in_features = in_features
         self.out_features = out_features
@@ -290,14 +344,12 @@ class DynamicW8A8Fp8Linear(torch.nn.Module):
 
         assert weight is None or isinstance(weight, Parameter)
         if weight is None:
-            data = torch.empty(out_features, in_features,
-                               dtype=self.weight_dtype)
+            data = torch.empty(out_features, in_features, dtype=self.weight_dtype)
             self.weight = Parameter(data, requires_grad=False)
         else:
             self.weight = weight
 
-        assert bias is None or isinstance(bias, bool) or isinstance(bias,
-                                                                    Parameter)
+        assert bias is None or isinstance(bias, bool) or isinstance(bias, Parameter)
         if bias is None or isinstance(bias, Parameter):
             self.bias = bias
         elif bias is False:
@@ -309,8 +361,8 @@ class DynamicW8A8Fp8Linear(torch.nn.Module):
         assert weight_scale is None or isinstance(weight_scale, Parameter)
         if weight_scale is None:
             weight_scale = Parameter(
-                torch.ones(out_features, 1, dtype=torch.float32),
-                requires_grad=False)
+                torch.ones(out_features, 1, dtype=torch.float32), requires_grad=False
+            )
         self.weight_scale = weight_scale
 
     def forward(self, x):
@@ -320,20 +372,19 @@ class DynamicW8A8Fp8Linear(torch.nn.Module):
         m = x.view(-1, x.shape[-1])
         output_shape = [*x.shape[:-1], self.out_features]
 
-        qinput, x_scale = scaled_fp8_quant(
-            m,
-            scale=None)
+        qinput, x_scale = scaled_fp8_quant(m, scale=None)
         # TODO:  use vllm.cutlass_scaled_mm on sm89 for beffer performance
-        output = torch._scaled_mm(qinput,
-                                  self.weight,
-                                  scale_a=x_scale,
-                                  scale_b=self.weight_scale.data.t(),
-                                  out_dtype=x.dtype,
-                                  use_fast_accum=True)
+        output = torch._scaled_mm(
+            qinput,
+            self.weight,
+            scale_a=x_scale,
+            scale_b=self.weight_scale.data.t(),
+            out_dtype=x.dtype,
+            use_fast_accum=True,
+        )
         if self.bias is not None:
             output = output + self.bias
         return output.view(*output_shape)
-
 
     @staticmethod
     def merge(linears):
@@ -357,47 +408,57 @@ class DynamicW8A8Fp8Linear(torch.nn.Module):
 
         assert min(in_features) == max(in_features)
 
-        weight = Parameter(torch.cat(weights, dim=0).view(dtype).t(),
-                           requires_grad=False)
-        bias = None if any([b is None for b in biases]) else Parameter(
-            torch.cat(biases, dim=0), requires_grad=False)
+        weight = Parameter(
+            torch.cat(weights, dim=0).view(dtype).t(), requires_grad=False
+        )
+        bias = (
+            None
+            if any([b is None for b in biases])
+            else Parameter(torch.cat(biases, dim=0), requires_grad=False)
+        )
         scale = Parameter(torch.cat(scales, dim=0))
         in_features = in_features[0]
         out_features = sum(out_features)
         config = linears[0].config
 
-        return DynamicW8A8Fp8Linear(in_features,
-                                    out_features,
-                                    weight=weight,
-                                    bias=bias,
-                                    input_scale=None,
-                                    weight_scale=scale,
-                                    device=device,
-                                    weight_dtype=None,
-                                    bias_dtype=None,
-                                    config=config)
+        return DynamicW8A8Fp8Linear(
+            in_features,
+            out_features,
+            weight=weight,
+            bias=bias,
+            input_scale=None,
+            weight_scale=scale,
+            device=device,
+            weight_dtype=None,
+            bias_dtype=None,
+            config=config,
+        )
 
     def patch(self):
         self.weight = Parameter(self.weight.t(), requires_grad=False)
 
     def __repr__(self):
-        return (f'DynamicW8A8Fp8Linear(in_features={self.in_features}, '
-                f'out_features={self.out_features}, bias={self.bias is not None})')
+        return (
+            f"DynamicW8A8Fp8Linear(in_features={self.in_features}, "
+            f"out_features={self.out_features}, bias={self.bias is not None})"
+        )
 
 
 class StaticW8A8Fp8Linear(torch.nn.Module):
-    def __init__(self,
-                 in_features,
-                 out_features,
-                 weight=None,
-                 bias=None,
-                 dtype=None,
-                 input_scale=None,
-                 weight_scale=None,
-                 device=None,
-                 weight_dtype=None,
-                 bias_dtype=None,
-                 config=None):
+    def __init__(
+        self,
+        in_features,
+        out_features,
+        weight=None,
+        bias=None,
+        dtype=None,
+        input_scale=None,
+        weight_scale=None,
+        device=None,
+        weight_dtype=None,
+        bias_dtype=None,
+        config=None,
+    ):
         super().__init__()
         self.in_features = in_features
         self.out_features = out_features
@@ -412,14 +473,12 @@ class StaticW8A8Fp8Linear(torch.nn.Module):
 
         assert weight is None or isinstance(weight, Parameter)
         if weight is None:
-            data = torch.empty(out_features, in_features,
-                               dtype=self.weight_dtype)
+            data = torch.empty(out_features, in_features, dtype=self.weight_dtype)
             self.weight = Parameter(data, requires_grad=False)
         else:
             self.weight = weight
 
-        assert bias is None or isinstance(bias, bool) or isinstance(bias,
-                                                                    Parameter)
+        assert bias is None or isinstance(bias, bool) or isinstance(bias, Parameter)
         if bias is None or isinstance(bias, Parameter):
             self.bias = bias
         elif bias is False:
@@ -430,15 +489,17 @@ class StaticW8A8Fp8Linear(torch.nn.Module):
 
         assert weight_scale is None or isinstance(weight_scale, Parameter)
         if weight_scale is None:
-            weight_scale = Parameter(torch.empty(1, dtype=torch.float32),
-                                     requires_grad=False)
+            weight_scale = Parameter(
+                torch.empty(1, dtype=torch.float32), requires_grad=False
+            )
 
         self.weight_scale = weight_scale
 
         assert input_scale is None or isinstance(input_scale, Parameter)
         if input_scale is None:
-            input_scale = Parameter(torch.empty(1, dtype=torch.float32),
-                                    requires_grad=False)
+            input_scale = Parameter(
+                torch.empty(1, dtype=torch.float32), requires_grad=False
+            )
         self.input_scale = input_scale
 
     def forward(self, x):
@@ -449,15 +510,15 @@ class StaticW8A8Fp8Linear(torch.nn.Module):
         m = x.view(-1, x.shape[-1])
         output_shape = [*x.shape[:-1], self.out_features]
 
-        qinput, x_scale = scaled_fp8_quant(
-            m,
-            scale=self.input_scale)
-        output = torch._scaled_mm(qinput,
-                                  self.weight,
-                                  scale_a=x_scale,
-                                  scale_b=self.weight_scale.data,
-                                  out_dtype=x.dtype,
-                                  use_fast_accum=True)
+        qinput, x_scale = scaled_fp8_quant(m, scale=self.input_scale)
+        output = torch._scaled_mm(
+            qinput,
+            self.weight,
+            scale_a=x_scale,
+            scale_b=self.weight_scale.data,
+            out_dtype=x.dtype,
+            use_fast_accum=True,
+        )
         if self.bias is not None:
             output = output + self.bias
         return output.view(*output_shape)
@@ -489,35 +550,38 @@ class StaticW8A8Fp8Linear(torch.nn.Module):
         scale = max(scales)
         scale = Parameter(scale, requires_grad=False)
         weight = torch.cat(
-            [(x.float() * (scales[i] / scale)) for i, x in enumerate(weights)],
-            dim=0).to(dtype)
+            [(x.float() * (scales[i] / scale)) for i, x in enumerate(weights)], dim=0
+        ).to(dtype)
         weight = Parameter(weight.t(), requires_grad=False)
-        bias = None if any([b is None for b in biases]) else Parameter(
-            torch.cat(biases, dim=0), requires_grad=False)
+        bias = (
+            None
+            if any([b is None for b in biases])
+            else Parameter(torch.cat(biases, dim=0), requires_grad=False)
+        )
         input_scale = Parameter(max(input_scales))
         in_features = in_features[0]
         out_features = sum(out_features)
         config = linears[0].config
 
-        return StaticW8A8Fp8Linear(in_features,
-                                   out_features,
-                                   weight=weight,
-                                   bias=bias,
-                                   input_scale=input_scale,
-                                   weight_scale=scale,
-                                   device=device,
-                                   weight_dtype=None,
-                                   bias_dtype=None,
-                                   config=config)
+        return StaticW8A8Fp8Linear(
+            in_features,
+            out_features,
+            weight=weight,
+            bias=bias,
+            input_scale=input_scale,
+            weight_scale=scale,
+            device=device,
+            weight_dtype=None,
+            bias_dtype=None,
+            config=config,
+        )
 
     @staticmethod
-    def _convert_to_channelwise(
-            weight_scale,
-            logical_widths):
+    def _convert_to_channelwise(weight_scale, logical_widths):
         # Create channelwise buffer
-        weight_scale_channel = torch.empty((sum(logical_widths), 1),
-                                           dtype=torch.float32,
-                                           device=weight_scale[0].device)
+        weight_scale_channel = torch.empty(
+            (sum(logical_widths), 1), dtype=torch.float32, device=weight_scale[0].device
+        )
 
         # Expand each scale to match the size of each logical matrix.
         start = 0
@@ -532,23 +596,27 @@ class StaticW8A8Fp8Linear(torch.nn.Module):
         self.weight = Parameter(self.weight.t(), requires_grad=False)
 
     def __repr__(self):
-        return (f'StaticW8A8Fp8Linear(in_features={self.in_features}, '
-                f'out_features={self.out_features}, bias={self.bias is not None})')
+        return (
+            f"StaticW8A8Fp8Linear(in_features={self.in_features}, "
+            f"out_features={self.out_features}, bias={self.bias is not None})"
+        )
 
 
 class DynamicW8A8Int8Linear(torch.nn.Module):
-    def __init__(self,
-                 in_features,
-                 out_features,
-                 weight=None,
-                 bias=None,
-                 dtype=None,
-                 input_scale=None,
-                 weight_scale=None,
-                 device=None,
-                 weight_dtype=None,
-                 bias_dtype=None,
-                 config=None):
+    def __init__(
+        self,
+        in_features,
+        out_features,
+        weight=None,
+        bias=None,
+        dtype=None,
+        input_scale=None,
+        weight_scale=None,
+        device=None,
+        weight_dtype=None,
+        bias_dtype=None,
+        config=None,
+    ):
         super().__init__()
         self.in_features = in_features
         self.out_features = out_features
@@ -563,14 +631,12 @@ class DynamicW8A8Int8Linear(torch.nn.Module):
 
         assert weight is None or isinstance(weight, Parameter)
         if weight is None:
-            data = torch.empty(out_features, in_features,
-                               dtype=self.weight_dtype)
+            data = torch.empty(out_features, in_features, dtype=self.weight_dtype)
             self.weight = Parameter(data, requires_grad=False)
         else:
             self.weight = weight
 
-        assert bias is None or isinstance(bias, bool) or isinstance(bias,
-                                                                    Parameter)
+        assert bias is None or isinstance(bias, bool) or isinstance(bias, Parameter)
         if bias is None or isinstance(bias, Parameter):
             self.bias = bias
         elif bias is False:
@@ -582,18 +648,16 @@ class DynamicW8A8Int8Linear(torch.nn.Module):
         assert weight_scale is None or isinstance(weight_scale, Parameter)
         if weight_scale is None:
             weight_scale = Parameter(
-                torch.empty(out_features, 1, dtype=torch.float32),
-                requires_grad=False)
+                torch.empty(out_features, 1, dtype=torch.float32), requires_grad=False
+            )
         self.weight_scale = weight_scale
 
     def forward(self, x):
         x_q, x_scale = dynamic_int8_quant(x)
 
-        output = dynamic_int8_gemm_nt(x_q,
-                                     self.weight,
-                                     x_scale,
-                                     self.weight_scale,
-                                     x.dtype)
+        output = dynamic_int8_gemm_nt(
+            x_q, self.weight, x_scale, self.weight_scale, x.dtype
+        )
         if self.bias is not None:
             output += self.bias
         return output
@@ -621,45 +685,54 @@ class DynamicW8A8Int8Linear(torch.nn.Module):
         assert min(in_features) == max(in_features)
 
         weight = Parameter(torch.cat(weights, dim=0).t(), requires_grad=False)
-        bias = None if any([b is None for b in biases]) else Parameter(
-            torch.cat(biases, dim=0), requires_grad=False)
+        bias = (
+            None
+            if any([b is None for b in biases])
+            else Parameter(torch.cat(biases, dim=0), requires_grad=False)
+        )
         scale = Parameter(torch.cat(scales, dim=0))
         in_features = in_features[0]
         out_features = sum(out_features)
         config = linears[0].config
 
-        return DynamicW8A8Int8Linear(in_features,
-                                     out_features,
-                                     weight=weight,
-                                     bias=bias,
-                                     input_scale=None,
-                                     weight_scale=scale,
-                                     device=device,
-                                     weight_dtype=None,
-                                     bias_dtype=None,
-                                     config=config)
+        return DynamicW8A8Int8Linear(
+            in_features,
+            out_features,
+            weight=weight,
+            bias=bias,
+            input_scale=None,
+            weight_scale=scale,
+            device=device,
+            weight_dtype=None,
+            bias_dtype=None,
+            config=config,
+        )
 
     def patch(self):
         self.weight = Parameter(self.weight.t(), requires_grad=False)
 
     def __repr__(self):
-        return (f'DynamicW8A8Int8Linear(in_features={self.in_features}, '
-                f'out_features={self.out_features}, bias={self.bias is not None})')
+        return (
+            f"DynamicW8A8Int8Linear(in_features={self.in_features}, "
+            f"out_features={self.out_features}, bias={self.bias is not None})"
+        )
 
 
 class StaticW8A8Int8Linear(torch.nn.Module):
-    def __init__(self,
-                 in_features,
-                 out_features,
-                 weight=None,
-                 bias=None,
-                 dtype=None,
-                 input_scale=None,
-                 weight_scale=None,
-                 device=None,
-                 weight_dtype=None,
-                 bias_dtype=None,
-                 config=None):
+    def __init__(
+        self,
+        in_features,
+        out_features,
+        weight=None,
+        bias=None,
+        dtype=None,
+        input_scale=None,
+        weight_scale=None,
+        device=None,
+        weight_dtype=None,
+        bias_dtype=None,
+        config=None,
+    ):
         super().__init__()
         self.in_features = in_features
         self.out_features = out_features
@@ -674,14 +747,12 @@ class StaticW8A8Int8Linear(torch.nn.Module):
 
         assert weight is None or isinstance(weight, Parameter)
         if weight is None:
-            data = torch.empty(out_features, in_features,
-                               dtype=self.weight_dtype)
+            data = torch.empty(out_features, in_features, dtype=self.weight_dtype)
             self.weight = Parameter(data, requires_grad=False)
         else:
             self.weight = weight
 
-        assert bias is None or isinstance(bias, bool) or isinstance(bias,
-                                                                    Parameter)
+        assert bias is None or isinstance(bias, bool) or isinstance(bias, Parameter)
         if bias is None or isinstance(bias, Parameter):
             self.bias = bias
         elif bias is False:
@@ -692,28 +763,28 @@ class StaticW8A8Int8Linear(torch.nn.Module):
 
         assert weight_scale is None or isinstance(weight_scale, Parameter)
         if weight_scale is None:
-            weight_scale = Parameter(torch.empty(1, dtype=torch.float32),
-                                     requires_grad=False)
+            weight_scale = Parameter(
+                torch.empty(1, dtype=torch.float32), requires_grad=False
+            )
 
         self.weight_scale = weight_scale
 
         assert input_scale is None or isinstance(input_scale, Parameter)
         if input_scale is None:
-            input_scale = Parameter(torch.empty(1, dtype=torch.float32),
-                                    requires_grad=False)
+            input_scale = Parameter(
+                torch.empty(1, dtype=torch.float32), requires_grad=False
+            )
         self.input_scale = input_scale
 
     def forward(self, x):
         x_q, x_scale, _ = static_int8_quant(x, self.input_scale)
 
-        output = static_int8_gemm_nt(x_q,
-                                     self.weight,
-                                     x_scale,
-                                     self.weight_scale,
-                                     x.dtype)
+        output = static_int8_gemm_nt(
+            x_q, self.weight, x_scale, self.weight_scale, x.dtype
+        )
         if self.bias is not None:
-            output += self.bias 
-        return output 
+            output += self.bias
+        return output
 
     @staticmethod
     def merge(linears):
@@ -742,49 +813,57 @@ class StaticW8A8Int8Linear(torch.nn.Module):
         scale = max(scales)
         scale = Parameter(scale, requires_grad=False)
         weight = torch.cat(
-            [(x.float() * (scales[i] / scale)) for i, x in enumerate(weights)],
-            dim=0).to(dtype)
+            [(x.float() * (scales[i] / scale)) for i, x in enumerate(weights)], dim=0
+        ).to(dtype)
         weight = Parameter(weight.t(), requires_grad=False)
-        bias = None if any([b is None for b in biases]) else Parameter(
-            torch.cat(biases, dim=0), requires_grad=False)
+        bias = (
+            None
+            if any([b is None for b in biases])
+            else Parameter(torch.cat(biases, dim=0), requires_grad=False)
+        )
         input_scale = Parameter(max(input_scales))
         in_features = in_features[0]
         out_features = sum(out_features)
         config = linears[0].config
 
-        return StaticW8A8Int8Linear(in_features,
-                                    out_features,
-                                    weight=weight,
-                                    bias=bias,
-                                    input_scale=input_scale,
-                                    weight_scale=scale,
-                                    device=device,
-                                    weight_dtype=None,
-                                    bias_dtype=None,
-                                    config=config)
+        return StaticW8A8Int8Linear(
+            in_features,
+            out_features,
+            weight=weight,
+            bias=bias,
+            input_scale=input_scale,
+            weight_scale=scale,
+            device=device,
+            weight_dtype=None,
+            bias_dtype=None,
+            config=config,
+        )
 
     def patch(self):
         self.weight = Parameter(self.weight.t(), requires_grad=False)
 
     def __repr__(self):
-        return (f'StaticW8A8Int8Linear(in_features={self.in_features}, '
-                f'out_features={self.out_features}, bias={self.bias is not None})')
-
+        return (
+            f"StaticW8A8Int8Linear(in_features={self.in_features}, "
+            f"out_features={self.out_features}, bias={self.bias is not None})"
+        )
 
 
 class DynamicTbW8A8Fp8Linear(torch.nn.Module):
-    def __init__(self,
-                 in_features,
-                 out_features,
-                 weight=None,
-                 bias=None,
-                 dtype=None,
-                 input_scale=None,
-                 weight_scale_inv=None,
-                 device=None,
-                 weight_dtype=None,
-                 bias_dtype=None,
-                 config=None):
+    def __init__(
+        self,
+        in_features,
+        out_features,
+        weight=None,
+        bias=None,
+        dtype=None,
+        input_scale=None,
+        weight_scale_inv=None,
+        device=None,
+        weight_dtype=None,
+        bias_dtype=None,
+        config=None,
+    ):
         super().__init__()
         self.in_features = in_features
         self.out_features = out_features
@@ -799,14 +878,12 @@ class DynamicTbW8A8Fp8Linear(torch.nn.Module):
 
         assert weight is None or isinstance(weight, Parameter)
         if weight is None:
-            data = torch.empty(out_features, in_features,
-                               dtype=self.weight_dtype)
+            data = torch.empty(out_features, in_features, dtype=self.weight_dtype)
             self.weight = Parameter(data, requires_grad=False)
         else:
             self.weight = weight
 
-        assert bias is None or isinstance(bias, bool) or isinstance(bias,
-                                                                    Parameter)
+        assert bias is None or isinstance(bias, bool) or isinstance(bias, Parameter)
         if bias is None or isinstance(bias, Parameter):
             self.bias = bias
         elif bias is False:
@@ -818,11 +895,18 @@ class DynamicTbW8A8Fp8Linear(torch.nn.Module):
         assert weight_scale_inv is None or isinstance(weight_scale_inv, Parameter)
         if weight_scale_inv is None:
             block_size = 128
-            weight_scale_inv = Parameter(torch.empty(( (out_features-1)//block_size + 1, (in_features-1)//block_size + 1), dtype=torch.float32),
-                                     requires_grad=False)
+            weight_scale_inv = Parameter(
+                torch.empty(
+                    (
+                        (out_features - 1) // block_size + 1,
+                        (in_features - 1) // block_size + 1,
+                    ),
+                    dtype=torch.float32,
+                ),
+                requires_grad=False,
+            )
 
         self.weight_scale_inv = weight_scale_inv
-
 
     def forward(self, x):
         x_q, x_scale = tile_quant(x)
@@ -857,43 +941,53 @@ class DynamicTbW8A8Fp8Linear(torch.nn.Module):
         scale = Parameter(torch.cat(scales, dim=1))
         weight = torch.cat(weights, dim=0).to(dtype)
         weight = Parameter(weight, requires_grad=False)
-        bias = None if any([b is None for b in biases]) else Parameter(
-            torch.cat(biases, dim=0), requires_grad=False)
+        bias = (
+            None
+            if any([b is None for b in biases])
+            else Parameter(torch.cat(biases, dim=0), requires_grad=False)
+        )
         in_features = in_features[0]
         out_features = sum(out_features)
         config = linears[0].config
 
-        return DynamicTbW8A8Fp8Linear(in_features,
-                                    out_features,
-                                    weight=weight,
-                                    bias=bias,
-                                    weight_scale_inv=scale,
-                                    device=device,
-                                    weight_dtype=None,
-                                    bias_dtype=None,
-                                    config=config)
+        return DynamicTbW8A8Fp8Linear(
+            in_features,
+            out_features,
+            weight=weight,
+            bias=bias,
+            weight_scale_inv=scale,
+            device=device,
+            weight_dtype=None,
+            bias_dtype=None,
+            config=config,
+        )
 
     def patch(self):
         # self.weight = Parameter(self.weight.t(), requires_grad=False)
         pass
 
     def __repr__(self):
-        return (f'DynamicTbW8A8Fp8Linear(in_features={self.in_features}, '
-                f'out_features={self.out_features}, bias={self.bias is not None})')
+        return (
+            f"DynamicTbW8A8Fp8Linear(in_features={self.in_features}, "
+            f"out_features={self.out_features}, bias={self.bias is not None})"
+        )
+
 
 class DynamicBlockW8A8Fp8Linear(torch.nn.Module):
-    def __init__(self,
-                 in_features,
-                 out_features,
-                 weight=None,
-                 bias=None,
-                 dtype=None,
-                 input_scale=None,
-                 weight_scale_inv=None,
-                 device=None,
-                 weight_dtype=None,
-                 bias_dtype=None,
-                 config=None):
+    def __init__(
+        self,
+        in_features,
+        out_features,
+        weight=None,
+        bias=None,
+        dtype=None,
+        input_scale=None,
+        weight_scale_inv=None,
+        device=None,
+        weight_dtype=None,
+        bias_dtype=None,
+        config=None,
+    ):
         super().__init__()
         self.in_features = in_features
         self.out_features = out_features
@@ -909,14 +1003,12 @@ class DynamicBlockW8A8Fp8Linear(torch.nn.Module):
 
         assert weight is None or isinstance(weight, Parameter)
         if weight is None:
-            data = torch.empty(out_features, in_features,
-                               dtype=self.weight_dtype)
+            data = torch.empty(out_features, in_features, dtype=self.weight_dtype)
             self.weight = Parameter(data, requires_grad=False)
         else:
             self.weight = weight
 
-        assert bias is None or isinstance(bias, bool) or isinstance(bias,
-                                                                    Parameter)
+        assert bias is None or isinstance(bias, bool) or isinstance(bias, Parameter)
         if bias is None or isinstance(bias, Parameter):
             self.bias = bias
         elif bias is False:
@@ -927,14 +1019,24 @@ class DynamicBlockW8A8Fp8Linear(torch.nn.Module):
 
         assert weight_scale_inv is None or isinstance(weight_scale_inv, Parameter)
         if weight_scale_inv is None:
-            weight_scale_inv = Parameter(torch.empty(( (out_features-1)//self.block_size[0] + 1, (in_features-1)//self.block_size[1] + 1), dtype=torch.float32),
-                                     requires_grad=False)
+            weight_scale_inv = Parameter(
+                torch.empty(
+                    (
+                        (out_features - 1) // self.block_size[0] + 1,
+                        (in_features - 1) // self.block_size[1] + 1,
+                    ),
+                    dtype=torch.float32,
+                ),
+                requires_grad=False,
+            )
 
         self.weight_scale_inv = weight_scale_inv
 
     def forward(self, x):
         x_q, x_scale = per_token_group_quant_fp8(x, group_size=self.block_size[0])
-        output = w8a8_block_fp8_matmul(x_q, self.weight, x_scale, self.weight_scale_inv, self.block_size, x.dtype)
+        output = w8a8_block_fp8_matmul(
+            x_q, self.weight, x_scale, self.weight_scale_inv, self.block_size, x.dtype
+        )
         if self.bias is not None:
             output += self.bias
         return output
@@ -963,26 +1065,33 @@ class DynamicBlockW8A8Fp8Linear(torch.nn.Module):
 
         scale = Parameter(torch.cat(scales, dim=0))
         weight = Parameter(torch.cat(weights, dim=0).view(dtype), requires_grad=False)
-        bias = None if any([b is None for b in biases]) else Parameter(
-            torch.cat(biases, dim=0), requires_grad=False)
+        bias = (
+            None
+            if any([b is None for b in biases])
+            else Parameter(torch.cat(biases, dim=0), requires_grad=False)
+        )
         in_features = in_features[0]
         out_features = sum(out_features)
         config = linears[0].config
 
-        return DynamicBlockW8A8Fp8Linear(in_features,
-                                    out_features,
-                                    weight=weight,
-                                    bias=bias,
-                                    weight_scale_inv=scale,
-                                    device=device,
-                                    weight_dtype=None,
-                                    bias_dtype=None,
-                                    config=config)
+        return DynamicBlockW8A8Fp8Linear(
+            in_features,
+            out_features,
+            weight=weight,
+            bias=bias,
+            weight_scale_inv=scale,
+            device=device,
+            weight_dtype=None,
+            bias_dtype=None,
+            config=config,
+        )
 
     def patch(self):
         # self.weight = Parameter(self.weight.t(), requires_grad=False)
         pass
 
     def __repr__(self):
-        return (f'DynamicBlockW8A8Fp8Linear(in_features={self.in_features}, '
-                f'out_features={self.out_features}, bias={self.bias is not None})')
+        return (
+            f"DynamicBlockW8A8Fp8Linear(in_features={self.in_features}, "
+            f"out_features={self.out_features}, bias={self.bias is not None})"
+        )

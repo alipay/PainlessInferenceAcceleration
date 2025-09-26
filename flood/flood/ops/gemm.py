@@ -130,7 +130,10 @@ def dynamic_int8_gemm_nt(
     c = a.new_empty(*a.size()[:-1], N, dtype=dtype)
     BLOCK_SIZE_M = 128
     BLOCK_SIZE_N = 128
-    grid = lambda META: (triton.cdiv(M, BLOCK_SIZE_M), triton.cdiv(N, BLOCK_SIZE_N))  # noqa: E731
+    grid = lambda META: (
+        triton.cdiv(M, BLOCK_SIZE_M),
+        triton.cdiv(N, BLOCK_SIZE_N),
+    )  # noqa: E731
     dynamic_int8_gemm_nt_kernel[grid](
         a, b, c, a_s, b_s, M, N, K, BLOCK_SIZE_K=128, BLOCK_SIZE_M=128, BLOCK_SIZE_N=128
     )
@@ -389,4 +392,3 @@ def _w8a8_block_fp8_matmul(
     c_ptrs = C + stride_cm * offs_cm[:, None] + stride_cn * offs_cn[None, :]
     c_mask = (offs_cm[:, None] < M) & (offs_cn[None, :] < N)
     tl.store(c_ptrs, c, mask=c_mask)
-

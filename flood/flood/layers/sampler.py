@@ -25,29 +25,30 @@ class Sampler(torch.nn.Module):
                     continue
                 req.output_ids.append(next_ids[index])
                 index += 1
-            return 
+            return
 
         # lookahead
         if batch_meta_info.mode == 2:
             next_ids = logits.argmax(dim=-1)
-            output_ids, cache_src_indices, cache_dst_indices = \
-                batch_meta_info.spec.verify_draft(batch_meta_info.input_ids, 
-                                                  next_ids,
-                                                  batch_meta_info=batch_meta_info)
-            output_ids = [[y for y in x if y!=-1] for x in output_ids.tolist()]
-            
+            output_ids, cache_src_indices, cache_dst_indices = (
+                batch_meta_info.spec.verify_draft(
+                    batch_meta_info.input_ids, next_ids, batch_meta_info=batch_meta_info
+                )
+            )
+            output_ids = [[y for y in x if y != -1] for x in output_ids.tolist()]
+
             if False:
                 accept_counts = [len(x) for x in output_ids]
                 texts = batch_meta_info.spec.tokenizer.batch_decode(output_ids)
-                print(f'{accept_counts=} {output_ids=} {texts=}')
+                print(f"{accept_counts=} {output_ids=} {texts=}")
                 if tuple(output_ids[0]) == tuple([4891, 236, 228, 99497]):
-                    print(f'{cache_src_indices=} {cache_dst_indices=}')
+                    print(f"{cache_src_indices=} {cache_dst_indices=}")
 
             for i, req in enumerate(reqs):
                 req.output_ids.extend(output_ids[i])
             batch_meta_info.cache_src_indices = cache_src_indices
             batch_meta_info.cache_dst_indices = cache_dst_indices
-            return 
+            return
 
         # NOTE: sampling with prob can not work together with targeting
         temperature = []
@@ -55,7 +56,13 @@ class Sampler(torch.nn.Module):
         top_p = []
         min_p = []
         for i, sampling in enumerate(batch_meta_info.samplings):
-            if sampling is None or temperature is None and top_k is None and top_p is None and min_p is None:
+            if (
+                sampling is None
+                or temperature is None
+                and top_k is None
+                and top_p is None
+                and min_p is None
+            ):
                 temperature.append(1.0)
                 top_k.append(1)
                 top_p.append(1.0)
@@ -67,22 +74,20 @@ class Sampler(torch.nn.Module):
                 min_p.append(sampling.min_p or 0.0)
         max_top_k = max(top_k)
         if max_top_k > 1:
-            temperature = torch.tensor(temperature, dtype=logits.dtype,
-                                       device=logits.device)
+            temperature = torch.tensor(
+                temperature, dtype=logits.dtype, device=logits.device
+            )
             top_k = torch.tensor(top_k, dtype=torch.int32, device=logits.device)
-            top_p = torch.tensor(top_p, dtype=logits.dtype,
-                                 device=logits.device)
-            min_p = torch.tensor(min_p, dtype=logits.dtype,
-                                 device=logits.device)
-            next_token_id_list = sample_from_logit(logits, temperature, top_k,
-                                                   top_p, min_p,
-                                                   max_top_k).tolist()
+            top_p = torch.tensor(top_p, dtype=logits.dtype, device=logits.device)
+            min_p = torch.tensor(min_p, dtype=logits.dtype, device=logits.device)
+            next_token_id_list = sample_from_logit(
+                logits, temperature, top_k, top_p, min_p, max_top_k
+            ).tolist()
             for i, req in enumerate(reqs):
                 if logit_counts is not None and logit_counts[i] == 0:
                     continue
                 req.output_ids.append(next_token_id_list[i])
-            return 
-
+            return
 
         # targeting
         argmax_ids = logits.argmax(dim=-1).tolist()
@@ -95,7 +100,7 @@ class Sampler(torch.nn.Module):
             index = 0
             for i, sampling in enumerate(batch_meta_info.samplings):
                 if logit_counts is not None and logit_counts[i] == 0:
-                    continue 
+                    continue
 
                 req = batch_meta_info.reqs[i]
                 ql = batch_meta_info.qls[i]
@@ -111,14 +116,15 @@ class Sampler(torch.nn.Module):
                     if req.done >= req.input_length:  # options
                         idx, _, target_ids = req.iterate_target()
                         target_ids = target_ids[:ql]
-                        indices = [(j + index) * voc + target_ids[j+1] for j in
-                                range(ql-1)]
+                        indices = [
+                            (j + index) * voc + target_ids[j + 1] for j in range(ql - 1)
+                        ]
                         ppl = sum(ppls.view(-1)[indices].tolist())
                         vs = req.output_ids[0]
                         vs[idx] += ppl
                         index += len(target_ids)
                     else:  # prefill
-                        vs = [0.0]*len(req.target_ids)
+                        vs = [0.0] * len(req.target_ids)
                         first_token_ids = [x[0] for x in req.target_ids]
                         ppl = ppls[index, first_token_ids].tolist()  # i->index
                         for j in range(len(req.target_ids)):
@@ -129,4 +135,3 @@ class Sampler(torch.nn.Module):
                     ppl = ppls[index, sampling.target_ids].tolist()  # i->index
                     req.output_ids.append(ppl)
                     index += 1
-

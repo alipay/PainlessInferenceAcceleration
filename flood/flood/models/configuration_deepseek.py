@@ -109,38 +109,38 @@ class DeepseekConfig(PretrainedConfig):
     keys_to_ignore_at_inference = ["past_key_values"]
 
     def __init__(
-            self,
-            vocab_size=102400,
-            hidden_size=4096,
-            intermediate_size=11008,
-            moe_intermediate_size=1407,
-            num_hidden_layers=30,
-            num_attention_heads=32,
-            num_key_value_heads=32,
-            n_shared_experts=None,
-            n_routed_experts=None,
-            num_experts_per_tok=None,
-            moe_layer_freq=1,
-            first_k_dense_replace=0,
-            norm_topk_prob=False,
-            scoring_func='softmax',
-            aux_loss_alpha=0.001,
-            seq_aux=True,
-            hidden_act="silu",
-            max_position_embeddings=2048,
-            initializer_range=0.02,
-            rms_norm_eps=1e-6,
-            use_cache=True,
-            pad_token_id=None,
-            bos_token_id=100000,
-            eos_token_id=100001,
-            pretraining_tp=1,
-            tie_word_embeddings=False,
-            rope_theta=10000.0,
-            rope_scaling=None,
-            attention_bias=False,
-            attention_dropout=0.0,
-            **kwargs,
+        self,
+        vocab_size=102400,
+        hidden_size=4096,
+        intermediate_size=11008,
+        moe_intermediate_size=1407,
+        num_hidden_layers=30,
+        num_attention_heads=32,
+        num_key_value_heads=32,
+        n_shared_experts=None,
+        n_routed_experts=None,
+        num_experts_per_tok=None,
+        moe_layer_freq=1,
+        first_k_dense_replace=0,
+        norm_topk_prob=False,
+        scoring_func="softmax",
+        aux_loss_alpha=0.001,
+        seq_aux=True,
+        hidden_act="silu",
+        max_position_embeddings=2048,
+        initializer_range=0.02,
+        rms_norm_eps=1e-6,
+        use_cache=True,
+        pad_token_id=None,
+        bos_token_id=100000,
+        eos_token_id=100001,
+        pretraining_tp=1,
+        tie_word_embeddings=False,
+        rope_theta=10000.0,
+        rope_scaling=None,
+        attention_bias=False,
+        attention_dropout=0.0,
+        **kwargs,
     ):
         self.vocab_size = vocab_size
         self.max_position_embeddings = max_position_embeddings
@@ -189,20 +189,22 @@ class DeepseekConfig(PretrainedConfig):
         if self.rope_scaling is None:
             return
 
-        if not isinstance(self.rope_scaling, dict) or len(
-                self.rope_scaling) != 2:
+        if not isinstance(self.rope_scaling, dict) or len(self.rope_scaling) != 2:
             raise ValueError(
                 "`rope_scaling` must be a dictionary with with two fields, `type` and `factor`, "
                 f"got {self.rope_scaling}"
             )
         rope_scaling_type = self.rope_scaling.get("type", None)
         rope_scaling_factor = self.rope_scaling.get("factor", None)
-        if rope_scaling_type is None or rope_scaling_type not in ["linear",
-                                                                  "dynamic"]:
+        if rope_scaling_type is None or rope_scaling_type not in ["linear", "dynamic"]:
             raise ValueError(
                 f"`rope_scaling`'s type field must be one of ['linear', 'dynamic'], got {rope_scaling_type}"
             )
-        if rope_scaling_factor is None or not isinstance(rope_scaling_factor,
-                                                         float) or rope_scaling_factor <= 1.0:
+        if (
+            rope_scaling_factor is None
+            or not isinstance(rope_scaling_factor, float)
+            or rope_scaling_factor <= 1.0
+        ):
             raise ValueError(
-                f"`rope_scaling`'s factor field must be a float > 1, got {rope_scaling_factor}")
+                f"`rope_scaling`'s factor field must be a float > 1, got {rope_scaling_factor}"
+            )
