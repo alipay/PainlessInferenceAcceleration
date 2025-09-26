@@ -1,6 +1,11 @@
+# -*- coding: utf-8 -*-
+"""
+Copyright (c) Ant Financial Service Group and its affiliates.
+"""
+
 import random
 import torch
-from flood.ops.rope import triton_qk_norm_and_rope_forward
+from flood.ops.rope import triton_qk_norm_and_rope_forward, triton_q_k_norm_and_rope_forward
 from flood.utils.benchmark import benchmark_func
 
 import flood_cuda
@@ -96,11 +101,14 @@ def test_qk_norm_and_rope(B=2,ql=1024, max_position_embeddings=4096,H=32,h=8,D=1
     q_ref,k_ref,v_ref = torch_qk_norm_and_rope(qkv,qw,kw, position_ids,rope_theta, H=H,h=h, rotary_dim=rotary_dim, max_position_embeddings=4096, eps=1e-6,interleave=interleave)
     
     qkv_clone = qkv.clone().reshape(-1, (H+2*h)*D).contiguous()
-    qo,ko,vo = triton_qk_norm_and_rope_forward(qkv_clone,qw,kw,freqs, indptr, offsets, max_seq_len, q_head=H,kv_head=h, rotary_dim=rotary_dim,eps=1e-6,interleave=interleave)
-    
-    qo = qo.view(B,ql,H,D)
-    ko = ko.view(B,ql,h,D)
-    vo = vo.view(B,ql,h,D)
+    qkv = qkv_clone.view(-1, H+2*h, D)
+    q, k, v = qkv.split([H, h, h], dim=-2)
+
+    triton_q_k_norm_and_rope_forward(q, k,qw,kw,freqs, indptr, offsets, max_seq_len, q_head=H,kv_head=h, rotary_dim=rotary_dim,eps=1e-6,interleave=interleave)
+
+    qo = q.view(B,ql,H,D)
+    ko = k.view(B,ql,h,D)
+    vo = v.view(B,ql,h,D)
 
     torch.testing.assert_close(vo, v_ref, atol=1e-2, rtol=1e-2)
     torch.testing.assert_close(qo, q_ref, atol=1e-1, rtol=1e-2)
@@ -110,15 +118,19 @@ def test_qk_norm_and_rope(B=2,ql=1024, max_position_embeddings=4096,H=32,h=8,D=1
         print(f"{rotary_dim=}, head_dim={D}, {ql=}, {B=}")
         benchmark_func(cuda_qk_norm_and_rope, qkv_clone,qw,kw,indptr, offsets,q_head=H,kv_head=h, rotary_dim=rotary_dim, rope_theta=rope_theta, eps=1e-6, n_repeat=1000, ref_bytes=ql*B*(H+2*h)*D*4, n_profile=0, trace_dir='./cuda_qknorm_rope.json')
         benchmark_func(triton_qk_norm_and_rope_forward, qkv_clone,qw,kw,freqs, indptr, offsets, max_seq_len, q_head=H,kv_head=h, rotary_dim=rotary_dim, eps=1e-6, n_repeat=1000, ref_bytes=ql*B*(H+2*h)*D*4, n_profile=0, trace_dir='./triton_qknorm_rope.json')
+        benchmark_func(triton_q_k_norm_and_rope_forward, q, k,qw,kw,freqs, indptr, offsets, max_seq_len, q_head=H,kv_head=h, rotary_dim=rotary_dim, eps=1e-6, n_repeat=1000, ref_bytes=ql*B*(H+2*h)*D*4, n_profile=0, trace_dir='./triton_q_knorm_rope.json')
 
 
 if __name__ == '__main__':
 
-    for length in [128, 256, 512, 1024, 2048, 4096]:
-        test_qk_norm_and_rope(B=1,ql=length, max_position_embeddings=8192,H=16,h=4,D=128, rotary_dim=64, bench=True,interleave=False)
-        print('-'*50)
-    
+    # for length in [128, 256, 512, 1024, 2048, 4096]:
+    #     test_qk_norm_and_rope(B=1,ql=length, max_position_embeddings=4096,H=16,h=16,D=128, rotary_dim=64, bench=True,interleave=False)
+    #     print('-'*50)
 
-    for length in [128, 256, 512, 1024, 2048, 4096]:
-        test_qk_norm_and_rope(B=length,ql=1, max_position_embeddings=4096,H=16,h=4,D=128, rotary_dim=64, bench=True,interleave=False)
-        print('-'*50)
+
+    # for length in [128, 256, 512, 1024, 2048, 4096]:
+    #     test_qk_norm_and_rope(B=length,ql=1, max_position_embeddings=4096,H=16,h=16,D=128, rotary_dim=64, bench=True,interleave=False)
+    #     print('-'*50)
+
+    test_qk_norm_and_rope(B=1,ql=128, max_position_embeddings=4096,H=16,h=16,D=128, rotary_dim=64, bench=True,interleave=False)
+    test_qk_norm_and_rope(B=1,ql=128, max_position_embeddings=4096,H=16,h=16,D=128, rotary_dim=128, bench=True,interleave=False)

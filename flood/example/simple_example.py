@@ -24,8 +24,7 @@ random.seed(7)
 if __name__ == '__main__':
     mp.set_start_method('spawn', force=True)
 
-    # model_path = '/mntnlp/common_base_model/Llama-3.1-8B-Instruct'
-    model_path = '/mnt/nas_acr89/jingyue/Qwen3-0.6B-FP8_812d1c0c76a9b09a'
+    model_path = '/mntnlp/common_base_model/Llama-3.1-8B-Instruct'
     tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
     
     prompts = ['tell me a joke']

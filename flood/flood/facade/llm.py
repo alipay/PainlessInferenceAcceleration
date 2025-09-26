@@ -201,11 +201,13 @@ class LLM():
 
         if 'layer_group_size' in self.conf:
             assert self.max_concurrency is not None, "max_concurrency must be set for linear model"
-            layer_group_size = self.conf['layer_group_size']
-            self.fix_size_indices = [i for i in range(self.n_layer) if (i+1)%layer_group_size != 0]
+            self.layer_group_size = self.conf['layer_group_size']
+            self.fix_size_indices = [i for i in range(self.n_layer) if (i+1)%self.layer_group_size != 0]
+            self.fix_size_dim = self.conf['num_attention_heads']*self.head_dim**2
         else:
             self.fix_size_indices = None
             self.max_concurrency = None
+            self.fix_size_dim = None
         self.tokenizer = self.load_tokenizer(self.model_path)
 
         self.device_list = self.get_device_list(self.n_layer, self.n_stage)
@@ -239,7 +241,7 @@ class LLM():
             cache_size = 1.0 - (2.0 + self.n_proc * coef) / mem
 
         if cache_size < 1:
-            token_size = (2 * self.n_layer * self.kv_heads *
+            token_size = (2 * self.kv_heads *
                           self.head_dim * self.cache_dtype.itemsize)
             self.cache_size = self.get_cache_size(self.n_stage, 
                                                   cache_size,
@@ -275,7 +277,7 @@ class LLM():
         torch_dtype = self.torch_dtype if (
                 self.model_dtype == torch.float8_e4m3fn) else self.model_dtype
         model = Model.from_pretrained(model_path,
-                                      torch_dtype=torch_dtype,
+                                      dtype=torch_dtype,
                                       low_cpu_mem_usage=True,
                                       device_map=device_map)
 
@@ -372,9 +374,14 @@ class LLM():
             usages.append(used_memory)
             frees.append(free_memory)
             totals.append(total_memory)
-            alloc_memory = max_rate * total_memory - used_memory
-            n_layer = len(device_list[i])
-            cache_size = alloc_memory / (token_size*n_layer/total_layers)
+            if self.max_concurrency is not None:
+                n_var_size_layer = sum(1 for j in device_list[i] if j not in self.fix_size_indices)
+                n_fix_size_layer = len(device_list[i]) - n_var_size_layer
+                alloc_memory = max_rate * total_memory - used_memory - self.max_concurrency * n_fix_size_layer * self.fix_size_dim * self.cache_dtype.itemsize
+            else:
+                alloc_memory = max_rate * total_memory - used_memory
+                n_var_size_layer = len(device_list[i])
+            cache_size = alloc_memory / (token_size*n_var_size_layer)
             cache_sizes.append(cache_size)
             info.append(f'{total_memory/2**30:.1f}/{used_memory/2**30:.1f}/{free_memory/2**30:.1f}')
         info = ' '.join(info)
@@ -418,15 +425,12 @@ class LLM():
             dims = [self.model.config.kv_lora_rank+self.model.config.qk_rope_head_dim]
         else:
             dims = [self.kv_heads*self.head_dim]*2
-        if self.fix_size_indices is  None:
-            fix_size_dim = None
-        else:
-            fix_size_dim = self.conf['num_attention_heads']*self.head_dim**2
+
         cache = SegmentCache(max_token,
                              num_layers=self.n_layer,
                              dims=dims,
                              max_concurrency=self.max_concurrency,
-                             fix_size_dim=fix_size_dim,
+                             fix_size_dim=self.fix_size_dim,
                              dtype=cache_dtype,
                              devices=devices,
                              fix_size_indices=self.fix_size_indices,
@@ -627,6 +631,7 @@ class LLM():
                             update_fails.append(req)
                     fails = update_fails
 
+                queue_ts = time.time()
                 if n_tokens < chunk_size:
                     while True:
                         try:
@@ -652,6 +657,7 @@ class LLM():
                             reqs.append(req)
                             embs.append(self.get_emb(req, fe))
                             break
+                queue_time = time.time() - queue_ts
 
                 if len(reqs) == 0:
                     time.sleep(0.001)
@@ -748,6 +754,7 @@ class LLM():
                     print(f'extend slot: suc:{n_suc} fail:{n_fail}')
                 waits = update_waits
 
+                queue_ts = time.time()
                 while True:
                     try:
                         req = working_queue.get(block=True,
@@ -757,6 +764,7 @@ class LLM():
                     reqs.append(req)
                     if len(reqs) >= dbs:
                         break
+                queue_time = time.time() - queue_ts
 
                 if len(reqs) == 0:
                     # time.sleep(0.001)
@@ -875,6 +883,7 @@ class LLM():
                 tokens = batch.token_count
                 bs_str = f'{batch.batch_size}/{tokens}'
                 times = (f'{batching_time * 1000:.1f}/'
+                         f'{queue_time * 1000:.1f}/'
                          f'{forward_time * 1000:.1f}/{recycle_time * 1000:.1f}')
                 mean_input_length = sum(input_lengths)/max(len(input_lengths),1)
                 mean_output_length = sum(output_lengths)/max(len(output_lengths),1)

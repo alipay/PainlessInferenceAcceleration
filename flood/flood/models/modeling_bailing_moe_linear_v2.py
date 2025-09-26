@@ -100,10 +100,11 @@ class BailingMoeV2MoE(torch.nn.Module):
                                                     topk_group=self.topk_group,
                                                     config=config,
                                                     )
-
-        self.gate = torch.nn.Linear(config.hidden_size,
-                                     self.num_experts,
-                                     bias=False)
+        self.gate = AutoLinear.from_pretrained(config.hidden_size, 
+                                            self.num_experts, 
+                                            bias=False, 
+                                            config=config, 
+                                            name='gate')
         self.gate.expert_bias = torch.nn.Parameter(torch.zeros(self.num_experts))
         im_sz = config.moe_intermediate_size * config.num_shared_experts
         share_conf = copy.deepcopy(config)
@@ -254,7 +255,7 @@ class BailingMoeV2LinearAttention(torch.nn.Module):
         self.use_linear_silu = config.use_linear_silu
         self.use_low_rank = config.use_low_rank
         self.num_layers = config.num_hidden_layers
-        self.num_norm_group = getattr(config, 'group_norm_size', None)
+        self.group_norm_size = getattr(config, 'group_norm_size', None)
 
         qkv_dim = (self.num_heads + 2 * self.num_key_value_heads) * self.head_dim
         self.query_key_value = AutoLinear.from_pretrained(self.hidden_size, 
@@ -267,12 +268,14 @@ class BailingMoeV2LinearAttention(torch.nn.Module):
                                             bias=config.use_bias, 
                                             config=config, 
                                             name='dense')
-
-        self.g_proj = torch.nn.Linear(self.hidden_size, self.num_heads * self.head_dim, bias=False)
+        self.g_proj = AutoLinear.from_pretrained(self.hidden_size, 
+                                                self.num_heads * self.head_dim,
+                                                bias=False,
+                                                config=config)
         self.query_layernorm = RMSNorm(self.head_dim, eps=config.rms_norm_eps)
         self.key_layernorm = RMSNorm(self.head_dim, eps=config.rms_norm_eps)
         self.g_norm = RMSGroupNormSigmoid(hidden_size=self.num_heads * self.head_dim,
-                                    num_norm_group=self.num_norm_group,
+                                    num_norm_group=self.group_norm_size,
                                     eps=config.rms_norm_eps)
         self.rope = AutoRope.from_pretrained(config)
         self.attention =  None
@@ -306,7 +309,7 @@ class BailingMoeV2LinearAttention(torch.nn.Module):
 
         start = 2 ** (-(2 ** -(math.log2(self.num_key_value_heads) - 3)))
         exponents = torch.arange(1, self.num_key_value_heads + 1, dtype=torch.float32)
-        self.decay_scales = -torch.pow(start, exponents) * (1 - self.layer_idx / (self.num_layers - 1) + 1e-5)
+        self.decay_scales = torch.pow(start, exponents) * (1 - self.layer_idx / (self.num_layers - 1) + 1e-5)
         self.decay_scales = self.decay_scales.to(self.dense.weight.device)
 
     def forward(
@@ -455,7 +458,7 @@ class BailingMoeV2Model(PreTrainedModel):
         self.word_embeddings = value
 
 
-class BailingMoeV2LinearForCausalLM(PreTrainedModel):
+class BailingMoeLinearV2ForCausalLM(PreTrainedModel):
     config_class = BailingMoeLinearV2Config
     _tied_weights_keys = ["lm_head.weight"]
 
