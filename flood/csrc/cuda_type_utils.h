@@ -5,7 +5,6 @@
 #include <cuda_bf16.h>
 #include <cuda_fp16.h>
 #include <torch/all.h>
-// #include <cuda_fp8.h>
 #include <torch/extension.h>
 #include <ATen/ATen.h>
 

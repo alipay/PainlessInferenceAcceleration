@@ -10,15 +10,22 @@ import torch
 from flood.ops.sample import sample_from_logit
 
 
-def benchmark_func(fn, *args, n_warmup=100, n_repeat=1000, ref_time=None,
-                   ref_flops=None, desc='', **kwargs):
+def benchmark_func(
+    fn,
+    *args,
+    n_warmup=100,
+    n_repeat=1000,
+    ref_time=None,
+    ref_flops=None,
+    desc="",
+    **kwargs,
+):
     func_name = fn.__name__
 
     for i in range(n_warmup):
         fn(*args, **kwargs)
 
-    start_events = [torch.cuda.Event(enable_timing=True) for _ in
-                    range(n_repeat)]
+    start_events = [torch.cuda.Event(enable_timing=True) for _ in range(n_repeat)]
     end_events = [torch.cuda.Event(enable_timing=True) for _ in range(n_repeat)]
 
     for i in range(n_repeat):
@@ -36,15 +43,17 @@ def benchmark_func(fn, *args, n_warmup=100, n_repeat=1000, ref_time=None,
     average_event_time = times * 1000 / (n_repeat - 2 * clip)
 
     speedup = ref_time / average_event_time if ref_time is not None else 1.0
-    flops = ref_flops / 1e12 / (
-                average_event_time / 1e6) if ref_flops is not None else 0.0
+    flops = (
+        ref_flops / 1e12 / (average_event_time / 1e6) if ref_flops is not None else 0.0
+    )
     print(
-        f'{func_name} {desc} time:{average_event_time:.1f} us flops:{flops:.2f} TFLOPS speedup:{speedup:.2f}')
+        f"{func_name} {desc} time:{average_event_time:.1f} us flops:{flops:.2f} TFLOPS speedup:{speedup:.2f}"
+    )
     return average_event_time
 
 
-if __name__ == '__main__':
-    device = 'cuda:0'
+if __name__ == "__main__":
+    device = "cuda:0"
     dtype = torch.float32
     bs = 256
     logits = torch.randn((bs, 126464), dtype=dtype, device=device)
@@ -60,7 +69,5 @@ if __name__ == '__main__':
     # print(outputs)
 
     benchmark_func(torch.argmax, logits)
-    benchmark_func(torch.topk, logits, max_top_k, dim=-1, largest=True,
-                   sorted=True)
-    benchmark_func(sample_from_logit, logits, temperature, top_k, top_p,
-                   max_top_k)
+    benchmark_func(torch.topk, logits, max_top_k, dim=-1, largest=True, sorted=True)
+    benchmark_func(sample_from_logit, logits, temperature, top_k, top_p, max_top_k)

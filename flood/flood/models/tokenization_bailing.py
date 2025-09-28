@@ -31,23 +31,22 @@ class BailingTokenizer(PreTrainedTokenizerFast):
     ]
 
     def __init__(
-            self,
-            vocab_file=None,
-            merges_file=None,
-            tokenizer_file=None,
-            clean_up_tokenization_spaces=False,
-            bos_token="<|startoftext|>",
-            eos_token="<|endoftext|>",
-            cls_token="[CLS]",
-            pad_token="<|endoftext|>",
-            gmask_token="[gMASK]",
-            add_bos_token=False,
-            add_eos_token=False,
-            **kwargs,
+        self,
+        vocab_file=None,
+        merges_file=None,
+        tokenizer_file=None,
+        clean_up_tokenization_spaces=False,
+        bos_token="<|startoftext|>",
+        eos_token="<|endoftext|>",
+        cls_token="[CLS]",
+        pad_token="<|endoftext|>",
+        gmask_token="[gMASK]",
+        add_bos_token=False,
+        add_eos_token=False,
+        **kwargs,
     ):
         self._gmask_token = (
-            AddedToken(gmask_token, lstrip=False, rstrip=False,
-                       normalized=False)
+            AddedToken(gmask_token, lstrip=False, rstrip=False, normalized=False)
             if isinstance(gmask_token, str)
             else gmask_token
         )
@@ -82,16 +81,23 @@ class BailingTokenizer(PreTrainedTokenizerFast):
         self.check_special_tokens()
 
     def check_special_tokens(self):
-        '''
+        """
         eos_token, cls_token, mask_token
         special tokens should init, check special token is not None
-        '''
+        """
         for name, special_token in zip(
-                ['eos', 'bos', 'cls', 'gmask', 'pad'],
-                [self.eos_token, self.bos_token, self.cls_token,
-                 self.gmask_token, self.pad_token],
+            ["eos", "bos", "cls", "gmask", "pad"],
+            [
+                self.eos_token,
+                self.bos_token,
+                self.cls_token,
+                self.gmask_token,
+                self.pad_token,
+            ],
         ):
-            assert special_token is not None, f'should init special token [{name}] in tokenizer_config.json'
+            assert (
+                special_token is not None
+            ), f"should init special token [{name}] in tokenizer_config.json"
 
     @property
     def gmask_token(self) -> Optional[str]:

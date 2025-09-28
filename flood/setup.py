@@ -11,24 +11,27 @@ from typing import Set
 # import pkg_resources
 from packaging.version import parse, Version
 from setuptools import find_packages, setup
+import torch
 from torch.utils import cpp_extension
-from torch.utils.cpp_extension import BuildExtension, CUDAExtension, \
-    CUDA_HOME
+from torch.utils.cpp_extension import BuildExtension, CUDAExtension, CUDA_HOME
 
-__version__ = "0.0.3"
+__version__ = "0.0.5"
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
 
 SUPPORTED_ARCHS = {"8.0", "8.9", "9.0a"}
 os.environ["TORCH_CUDA_ARCH_LIST"] = "8.0;8.9;9.0a"
 
-NVCC_FLAGS = ["-O3", "-std=c++17",
-              '-U__CUDA_NO_HALF_OPERATORS__',
-              '-U__CUDA_NO_HALF_CONVERSIONS__',
-              '-U__CUDA_NO_HALF2_OPERATORS__',
-              '-U__CUDA_NO_HALF2_CONVERSIONS__',
-              '-DSM90_MM'
-              ]
+NVCC_FLAGS = [
+    "-O3",
+    "-std=c++17",
+    "-U__CUDA_NO_HALF_OPERATORS__",
+    "-U__CUDA_NO_HALF_CONVERSIONS__",
+    "-U__CUDA_NO_HALF2_OPERATORS__",
+    "-U__CUDA_NO_HALF2_CONVERSIONS__",
+    "-DSM90_MM",
+    "-Wno-deprecated-declarations",
+]
 
 
 def get_nvcc_cuda_version(cuda_dir: str) -> Version:
@@ -36,8 +39,9 @@ def get_nvcc_cuda_version(cuda_dir: str) -> Version:
 
     Adapted from https://github.com/NVIDIA/apex/blob/8b7a1ff183741dd8f9b87e7bafd04cfde99cea28/setup.py
     """
-    nvcc_output = subprocess.check_output([cuda_dir + "/bin/nvcc", "-V"],
-                                          universal_newlines=True)
+    nvcc_output = subprocess.check_output(
+        [cuda_dir + "/bin/nvcc", "-V"], universal_newlines=True
+    )
     output = nvcc_output.split()
     release_idx = output.index("release") + 1
     nvcc_cuda_version = parse(output[release_idx].split(",")[0])
@@ -61,14 +65,16 @@ def get_torch_arch_list() -> Set[str]:
         raise RuntimeError(
             "None of the CUDA architectures in `TORCH_CUDA_ARCH_LIST` env "
             f"variable ({env_arch_list}) is supported. "
-            f"Supported CUDA architectures are: {valid_archs}.")
+            f"Supported CUDA architectures are: {valid_archs}."
+        )
     invalid_arch_list = torch_arch_list - valid_archs
     if invalid_arch_list:
         warnings.warn(
             f"Unsupported CUDA architectures ({invalid_arch_list}) are "
             "excluded from the `TORCH_CUDA_ARCH_LIST` env variable "
             f"({env_arch_list}). Supported CUDA architectures are: "
-            f"{valid_archs}.")
+            f"{valid_archs}."
+        )
     return arch_list
 
 
@@ -90,21 +96,18 @@ for capability in compute_capabilities:
 print(NVCC_FLAGS)
 ext_modules = []
 
-# cutlass_sources = ["csrc/flood.cpp"]
 
-custom_sources = ["csrc/flood.cpp",
-                  "csrc/layernorm/rmsnorm.cu",
-                  "csrc/activation/activation_kernels.cu",
-                  "csrc/rope/rope.cu",
-                  "csrc/cache/cache.cu",
-                  "csrc/moe/topk_softmax_kernels.cu",
-                  "csrc/moe/moe_align.cu",
-                  "csrc/moe/moe_sum.cu",
-                  # "csrc/w8a8/scaled_mm_c2x.cu",
-                  # "csrc/w8a8/scaled_mm_c3x.cu",
-                  # "csrc/w8a8/scaled_mm_entry.cu",
-                  "csrc/quantize/fp8_quant.cu"
-                  ]
+custom_sources = [
+    "csrc/flood.cpp",
+    "csrc/layernorm/rmsnorm.cu",
+    "csrc/activation/activation_kernels.cu",
+    "csrc/rope/rope.cu",
+    "csrc/cache/cache.cu",
+    "csrc/moe/topk_softmax_kernels.cu",
+    "csrc/moe/moe_align.cu",
+    "csrc/moe/moe_sum.cu",
+    "csrc/quantize/fp8_quant.cu",
+]
 
 # sources = cutlass_sources + custom_sources
 sources = custom_sources
@@ -112,16 +115,17 @@ for item in sources:
     sources[sources.index(item)] = os.path.join(current_dir, item)
 
 include_paths = []
-include_paths.append(cpp_extension.include_paths(cuda=True))  # cuda path
-include_paths.append(os.path.join(current_dir, 'csrc'))
-include_paths.append(os.path.join(current_dir, 'csrc/layernorm'))
-include_paths.append(os.path.join(current_dir, 'csrc/activation'))
-include_paths.append(os.path.join(current_dir, 'csrc/rope'))
-include_paths.append(os.path.join(current_dir, 'csrc/cache'))
-include_paths.append(os.path.join(current_dir, 'csrc/moe'))
-# include_paths.append(os.path.join(current_dir, 'csrc/cutlass/include'))
-# include_paths.append(os.path.join(current_dir, 'csrc/w8a8'))
-include_paths.append(os.path.join(current_dir, 'csrc/quantize'))
+if parse(torch.__version__) >= parse("2.6.0"):
+    include_paths.append(cpp_extension.include_paths(device_type="cuda"))
+else:
+    include_paths.append(cpp_extension.include_paths(cuda=True))
+include_paths.append(os.path.join(current_dir, "csrc"))
+include_paths.append(os.path.join(current_dir, "csrc/layernorm"))
+include_paths.append(os.path.join(current_dir, "csrc/activation"))
+include_paths.append(os.path.join(current_dir, "csrc/rope"))
+include_paths.append(os.path.join(current_dir, "csrc/cache"))
+include_paths.append(os.path.join(current_dir, "csrc/moe"))
+include_paths.append(os.path.join(current_dir, "csrc/quantize"))
 
 ext_modules.append(
     CUDAExtension(
@@ -130,20 +134,23 @@ ext_modules.append(
         include_dirs=include_paths,
         # libraries=['cublas', 'cudart', 'cudnn', 'curand', 'nvToolsExt'],
         extra_compile_args={
-            "cxx": ['-g',
-                    '-std=c++17',
-                    '-DNDEBUG',
-                    '-O3',
-                    '-fopenmp',
-                    '-lgomp',
-                    '-Wno-deprecated-declarations',
-                    '-Wno-deprecated',
-                    "-Wno-unused-variable"],
+            "cxx": [
+                "-g",
+                "-std=c++17",
+                "-DNDEBUG",
+                "-O3",
+                "-fopenmp",
+                "-lgomp",
+                "-Wno-deprecated-declarations",
+                "-Wno-deprecated",
+                "-Wno-unused-variable",
+            ],
             "nvcc": NVCC_FLAGS,
         },
-        define_macros=[('VERSION_INFO', __version__),
-                       # ('_DEBUG_MODE_', None),
-                       ]
+        define_macros=[
+            ("VERSION_INFO", __version__),
+            # ('_DEBUG_MODE_', None),
+        ],
     )
 )
 
@@ -153,12 +160,11 @@ ext_modules.append(
 setup(
     name="flood",
     version=__version__,
-    license="CC-BY-4.0",
+    license="MIT",
     license_files=("LICENSE",),
     description="Flood Inference Framework",
     URL="http://gitlab.alibaba-inc.com/infer/framework.git",
-    packages=find_packages(
-        exclude=("build", "csrc", "test", "example", "benchmark")),
+    packages=find_packages(exclude=("build", "csrc", "test", "example", "benchmark")),
     ext_modules=ext_modules,
     cmdclass={"build_ext": BuildExtension} if ext_modules else {},
     install_requires=[],

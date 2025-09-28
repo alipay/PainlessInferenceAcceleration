@@ -10,7 +10,7 @@ with pathlib.Path("requirements.txt").open() as f:
 setup(
     name="lookahead",
     version="0.0.2",
-    license="CC-BY-4.0",
+    license="MIT",
     license_files=("LICENSE",),
     description="a light-weighted framework for inference accelerate",
     URL="https://github.com/alipay/PainlessInferenceAcceleration",

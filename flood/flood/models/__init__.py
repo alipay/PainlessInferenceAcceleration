@@ -1,30 +1,54 @@
-
 from flood.models.modeling_llama import LlamaForCausalLM
 from flood.models.modeling_bailing import BailingForCausalLM
 from flood.models.modeling_bailing_moe import BailingMoeForCausalLM
+from flood.models.modeling_bailing_moe_v2 import BailingMoeV2ForCausalLM
+
+from flood.models.modeling_bailing_moe_linear import BailingMoeLinearForCausalLM
+from flood.models.modeling_bailing_moe_linear_v2 import BailingMoeLinearV2ForCausalLM
 from flood.models.modeling_qwen2 import Qwen2ForCausalLM
 from flood.models.modeling_deepseek import DeepseekForCausalLM
+from flood.models.modeling_deepseekv2 import DeepseekV2ForCausalLM
+from flood.models.modeling_deepseekv3 import DeepseekV3ForCausalLM
+from flood.models.modeling_qwen3 import Qwen3ForCausalLM
+from flood.models.modeling_qwen3_moe import Qwen3MoeForCausalLM
 
 
 model_class_map = {
     "LlamaForCausalLM": LlamaForCausalLM,
     "BailingForCausalLM": BailingForCausalLM,
     "BailingMoeForCausalLM": BailingMoeForCausalLM,
+    "BailingMoeV2ForCausalLM": BailingMoeV2ForCausalLM,
+    "BailingMoeLinearForCausalLM": BailingMoeLinearForCausalLM,
+    "BailingMoeLinearV2ForCausalLM": BailingMoeLinearV2ForCausalLM,
     "Qwen2ForCausalLM": Qwen2ForCausalLM,
-    "DeepseekForCausalLM": DeepseekForCausalLM
+    "DeepseekForCausalLM": DeepseekForCausalLM,
+    "DeepseekV2ForCausalLM": DeepseekV2ForCausalLM,
+    "DeepseekV3ForCausalLM": DeepseekV3ForCausalLM,
+    "Qwen3ForCausalLM": Qwen3ForCausalLM,
+    "Qwen3MoeForCausalLM": Qwen3MoeForCausalLM,
 }
 
 
 # used for device map setting
 class ModelAttr:
-    def __init__(self, emb_name='model.embed_tokens', layer_name='model.layers', norm_name='model.norm', head_name="lm_head"):
-        self.emb_name = emb_name 
-        self.layer_name = layer_name 
-        self.norm_name = norm_name 
-        self.head_name = head_name 
+    def __init__(
+        self,
+        emb_name="model.embed_tokens",
+        layer_name="model.layers",
+        norm_name="model.norm",
+        head_name="lm_head",
+    ):
+        self.emb_name = emb_name
+        self.layer_name = layer_name
+        self.norm_name = norm_name
+        self.head_name = head_name
+
 
 model_attr_map = {
     "DEFAULT": ModelAttr(),
-    "BailingForCausalLM": ModelAttr(emb_name='model.word_embeddings'),
-    "BailingMoeForCausalLM": ModelAttr(emb_name='model.word_embeddings'),
+    "BailingForCausalLM": ModelAttr(emb_name="model.word_embeddings"),
+    "BailingMoeForCausalLM": ModelAttr(emb_name="model.word_embeddings"),
+    "BailingMoeV2ForCausalLM": ModelAttr(emb_name="model.word_embeddings"),
+    "BailingMoeLinearForCausalLM": ModelAttr(emb_name="model.word_embeddings"),
+    "BailingMoeLinearV2ForCausalLM": ModelAttr(emb_name="model.word_embeddings"),
 }

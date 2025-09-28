@@ -18,7 +18,7 @@ x = torch.randn(batch_size, hidden_size).to(0).to(dtype)
 
 def vllm_silu(x: torch.Tensor) -> torch.Tensor:
     d = x.shape[-1] // 2
-    output_shape = (x.shape[:-1] + (d,))
+    output_shape = x.shape[:-1] + (d,)
     out = torch.empty(output_shape, dtype=x.dtype, device=x.device)
     vllm_ops.silu_and_mul(out, x)
     return out
@@ -26,7 +26,7 @@ def vllm_silu(x: torch.Tensor) -> torch.Tensor:
 
 def flood_silu(x: torch.Tensor) -> torch.Tensor:
     d = x.shape[-1] // 2
-    output_shape = (x.shape[:-1] + (d,))
+    output_shape = x.shape[:-1] + (d,)
     out = torch.empty(output_shape, dtype=x.dtype, device=x.device)
     flood_cuda.silu_and_mul(out, x)
     return out

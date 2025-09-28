@@ -10,7 +10,7 @@ with pathlib.Path("requirements.txt").open() as f:
 setup(
     name="ipad",
     version="0.0.2",
-    license="CC-BY-4.0",
+    license="MIT",
     license_files=("LICENSE",),
     description="iteratively pruning and distillation",
     URL="https://github.com/alipay/PainlessInferenceAcceleration",

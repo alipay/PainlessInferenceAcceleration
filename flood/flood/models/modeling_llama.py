@@ -11,9 +11,12 @@ from typing import List, Optional, Tuple, Union, Dict
 
 import torch
 from transformers.cache_utils import Cache
-from transformers.modeling_utils import PreTrainedModel, PretrainedConfig
+from transformers.modeling_utils import PreTrainedModel
+from transformers.modeling_utils import PretrainedConfig
 
-from flood.ops import RMSNorm, silu_and_mul
+
+from flood.ops.activation import silu_and_mul
+from flood.ops.norm import RMSNorm
 from flood.utils.batch import Batch
 from flood.layers.linear import AutoLinear
 from flood.layers.rope import AutoRope
@@ -24,7 +27,6 @@ from flood.layers.sampler import Sampler
 from transformers.models.llama.configuration_llama import LlamaConfig
 
 
-
 class LlamaMLP(torch.nn.Module):
     def __init__(self, config: PretrainedConfig, layer_idx: int = 0):
         super().__init__()
@@ -33,41 +35,46 @@ class LlamaMLP(torch.nn.Module):
         self.hidden_size = config.hidden_size
         self.intermediate_size = config.intermediate_size
 
-        self.gate_proj = AutoLinear.from_pretrained(self.hidden_size, 
-                                                    self.intermediate_size, 
-                                                    bias=config.mlp_bias, 
-                                                    config=config, 
-                                                    name='gate_proj')
-        self.up_proj = AutoLinear.from_pretrained(self.hidden_size, 
-                                                  self.intermediate_size, 
-                                                  bias=config.mlp_bias, 
-                                                  config=config, 
-                                                  name='up_proj')
-            
-        self.down_proj = AutoLinear.from_pretrained(self.intermediate_size, 
-                                                    self.hidden_size, 
-                                                    bias=config.mlp_bias, 
-                                                    config=config, 
-                                                    name='down_proj')
+        self.gate_proj = AutoLinear.from_pretrained(
+            self.hidden_size,
+            self.intermediate_size,
+            bias=config.mlp_bias,
+            config=config,
+            name="gate_proj",
+        )
+        self.up_proj = AutoLinear.from_pretrained(
+            self.hidden_size,
+            self.intermediate_size,
+            bias=config.mlp_bias,
+            config=config,
+            name="up_proj",
+        )
+
+        self.down_proj = AutoLinear.from_pretrained(
+            self.intermediate_size,
+            self.hidden_size,
+            bias=config.mlp_bias,
+            config=config,
+            name="down_proj",
+        )
 
     def flood_patch_func(self, kwargs=None):
         if self.layer_idx == 0:
-            print('patch MLP')
+            print("patch MLP")
 
         self.gate_up_proj = self.gate_proj.merge([self.gate_proj, self.up_proj])
         self.down_proj.patch()
 
         self.gate_proj = None
-        delattr(self, 'gate_proj')
+        delattr(self, "gate_proj")
 
         self.up_proj = None
-        delattr(self, 'up_proj')
-            
+        delattr(self, "up_proj")
+
     def forward(self, x):
         gate_up = self.gate_up_proj(x)
         act = silu_and_mul(gate_up)
         return self.down_proj(act)
-
 
 
 class LlamaAttention(torch.nn.Module):
@@ -79,9 +86,9 @@ class LlamaAttention(torch.nn.Module):
         self.hidden_size = config.hidden_size
         self.num_heads = config.num_attention_heads
         head_dim = None
-        if hasattr(config, 'head_dim'):
+        if hasattr(config, "head_dim"):
             head_dim = config.head_dim
-        if head_dim is None or head_dim<=0:
+        if head_dim is None or head_dim <= 0:
             head_dim = self.hidden_size // self.num_heads
         self.head_dim = head_dim
         self.intermediate_size = self.num_heads * self.head_dim
@@ -91,65 +98,84 @@ class LlamaAttention(torch.nn.Module):
         self.rope_theta = float(config.rope_theta)
         self.softmax_scale = math.sqrt(1.0 / self.head_dim)
 
-        self.q_proj = AutoLinear.from_pretrained(self.hidden_size, 
-                                                 self.num_heads * self.head_dim, 
-                                                 bias=config.qkv_bias if hasattr(config, "qkv_bias") else config.attention_bias, 
-                                                 config=config, 
-                                                 name='q_proj')
-        self.k_proj = AutoLinear.from_pretrained(self.hidden_size, 
-                                                 self.num_key_value_heads * self.head_dim, 
-                                                 bias=config.qkv_bias if hasattr(config, "qkv_bias") else config.attention_bias, 
-                                                 config=config, 
-                                                 name='k_proj')
-        self.v_proj = AutoLinear.from_pretrained(self.hidden_size, 
-                                                 self.num_key_value_heads * self.head_dim, 
-                                                 bias=config.qkv_bias if hasattr(config, "qkv_bias") else config.attention_bias, 
-                                                 config=config, 
-                                                 name='v_proj')
-            
-        self.o_proj = AutoLinear.from_pretrained(self.intermediate_size, 
-                                                 self.hidden_size, 
-                                                 bias=config.o_bias if hasattr(config, "o_bias") else config.attention_bias, 
-                                                 config=config, 
-                                                 name='o_proj')
+        self.q_proj = AutoLinear.from_pretrained(
+            self.hidden_size,
+            self.num_heads * self.head_dim,
+            bias=(
+                config.qkv_bias
+                if hasattr(config, "qkv_bias")
+                else config.attention_bias
+            ),
+            config=config,
+            name="q_proj",
+        )
+        self.k_proj = AutoLinear.from_pretrained(
+            self.hidden_size,
+            self.num_key_value_heads * self.head_dim,
+            bias=(
+                config.qkv_bias
+                if hasattr(config, "qkv_bias")
+                else config.attention_bias
+            ),
+            config=config,
+            name="k_proj",
+        )
+        self.v_proj = AutoLinear.from_pretrained(
+            self.hidden_size,
+            self.num_key_value_heads * self.head_dim,
+            bias=(
+                config.qkv_bias
+                if hasattr(config, "qkv_bias")
+                else config.attention_bias
+            ),
+            config=config,
+            name="v_proj",
+        )
+
+        self.o_proj = AutoLinear.from_pretrained(
+            self.intermediate_size,
+            self.hidden_size,
+            bias=config.o_bias if hasattr(config, "o_bias") else config.attention_bias,
+            config=config,
+            name="o_proj",
+        )
 
         self.rope = AutoRope.from_pretrained(config)
-        self.attention =  None
+        self.attention = None
 
     def flood_patch_func(self, kwargs=None):
         if self.layer_idx == 0:
-            print('patch Attention')
-
+            print("patch Attention")
 
         self.qkv_proj = self.q_proj.merge([self.q_proj, self.k_proj, self.v_proj])
 
         self.o_proj.patch()
 
         self.q_proj = None
-        delattr(self, 'q_proj')
+        delattr(self, "q_proj")
 
         self.k_proj = None
-        delattr(self, 'k_proj')
+        delattr(self, "k_proj")
 
         self.v_proj = None
-        delattr(self, 'v_proj')
+        delattr(self, "v_proj")
 
         if kwargs is None:
             kwargs = {}
-        cache_dtype = kwargs.get('cache_dtype', None)
-        interleave_value = kwargs.get('interleave_value', False)
+        cache_dtype = kwargs.get("cache_dtype", None)
+        interleave_value = kwargs.get("interleave_value", False)
         if interleave_value:
-            AutoAttention.interleave(self.qkv_proj, 
-                                     self.num_heads, 
-                                     self.num_key_value_heads, 
-                                     self.head_dim)
+            AutoAttention.interleave(
+                self.qkv_proj, self.num_heads, self.num_key_value_heads, self.head_dim
+            )
 
-        kernels = kwargs.get('kernels', ['sa'])
-        self.attention = AutoAttention.from_pretrained(cache_dtype, 
-                                                       layer_idx=self.layer_idx, 
-                                                       kernels=kernels,
-                                                       softmax_scale=self.softmax_scale)
-
+        kernels = kwargs.get("kernels", ["sa"])
+        self.attention = AutoAttention.from_pretrained(
+            cache_dtype,
+            layer_idx=self.layer_idx,
+            kernels=kernels,
+            softmax_scale=self.softmax_scale,
+        )
 
     def forward(
         self,
@@ -162,22 +188,29 @@ class LlamaAttention(torch.nn.Module):
 
         q_len = hidden_states.size(0)
         qkv = self.qkv_proj(hidden_states)
-        qkv = qkv.view(q_len, self.num_heads + 2 * self.num_key_value_heads, self.head_dim)
+        qkv = qkv.view(
+            q_len, self.num_heads + 2 * self.num_key_value_heads, self.head_dim
+        )
 
-        query_states, key_states, value_states = qkv.split([self.num_heads, 
-                                                            self.num_key_value_heads, 
-                                                            self.num_key_value_heads], 
-                                                            dim=-2)
+        query_states, key_states, value_states = qkv.split(
+            [self.num_heads, self.num_key_value_heads, self.num_key_value_heads], dim=-2
+        )
 
-        batch_meta_info = kwargs['batch_meta_info']
+        batch_meta_info = kwargs["batch_meta_info"]
 
-        self.rope(query_states, key_states, batch_meta_info.q_offsets, batch_meta_info.pids)
+        q_offsets = (
+            batch_meta_info.q_offsets
+            if batch_meta_info.draft_offsets is None
+            else batch_meta_info.draft_offsets
+        )
+        self.rope(query_states, key_states, q_offsets, batch_meta_info.position_ids)
 
-        attn_output = self.attention(query_states, key_states, value_states, 
-                                     batch_meta_info, past_key_value)
+        attn_output = self.attention(
+            query_states, key_states, value_states, batch_meta_info, past_key_value
+        )
 
         # model may have different hidden_size
-        attn_output = attn_output.view(q_len, self.intermediate_size)  
+        attn_output = attn_output.view(q_len, self.intermediate_size)
         attn_output = self.o_proj(attn_output)
 
         return attn_output
@@ -187,16 +220,18 @@ class LlamaDecoderLayer(torch.nn.Module):
     def __init__(self, config: PretrainedConfig, layer_idx: int = 0):
         super().__init__()
         self.hidden_size = config.hidden_size
+        self.n_layer = config.num_hidden_layers
         self.layer_idx = layer_idx
 
-        # use layer_idx==None to indicate that the layer does not 
-        # initialized on the current node, and use layer_idx==-1
-        # to indicate the final layer of the model
+        # use layer_idx==None to indicate that the layer does not
+        # initialized on the current node
         if self.layer_idx is not None:
             self.self_attn = LlamaAttention(config, layer_idx=layer_idx)
             self.mlp = LlamaMLP(config, layer_idx=layer_idx)
             self.input_layernorm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
-            self.post_attention_layernorm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
+            self.post_attention_layernorm = RMSNorm(
+                config.hidden_size, eps=config.rms_norm_eps
+            )
 
     def forward(
         self,
@@ -219,12 +254,15 @@ class LlamaDecoderLayer(torch.nn.Module):
             attention_mask=attention_mask,
             position_ids=position_ids,
             past_key_value=past_key_value,
-            batch_meta_info=batch_meta_info
+            batch_meta_info=batch_meta_info,
         )
 
         hidden_states += residual
 
-        if self.layer_idx == -1 and batch_meta_info.logit_indices is not None:
+        if (
+            self.layer_idx == self.n_layer - 1
+            and batch_meta_info.logit_indices is not None
+        ):
             if batch_meta_info.logit_indices.numel() == 0:
                 return
             hidden_states = hidden_states[batch_meta_info.logit_indices]
@@ -249,23 +287,24 @@ class LlamaModel(PreTrainedModel):
         self.padding_idx = config.pad_token_id
         self.vocab_size = config.vocab_size
 
-        rank = int(os.environ.get('RANK', '0'))
-        world_size = int(os.environ.get('WORLD_SIZE', '1'))
+        self.rank = int(os.environ.get("FLOOD_RANK", "0"))
+        self.world_size = int(os.environ.get("FLOOD_WORLD_SIZE", "1"))
 
-        if rank == 0:
-            self.embed_tokens = AutoEmbedding.from_pretrained(config, 
-                                                                config.vocab_size, 
-                                                                config.hidden_size, 
-                                                                padding_idx=self.padding_idx)
+        if self.rank == 0:
+            self.embed_tokens = AutoEmbedding.from_pretrained(
+                config,
+                config.vocab_size,
+                config.hidden_size,
+                padding_idx=self.padding_idx,
+            )
         else:
-            self.embed_tokens = None 
+            self.embed_tokens = None
 
         n_layer = config.num_hidden_layers
         layers = []
-        local_size = n_layer // world_size
+        local_size = n_layer // self.world_size
         for i in range(n_layer):
-            layer_idx = i if i // local_size == rank else None
-            layer_idx = -1 if layer_idx == n_layer - 1 and rank == world_size - 1 else layer_idx
+            layer_idx = i if i // local_size == self.rank else None
             layers.append(LlamaDecoderLayer(config, layer_idx=layer_idx))
         self.layers = torch.nn.ModuleList(layers)
 
@@ -287,18 +326,19 @@ class LlamaForCausalLM(PreTrainedModel):
         self.model = LlamaModel(config)
         self.vocab_size = config.vocab_size
 
-        self.rank = int(os.environ.get('RANK', '0'))
-        self.world_size = int(os.environ.get('WORLD_SIZE', '1'))
+        self.rank = int(os.environ.get("FLOOD_RANK", "0"))
+        self.world_size = int(os.environ.get("FLOOD_WORLD_SIZE", "1"))
         if self.rank == self.world_size - 1:
-            self.lm_head = AutoLinear.from_pretrained(config.hidden_size, 
-                                                    config.vocab_size, 
-                                                    bias=False, 
-                                                    config=config, 
-                                                    name='lm_head')        
+            self.lm_head = AutoLinear.from_pretrained(
+                config.hidden_size,
+                config.vocab_size,
+                bias=False,
+                config=config,
+                name="lm_head",
+            )
         else:
             self.lm_head = None
         self.sampler = Sampler()
-
 
     def get_input_embeddings(self):
         return self.model.embed_tokens
@@ -318,12 +358,10 @@ class LlamaForCausalLM(PreTrainedModel):
     def get_decoder(self):
         return self.model
 
-
     def flood_patch_func(self, kwargs=None):
-        if hasattr(self.lm_head, 'patch'):
-            print('patch lm_head')            
+        if hasattr(self.lm_head, "patch"):
+            print("patch lm_head")
             self.lm_head.patch()
-
 
     @torch.inference_mode()
     def forward(
@@ -334,14 +372,13 @@ class LlamaForCausalLM(PreTrainedModel):
         position_ids: Optional[torch.LongTensor] = None,
         past_key_values: Optional[Cache] = None,
         inputs_embeds: Optional[torch.FloatTensor] = None,
-        batch_meta_info : Batch = None,
-        device_list : List = None,
-        sync_layers : List = None,
-        streams : List = None
+        batch_meta_info: Batch = None,
+        device_list: List = None,
+        sync_layers: List = None,
+        streams: List = None,
     ) -> List:
 
         n_devices = len(device_list)
-        n_layers = len(self.model.layers)
         for i, indices in enumerate(device_list):
             stream = streams[i]
             with torch.cuda.stream(stream):
@@ -367,7 +404,7 @@ class LlamaForCausalLM(PreTrainedModel):
                         batch_meta_info=batch_meta_info,
                     )
 
-                if i < n_devices-1:
+                if i < n_devices - 1:
                     device = torch.device(i + 1)
                     hidden_states = hidden_states.to(device, non_blocking=True)
                     batch_meta_info.to(device, non_blocking=True)
@@ -381,5 +418,13 @@ class LlamaForCausalLM(PreTrainedModel):
                 stream.synchronize()
 
         sync_layers[-1]()
+
+        # TODO: adapt for multi-node serving
+        if batch_meta_info.mode == 2:
+            batch_meta_info.spec.update_cache(
+                batch_meta_info.cache_src_indices,
+                batch_meta_info.cache_dst_indices,
+                past_key_values,
+            )
 
         return outputs

@@ -14,25 +14,18 @@
 
 #include "cuda_type_utils.h"
 
-__global__ void update_cache_kernel(uint4* k_out,  uint4* v_out,  uint4* key_states, uint4* value_states,  int* indices,  int stride) {
+__global__ void update_cache_kernel(uint4* k_out,  uint4* v_out,  uint4* key_states, uint4* value_states,  int* indices, int input_k_stride, int input_v_stride, int output_stride) {
     
     int token_id = blockIdx.x;
     int tid = threadIdx.x;
-    int dim = blockDim.x;
 
-    // int slot_id =  __ldg(indices+token_id);
-    int slot_id =  indices[token_id];
+    long slot_id = (long) indices[token_id];
 
-    int offset = token_id * stride +  tid;
+    int k_offset = token_id * input_k_stride +  tid;
+    int v_offset = token_id * input_v_stride + tid;
 
-    // uint4 tmp1 = __ldg(key_states + offset);
-    // uint4 tmp2 = __ldg(value_states + offset);
-
-    // uint4 tmp1 = key_states[offset];
-    // uint4 tmp2 = value_states[offset];
-
-    k_out[slot_id * dim + tid] = key_states[offset];
-    v_out[slot_id * dim + tid] = value_states[offset];
+    k_out[slot_id * output_stride + tid] = key_states[k_offset];
+    v_out[slot_id * output_stride + tid] = value_states[v_offset];
 
 }
 
@@ -41,7 +34,11 @@ void update_cache(torch::Tensor& k_out,
                   torch::Tensor& key_states, 
                   torch::Tensor& value_states,  
                   torch::Tensor& indices, 
-                  int tok, int dim, int stride) 
+                  int tok, 
+                  int dim, 
+                  int input_k_stride,
+                  int input_v_stride,
+                  int output_stride) 
 {
 
     dim3 blocks(tok);
@@ -55,48 +52,48 @@ void update_cache(torch::Tensor& k_out,
                                              static_cast<uint4*>(v_out.data_ptr()), 
                                              static_cast<uint4*>(key_states.data_ptr()), 
                                              static_cast<uint4*>(value_states.data_ptr()), 
-                                             static_cast<int32_t*>(indices.data_ptr()), stride);
+                                             static_cast<int32_t*>(indices.data_ptr()), 
+                                             input_k_stride,
+                                             input_v_stride,
+                                             output_stride);
 }
 
 
 
-__global__ void update_fusion_cache_kernel(uint4* kv_out,  uint4* kv_states, int* indices, int stride) {
+__global__ void update_fusion_cache_kernel(uint4* kv_out,  uint4* kv_states, int* indices, int input_stride, int output_stride) {
     
     int token_id = blockIdx.x;
     int tid = threadIdx.x;
     int dim = blockDim.x;
 
-    // int slot_id =  __ldg(indices+token_id);
-    int slot_id =  indices[token_id];
+    long slot_id = (long) indices[token_id];
 
-    int offset = token_id * stride +  tid;
+    int offset = token_id * input_stride +  tid;
 
-    // uint4 tmp1 = __ldg(key_states + offset);
-    // uint4 tmp2 = __ldg(value_states + offset);
-
-    // uint4 tmp1 = key_states[offset];
-    // uint4 tmp2 = value_states[offset];
-
-    kv_out[slot_id * dim + tid] = kv_states[offset];
+    kv_out[slot_id * output_stride + tid] = kv_states[offset];
 
 }
 
 void update_fusion_cache(torch::Tensor& kv_out, 
-                  torch::Tensor& kv_states, 
-                  torch::Tensor& indices, 
-                  int tok, int dim, int stride) 
+                        torch::Tensor& kv_states, 
+                        torch::Tensor& indices, 
+                        int tok, 
+                        int dim, 
+                        int input_stride, 
+                        int output_stride) 
 {
 
     dim3 blocks(tok);
     dim3 threads(dim/8);
 
-    // const at::cuda::OptionalCUDAGuard device_guard(device_of(k_out));
     const cudaStream_t current_stream = at::cuda::getCurrentCUDAStream();
     
     update_fusion_cache_kernel
     <<<blocks, threads, 0, current_stream>>>(static_cast<uint4*>(kv_out.data_ptr()), 
                                              static_cast<uint4*>(kv_states.data_ptr()), 
-                                             static_cast<int32_t*>(indices.data_ptr()), stride);
+                                             static_cast<int32_t*>(indices.data_ptr()), 
+                                             input_stride,
+                                             output_stride);
 }
 
 

@@ -15,14 +15,14 @@ class DeviceSyncLayer(torch.nn.Module):
         self.logging = False
 
     def __call__(self, hidden_states, *args, **kwargs):
-        device = torch.device(f'cuda:{self.dst}')
+        device = torch.device(f"cuda:{self.dst}")
         hidden_states = hidden_states.to(device)
-        kwargs['meta'].to(device)
+        kwargs["meta"].to(device)
 
         return hidden_states
 
 
-class NodeSyncLayer():
+class NodeSyncLayer:
     def __init__(self, dst, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.dst = dst
@@ -33,7 +33,7 @@ class NodeSyncLayer():
         return hidden_states
 
 
-class TaskSyncLayer():
+class TaskSyncLayer:
     def __init__(self, idx, pre_task, task, sync_wait_time, *args, **kwargs):
 
         super().__init__(*args, **kwargs)

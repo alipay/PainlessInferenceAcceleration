@@ -25,9 +25,12 @@ async def async_request(req):
     ts = time.time()
     token_count = 0
     async with aiohttp.ClientSession(timeout=AIOHTTP_TIMEOUT) as session:
-        async with session.post(url="http://localhost:30010/generate",
-                                json=data, chunked=True,
-                                read_bufsize=1) as response:
+        async with session.post(
+            url="http://localhost:30010/generate",
+            json=data,
+            chunked=True,
+            read_bufsize=1,
+        ) as response:
             async for chunk_bytes in response.content.iter_chunked(256):
                 chunk_bytes = chunk_bytes.strip()
                 if not chunk_bytes:
@@ -46,7 +49,10 @@ async def async_request(req):
     return ttft, latency, token_count
 
 
-async def get_request(reqs, request_rate: float = 1.0, ):
+async def get_request(
+    reqs,
+    request_rate: float = 1.0,
+):
     for request in reqs:
         yield request
 
@@ -75,15 +81,17 @@ async def benchmark(reqs, request_rate: float = 1.0):
         token_counts += token_count
     input_length = sum([req.input_length for req in reqs]) / n_output
     output_length = token_counts / n_output
-    line = (f'sample:{n_output} length:{input_length:.0f}/{output_length:.0f} '
-            f'qps:{request_rate:.2f} duration:{bench_time:.1f}s '
-            f'ttft:{ttfts / n_output:.3f}s latency:{latencies / n_output:.3f}s'
-            f' throughput:{token_counts / bench_time:.2f}token/s')
-    with open('server.log', 'a+') as logger:
+    line = (
+        f"sample:{n_output} length:{input_length:.0f}/{output_length:.0f} "
+        f"qps:{request_rate:.2f} duration:{bench_time:.1f}s "
+        f"ttft:{ttfts / n_output:.3f}s latency:{latencies / n_output:.3f}s"
+        f" throughput:{token_counts / bench_time:.2f}token/s"
+    )
+    with open("server.log", "a+") as logger:
         log(logger, line)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
 
     ils = [100, 500, 1000, 2000, 4000, 16384, 16384, 32768, 65536]
     ols = [300, 300, 300, 500, 500, 1, 1, 1, 1]
@@ -91,13 +99,13 @@ if __name__ == '__main__':
     # request_rates = [16, 7.7, 4.3, 1.9, 0.9]
     request_rates = [16.5, 7.8, 4.4, 2.0, 0.95, 0.2, 0.2, 0.2, 0.2]
     for i in range(5, 9):
-        data_path = 'dummy'
-        reqs = Reader.read_dummy_dataset(max_count=cs[i], input_length=ils[i],
-                                         output_length=ols[i], flunc=0.0)
+        data_path = "dummy"
+        reqs = Reader.read_dummy_dataset(
+            max_count=cs[i], input_length=ils[i], output_length=ols[i], flunc=0.0
+        )
 
         # model_path = '/mntnlp/common_base_model/Qwen__Qwen2.5-7B-Instruct'
         # data_path = '/mntnlp/nanxiao/dataset/sharegpt/ShareGPT_V3_unfiltered_cleaned_split.json'
         # reqs = Reader.read_sharegpt_dataset(data_path, model_path, max_count=2000)
 
-        benchmark_result = asyncio.run(
-            benchmark(reqs, request_rate=request_rates[i]))
+        benchmark_result = asyncio.run(benchmark(reqs, request_rate=request_rates[i]))
