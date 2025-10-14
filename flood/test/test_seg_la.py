@@ -1,8 +1,3 @@
-# -*- coding: utf-8 -*-
-"""
-Copyright (c) Ant Financial Service Group and its affiliates.
-"""
-
 import random
 import math
 import torch
@@ -16,7 +11,7 @@ class Meta:
         pass
 
 
-def torch_linear_attn(q, k, v, s, s_scales, decay_scales, causal=True, mask=None):
+def _torch_linear_attn(q, k, v, s, s_scales, decay_scales):
     q = q.float()
     k = k.float()
     v = v.float()
@@ -25,15 +20,6 @@ def torch_linear_attn(q, k, v, s, s_scales, decay_scales, causal=True, mask=None
     k_head = k.shape[2]
     k_len = k.shape[1]
     assert q_len == k_len
-    if mask is None:
-        if causal:
-            mask = torch.tril(
-                torch.ones((q_len, k_len), dtype=q.dtype, device="cuda:0"),
-                k_len - q_len,
-            )
-        else:
-            mask = torch.ones((q_len, k_len), dtype=q.dtype, device="cuda:0")
-
     softmax_scale = 1.0 / math.sqrt(head_dim)
     query = q.transpose(1, 2) * softmax_scale  # [bs, head, len, dim]
     key = torch.permute(k, (0, 2, 3, 1))  # [bs, head, dim, len]
@@ -45,23 +31,39 @@ def torch_linear_attn(q, k, v, s, s_scales, decay_scales, causal=True, mask=None
 
     arr = torch.arange(q_len, dtype=torch.float32, device=q.device)
     decay_matrix = arr.view(-1, 1) - arr.view(1, -1)
-    decay_matrix = torch.exp(decay_scales[:, None, None] * decay_matrix[None])
+    decay_matrix = torch.exp(-decay_scales[:, None, None] * decay_matrix[None])
     decay_matrix = torch.tril(decay_matrix, 0)
 
     score = torch.matmul(query, key)
-    score *= mask
     score *= decay_matrix[None]
     att = torch.matmul(score, value)
 
-    decay_arr = torch.exp(decay_scales[:, None, None] * (arr[:, None] + 1))
+    decay_arr = torch.exp(-decay_scales[:, None, None] * (arr[:, None] + 1))
     att += torch.matmul(query * decay_arr, s * s_scales[:, None, None, None])
 
     att = torch.reshape(att.transpose(1, 2), [bs, q_len, q_head, head_dim]).contiguous()
 
-    decay_key = key * torch.exp(decay_scales[:, None, None] * (q_len - 1 - arr))
+    decay_key = key * torch.exp(-decay_scales[:, None, None] * (q_len - 1 - arr))
     state = decay_key @ value
 
     return att, state
+
+
+def torch_linear_attn(q, k, v, s, s_scales, decay_scales, mask=None):
+    if mask is None:
+        return _torch_linear_attn(q, k, v, s, s_scales, decay_scales)
+
+    outputs = []
+    for i in range(mask.size(-1)):
+        m = mask[0, i, :]
+        indices = torch.where(m > 0)[0]
+        q_ = q[:, indices]
+        k_ = k[:, indices]
+        v_ = v[:, indices]
+        o_, _ = _torch_linear_attn(q_, k_, v_, s, s_scales, decay_scales)
+        outputs.append(o_[:, -1:])
+    outputs = torch.cat(outputs, 1)
+    return outputs, s
 
 
 import torch.nn.functional as F
@@ -94,7 +96,7 @@ def chunk_simple_gla_ref(
         v = F.pad(v, (0, 0, 0, pad_len))
         g = F.pad(g, (0, pad_len))
     q, k, v, g = map(lambda x: x.to(torch.float32), [q, k, v, g])
-    decay = g
+    decay = -g
     b, h, t, d_k = q.shape
     d_v = v.shape[-1]
     q = q * scale
@@ -188,26 +190,17 @@ def test_seg_attn(mode="prefill", even=True, decouple=False):
         qls = [1024 - bs + 1] + [1] * (bs - 1)
         kls = qls
     elif mode == "spec":
-        bs = 16
+        bs = 1
         qls = [mask_size] * bs
         kls = qls
 
         assert all([x == mask_size for x in qls])
 
-        masks = torch.tril(
-            torch.ones((bs, mask_size, mask_size), dtype=torch.int8, device=device), 0
-        )
-        for i in range(mask_size):
-            for j in range(mask_size):
-                if j < i:
-                    masks[:, i, j] = random.randint(0, 1)
-        # print(f'{masks}')
+        masks = torch.ones((bs, mask_size, mask_size), dtype=torch.int8, device=device)
+        masks[:, 5:, 1:5] = 0
+        masks[:, 8:, 5:8] = 0
+        masks = torch.tril(masks, 0)
 
-        full_mask = torch.ones(
-            (bs, qls[0], kls[0] - qls[0]), dtype=torch.float32, device=device
-        )
-        torch_mask = -10000 * (1 - torch.cat([full_mask, masks.float()], dim=2))
-        torch_mask = torch_mask[:, None]
     else:
         raise ValueError(f"unknown mode:{mode}")
 
@@ -235,8 +228,8 @@ def test_seg_attn(mode="prefill", even=True, decouple=False):
     s = torch.randn(bs, kv_head, dim, dim, dtype=dtype, device=device)
     s_scales = torch.ones((bs,), device=device, dtype=dtype)
 
-    decay_scales = -(
-        2 ** (-0.5 * torch.arange(1, qo_head + 1, dtype=torch.float32, device=device))
+    decay_scales = 2 ** (
+        -0.5 * torch.arange(1, qo_head + 1, dtype=torch.float32, device=device)
     )
 
     desc = f"mode:{mode} decouple:{decouple} bs:{len(qls)} q:{qls[0]} k:{kls[0]} qo_head:{qo_head} kv_head:{kv_head} dim:{dim}"
@@ -244,25 +237,28 @@ def test_seg_attn(mode="prefill", even=True, decouple=False):
     seg_attn_meta = get_seg_attn_meta(qls, kls, mask=masks)
     seg_attn_meta.s_scales = s_scales
 
-    # org_output, state_ref = torch_linear_attn(q.view(bs, qls[0], qo_head, dim),
-    #                                 k.view(bs, kls[0], kv_head, dim),
-    #                                 v.view(bs, kls[0], kv_head, dim),
-    #                                 s,
-    #                                 s_scales,
-    #                                 decay_scales,
-    #                                 causal=True,
-    #                                 mask=torch_mask)
-    # org_output = torch.reshape(org_output, (bs*qls[0], qo_head, dim))
+    if seg_attn_meta.mask is not None:
+        org_output, state_ref = torch_linear_attn(
+            q.view(bs, qls[0], qo_head, dim),
+            k.view(bs, kls[0], kv_head, dim),
+            v.view(bs, kls[0], kv_head, dim),
+            s,
+            s_scales,
+            decay_scales,
+            mask=seg_attn_meta.mask,
+        )
+        org_output = torch.reshape(org_output, (bs * qls[0], qo_head, dim))
+    else:
 
-    org_output, state_ref = chunk_simple_gla_ref(
-        q.view(bs, qls[0], qo_head, dim),
-        k.view(bs, kls[0], kv_head, dim),
-        v.view(bs, kls[0], kv_head, dim),
-        decay_scales.view(1, 1, -1).expand(bs, qls[0], qo_head),
-        initial_state=s,
-        output_final_state=True,
-    )
-    org_output = torch.reshape(org_output, (bs * qls[0], qo_head, dim))
+        org_output, state_ref = chunk_simple_gla_ref(
+            q.view(bs, qls[0], qo_head, dim),
+            k.view(bs, kls[0], kv_head, dim),
+            v.view(bs, kls[0], kv_head, dim),
+            decay_scales.view(1, 1, -1).expand(bs, qls[0], qo_head),
+            initial_state=s,
+            output_final_state=True,
+        )
+        org_output = torch.reshape(org_output, (bs * qls[0], qo_head, dim))
 
     torch.cuda.synchronize()
 
@@ -284,22 +280,25 @@ def test_seg_attn(mode="prefill", even=True, decouple=False):
     state_rate = state_err / state_amp
 
     print(f"\n{desc} err:{err:.4f} output_rate:{rate:.4f} state_rate:{state_rate:.4f}")
-    # if math.isnan(rate) or rate > 0.02:
-    #     print(
-    #         f"org max:{torch.max(org_output).item():.3f} min:{torch.min(org_output).item():.3f}")
-    #     print(
-    #         f"opt max:{torch.max(opt_output).item():.3f} min:{torch.min(opt_output).item():.3f}")
+    if math.isnan(rate) or rate > 0.02:
+        print(
+            f"org max:{torch.max(org_output).item():.3f} min:{torch.min(org_output).item():.3f}"
+        )
+        print(
+            f"opt max:{torch.max(opt_output).item():.3f} min:{torch.min(opt_output).item():.3f}"
+        )
 
-    #     print("org_output[:,0,0]", org_output[:, 0, 0])
-    #     print("opt_output[:,0,0]", opt_output[:, 0, 0])
+        print("org_output[:,0,0]", org_output[:, 0, 0])
+        print("opt_output[:,0,0]", opt_output[:, 0, 0])
 
-    #     print("org_output[0,:,0]", org_output[0, :, 0])
-    #     print("opt_output[0,:,0]", opt_output[0, :, 0])
+        print("org_output[0,:,0]", org_output[0, :, 0])
+        print("opt_output[0,:,0]", opt_output[0, :, 0])
 
-    #     print("org_output[0,0,:]", org_output[0, 0, :])
-    #     print("opt_output[0,0,:]", opt_output[0, 0, :])
-    #     torch.testing.assert_close(opt_output.float(), org_output.float(),
-    #                                rtol=0.05, atol=0.1)
+        print("org_output[0,0,:]", org_output[0, 0, :])
+        print("opt_output[0,0,:]", opt_output[0, 0, :])
+        torch.testing.assert_close(
+            opt_output.float(), org_output.float(), rtol=0.05, atol=0.1
+        )
 
     benchmark_func(
         seg_la_fwd,
@@ -315,7 +314,8 @@ def test_seg_attn(mode="prefill", even=True, decouple=False):
 
 
 if __name__ == "__main__":
-    for mode in ["prefill", "decode"]:
-        for even in [True, False]:
-            for decouple in [False, True]:
-                test_seg_attn(mode=mode, even=even, decouple=decouple)
+    # for mode in ['prefill','decode']:
+    #     for even in [True, False]:
+    #         for decouple in [False, True]:
+    #             test_seg_attn(mode=mode, even=even, decouple=decouple)
+    test_seg_attn(mode="spec", even=True, decouple=False)

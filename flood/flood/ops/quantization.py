@@ -10,7 +10,10 @@ import torch
 import triton
 import triton.language as tl
 
-import flood_cuda
+try:
+    import flood_cuda
+except ImportError:
+    pass
 
 
 @triton.jit

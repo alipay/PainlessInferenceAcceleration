@@ -476,13 +476,14 @@ def verify_draft_kernel(
                 )
                 tl.store(output_ids + bid * (BRANCH_LEGNTH + 1) + j + 1, accept_id)
                 # should move caches of the accepted tokens
-                if max_accept_idx != 0:
-                    offset = tl.load(cache_offsets + bid)
-                    tl.store(
-                        cache_src + bid * BRANCH_LEGNTH + j,
-                        offset + BRANCH_LEGNTH * max_accept_idx + 1 + j,
-                    )
-                    tl.store(cache_dst + bid * BRANCH_LEGNTH + j, offset + 1 + j)
+                # TODO:
+                # if max_accept_idx != 0:
+                offset = tl.load(cache_offsets + bid)
+                tl.store(
+                    cache_src + bid * BRANCH_LEGNTH + j,
+                    offset + BRANCH_LEGNTH * max_accept_idx + 1 + j,
+                )
+                tl.store(cache_dst + bid * BRANCH_LEGNTH + j, offset + 1 + j)
             else:
                 stop = True
 
@@ -524,9 +525,6 @@ def verify_draft(
     tile_next_ids[:, :, 1:-1] = batch_next_ids[:, :, 1:]
     tile_next_ids[:, :-1, -1] = batch_next_ids[:, 1:, 0]
 
-    # print(f'{tile_input_ids=} \n{tile_next_ids=}')
-
-    # print(tile_input_ids)
     grid = lambda META: (batch_size,)
     verify_draft_kernel[grid](
         tile_input_ids,
@@ -554,8 +552,11 @@ def update_draft_cache_kernel(cache, src_indices, dst_indices, dim, DIM: tl.cons
 
     if src_idx >= 0:
         dst_idx = tl.load(dst_indices + pid)
-        vals = tl.load(cache + src_idx * dim + indices, mask=indices < dim, other=0.0)
-        tl.store(cache + dst_idx * dim + indices, vals, mask=indices < dim)
+        if dst_idx != src_idx:
+            vals = tl.load(
+                cache + src_idx * dim + indices, mask=indices < dim, other=0.0
+            )
+            tl.store(cache + dst_idx * dim + indices, vals, mask=indices < dim)
 
 
 def update_draft_cache(cache, src_indices, dst_indices):
@@ -566,4 +567,94 @@ def update_draft_cache(cache, src_indices, dst_indices):
     grid = lambda META: (token_count,)
     update_draft_cache_kernel[grid](
         cache, src_indices, dst_indices, dim, DIM=round_dim, num_warps=4, num_stages=3
+    )
+
+
+@triton.jit
+def update_draft_fix_size_cache_kernel(
+    cache_ptr,
+    s_offsets_ptr,
+    decay_scales_ptr,
+    keys_ptr,
+    values_ptr,
+    accept_indices_ptr,
+    k_stride,
+    v_stride,
+    BRANCH_LEGNTH: tl.constexpr,
+    BRANCH_COUNT: tl.constexpr,
+    DIM: tl.constexpr,
+):
+    bid = tl.program_id(0)
+    hid = tl.program_id(1)
+    n_heads = tl.num_programs(1)
+
+    s_offset = tl.load(s_offsets_ptr + bid)
+    offs = (
+        cache_ptr
+        + s_offset * n_heads * DIM * DIM
+        + hid * DIM * DIM
+        + tl.arange(0, DIM)[:, None] * DIM
+        + tl.arange(0, DIM)[None, :]
+    )
+    state = tl.load(offs).to(tl.float32)
+    decay_scale = tl.load(decay_scales_ptr + hid)
+
+    indices = tl.load(
+        accept_indices_ptr + bid * BRANCH_LEGNTH + tl.arange(0, BRANCH_LEGNTH)
+    )
+    accept_count = tl.sum(tl.where(indices >= 0, 1, 0))
+    scale = tl.exp(-decay_scale * (accept_count + 1))
+    state = state * scale
+
+    for i in range(accept_count + 1):
+        if i == 0:
+            idx = 0
+        else:
+            idx = tl.load(accept_indices_ptr + bid * BRANCH_LEGNTH + i - 1)
+        key = tl.load(
+            keys_ptr
+            + bid * BRANCH_LEGNTH * BRANCH_COUNT * k_stride
+            + idx * k_stride
+            + hid * DIM
+            + tl.arange(0, DIM)
+        ).to(tl.float32)
+        value = tl.load(
+            values_ptr
+            + bid * BRANCH_LEGNTH * BRANCH_COUNT * v_stride
+            + idx * v_stride
+            + hid * DIM
+            + tl.arange(0, DIM)
+        ).to(tl.float32)
+        s = tl.exp(-decay_scale * (accept_count - i))
+
+        state = state + key[:, None] * value[None, :] * s
+
+    tl.store(offs, state.to(cache_ptr.dtype.element_ty))
+
+
+def update_draft_fix_size_cache(
+    cache, s_offsets, keys, values, accept_indices, decay_scales
+):
+    bs = s_offsets.shape[0]
+    n_heads = decay_scales.shape[0]
+    assert cache.ndim == 2 and keys.ndim == 3 and values.ndim == 3
+    dim = int((cache.size(1) / n_heads) ** 0.5)
+    branch_length = accept_indices.numel() // bs
+    branch_count = keys.shape[0] // (bs * branch_length)
+
+    grid = lambda META: (bs, n_heads)
+    update_draft_fix_size_cache_kernel[grid](
+        cache,
+        s_offsets,
+        decay_scales,
+        keys,
+        values,
+        accept_indices,
+        keys.stride(0),
+        values.stride(0),
+        branch_length,
+        branch_count,
+        DIM=dim,
+        num_warps=4,
+        num_stages=3,
     )
