@@ -103,22 +103,22 @@ class Lookahead(Spec):
             src_idx = src_idx.to(device)
 
         if caches.fix_size_indices is not None:
-            s_offsets = kwargs['s_offsets']
-            cache_indices = kwargs['cache_indices']
+            s_offsets = kwargs["s_offsets"]
+            cache_indices = kwargs["cache_indices"]
             bs = s_offsets.shape[0]
             si = src_idx.view(bs, -1)
-            tmp = si - cache_indices.view(bs,-1)[:,0:1]
+            tmp = si - cache_indices.view(bs, -1)[:, 0:1]
             # print(f'{si.shape=} {cache_indices.shape=}')
-            accept_indices = torch.where(si>=0, tmp, si) 
+            accept_indices = torch.where(si >= 0, tmp, si)
 
         for i in range(caches.num_layers):
             cache = caches.caches[i]
 
             if i in caches.fix_size_indices:
                 idx = caches.fix_size_indices.index(i)
-                ks, vs, decay_scales = kwargs['fix_size_draft_cache'][idx]
-                update_draft_fix_size_cache(cache, s_offsets, ks, vs, accept_indices, decay_scales)
+                ks, vs, decay_scales = kwargs["fix_size_draft_cache"][idx]
+                update_draft_fix_size_cache(
+                    cache, s_offsets, ks, vs, accept_indices, decay_scales
+                )
             else:
                 update_draft_cache(cache, src_idx, dst_idx)
-
-

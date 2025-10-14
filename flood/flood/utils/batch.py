@@ -583,7 +583,7 @@ class Batch:
             position_ids=position_ids,
             q_offsets=q_offsets,
             k_offsets=k_offsets,
-            s_offsets=s_offsets, 
+            s_offsets=s_offsets,
             s_scales=s_scales,
             max_q_length=max_q_length,
             max_k_length=max_k_length,

@@ -1,4 +1,3 @@
-
 # -*- coding: utf-8 -*-
 """
 Copyright (c) Ant Financial Service Group and its affiliates.
@@ -26,17 +25,17 @@ random.seed(7)
 if __name__ == "__main__":
     mp.set_start_method("spawn", force=True)
 
-    model_path = "/mnt/nas/youhe.zdh/checkpoints/Ring_miniv2_linear_052"
+    model_path = "inclusionAI/Ring-mini-linear-2.0"
 
-    prompts = ["Tell me a joke"]+["Give me a short introduction to large language models."]*32
+    prompts = ["Tell me a joke"] + [
+        "Give me a short introduction to large language models."
+    ] * 32
 
     reqs = []
 
     tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
     for i, prompt in enumerate(prompts):
-        messages = [
-            {"role": "user", "content": prompt}
-        ]
+        messages = [{"role": "user", "content": prompt}]
         text = tokenizer.apply_chat_template(
             messages,
             tokenize=False,
@@ -58,7 +57,7 @@ if __name__ == "__main__":
         debug=False,
         kernels=("sa",),
         spec_algo="lookahead",
-        spec_branch_length=4, 
+        spec_branch_length=4,
         max_spec_branch_count=2,
         spec_token_budget_count=256,
         use_spec_min_batch_size=32,
@@ -77,7 +76,9 @@ if __name__ == "__main__":
         ts = time.time()
         tokens = 0
         for i, req in enumerate(
-            worker.request_stream_generate(reqs[1:], input_queue, output_queues, print_count=0)
+            worker.request_stream_generate(
+                reqs[1:], input_queue, output_queues, print_count=0
+            )
         ):
             tokens += len(req.output_ids)
             if i <= -1:
@@ -87,4 +88,6 @@ if __name__ == "__main__":
         te = time.time()
         elapse = te - ts
         speed = tokens / (te - ts)
-        print(f"sample:{len(reqs)} tokens:{tokens} elapse:{elapse:.3f} speed:{speed:.2f}")
+        print(
+            f"sample:{len(reqs)} tokens:{tokens} elapse:{elapse:.3f} speed:{speed:.2f}"
+        )

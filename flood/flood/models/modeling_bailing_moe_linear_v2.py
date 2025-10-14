@@ -390,7 +390,9 @@ class BailingMoeV2LinearAttention(torch.nn.Module):
         )
 
         if batch_meta_info.mode == 2:
-            batch_meta_info.fix_size_draft_cache.append((key_states, value_states, self.decay_scales))
+            batch_meta_info.fix_size_draft_cache.append(
+                (key_states, value_states, self.decay_scales)
+            )
 
         attn_output = self.attention(
             query_states,
@@ -643,7 +645,7 @@ class BailingMoeLinearV2ForCausalLM(PreTrainedModel):
                 past_key_values,
                 fix_size_draft_cache=batch_meta_info.fix_size_draft_cache,
                 cache_indices=batch_meta_info.cache_indices,  # diff of cache_src_indices and cache_indices is accepted indices
-                s_offsets=batch_meta_info.s_offsets
+                s_offsets=batch_meta_info.s_offsets,
             )
 
         return outputs

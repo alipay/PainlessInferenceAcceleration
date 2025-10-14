@@ -55,7 +55,11 @@ class Reader:
 
     @staticmethod
     def read_jsonl_dataset(
-        filename, tokenizer_path, prompt_name='prompt', max_count=1000, output_length=200
+        filename,
+        tokenizer_path,
+        prompt_name="prompt",
+        max_count=1000,
+        output_length=200,
     ):
         tokenizer = AutoTokenizer.from_pretrained(
             tokenizer_path, trust_remote_code=True
@@ -73,7 +77,7 @@ class Reader:
                 prompts.append(json.loads(line.strip("\n"))[prompt_name])
                 if len(prompts) >= max_count:
                     break
-            
+
         reqs = []
         for i, prompt in enumerate(prompts):
             chat = [{"role": "user", "content": prompt}]
