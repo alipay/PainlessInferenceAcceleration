@@ -168,6 +168,7 @@ class Batch:
 
         self.cache_src_indices = None
         self.cache_dst_indices = None
+        self.fix_size_draft_cache = []
 
     @staticmethod
     def prefill_batching(
@@ -502,6 +503,7 @@ class Batch:
         cache_indices = []
         k_lengths = []
         k_offsets = []
+        s_offsets = []
         k_segs = []
         for i, req in enumerate(reqs):
             s = req.input_length + len(req.output_ids)
@@ -509,6 +511,7 @@ class Batch:
             k_segs.append(n_seg)
             offset = req.segs[-1][0]
             position_ids.extend([s - 1] + [s] * (retrieve_count - 1))
+            s_offsets.append(req.fix_size_slot_index)
             for j in range(retrieve_count):
                 if retrieve_count > 1:
                     if j == 0:
@@ -551,6 +554,8 @@ class Batch:
         cache_indices = torch.tensor(cache_indices, dtype=torch.int32, device=device)
         draft_offsets = torch.tensor(draft_offsets, dtype=torch.int32, device=device)
         position_ids = torch.tensor(position_ids, dtype=torch.int32, device=device)
+        s_scales = torch.ones((bs,), dtype=torch.float32, device=device)
+        s_offsets = torch.tensor(s_offsets, dtype=torch.int32, device=device)
 
         for _, req in enumerate(reqs):
             if req.target_ids or req.temperature or req.top_k or req.top_p or req.min_p:
@@ -578,6 +583,8 @@ class Batch:
             position_ids=position_ids,
             q_offsets=q_offsets,
             k_offsets=k_offsets,
+            s_offsets=s_offsets, 
+            s_scales=s_scales,
             max_q_length=max_q_length,
             max_k_length=max_k_length,
             q_lengths=q_lengths,
