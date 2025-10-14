@@ -10,6 +10,7 @@
 
 
 ## *News or Update* 🔥
+- [2025/10] We suport Lookahead for hybrid linear model (ling-linear-v2.0).
 - [2025/09] We release segment linear attention for better performance.
 - [2025/05] We integrade Lookahead into FLOOD.
 - [2025/03] We release the code of our inference framework `FLOOD`.
