@@ -88,6 +88,8 @@ class LLM:
         spec_algo: Optional[str] = None,
         spec_branch_length: int = 0,
         max_spec_branch_count: int = 0,
+        use_spec_min_batch_size: int = 32,
+        spec_token_budget_count: int = 64,
         spec_table_size: int = 2**30,
         kernels: Tuple = ("sa",),
         logger: str = "tmp.log",
@@ -150,6 +152,10 @@ class LLM:
                     tuple (or list): eos token ids. Set to () to ignore eos.
         :param embedding_dir: embedding path for image embeddings.
         :param spec_algo: speculative decoding algo.
+        :param spec_branch_length: branch length
+        :param max_spec_branch_count: max branch count
+        :param use_spec_min_batch_size: turn on spec decoding under the batch size
+        :param spec_token_budget_count: token budget of a batch
         :param spec_table_size: bytes
         :param kernels: kernels for attention and MLP.
         :param logger: logger file.
@@ -202,6 +208,8 @@ class LLM:
         self.spec_algo = spec_algo
         self.spec_branch_length = spec_branch_length
         self.max_spec_branch_count = max_spec_branch_count
+        self.spec_token_budget_count = spec_token_budget_count
+        self.use_spec_min_batch_size = use_spec_min_batch_size
         self.spec_table_size = spec_table_size
         self.logger = logger
         self.debug = debug
@@ -637,7 +645,7 @@ class LLM:
             if task_id == 0:
                 gbs.value = self.opt_batch_size(counts.value, self.n_proc)
 
-            hungry = counts.value <= self.n_proc * self.min_batch_size
+            hungry = counts.value <= self.n_proc * self.use_spec_min_batch_size
 
             if (
                 task_id != 0
@@ -718,7 +726,6 @@ class LLM:
                             update_fails.append(req)
                     fails = update_fails
 
-                queue_ts = time.time()
                 if n_tokens < chunk_size:
                     while True:
                         try:
@@ -726,8 +733,8 @@ class LLM:
                         except:
                             break
                         # assert req.done == 0
-                        if self.spec_algo == "lookahead" and hungry:
-                            self.spec.update_state(req.input_ids)
+                        # if self.spec_algo == "lookahead" and hungry:
+                        #     self.spec.update_state(req.input_ids)
                         n_token = req.input_length
                         if n_tokens + n_token <= chunk_size:
                             n_tokens += n_token
@@ -743,7 +750,9 @@ class LLM:
                             reqs.append(req)
                             embs.append(self.get_emb(req, fe))
                             break
-                queue_time = time.time() - queue_ts
+                te = time.time()
+                queue_time = te - ts
+                ts = te
 
                 if len(reqs) == 0:
                     time.sleep(0.001)
@@ -861,7 +870,6 @@ class LLM:
                     print(f"extend slot: suc:{n_suc} fail:{n_fail}")
                 waits = update_waits
 
-                queue_ts = time.time()
                 while True:
                     try:
                         req = working_queue.get(block=True, timeout=queue_timeout)
@@ -870,7 +878,9 @@ class LLM:
                     reqs.append(req)
                     if len(reqs) >= dbs:
                         break
-                queue_time = time.time() - queue_ts
+                te = time.time()
+                queue_time = te - ts
+                ts = te
 
                 if len(reqs) == 0:
                     # time.sleep(0.001)
@@ -890,7 +900,7 @@ class LLM:
                         )
                         retrieve_count = min(
                             max(
-                                64
+                                self.spec_token_budget_count
                                 * self.n_proc
                                 // max(self.spec_branch_length * counts.value, 1),
                                 1,
@@ -1028,9 +1038,10 @@ class LLM:
                 tokens = batch.token_count
                 bs_str = f"{batch.batch_size}/{tokens}"
                 times = (
-                    f"{batching_time * 1000:.1f}/"
                     f"{queue_time * 1000:.1f}/"
-                    f"{forward_time * 1000:.1f}/{recycle_time * 1000:.1f}"
+                    f"{batching_time * 1000:.1f}/"
+                    f"{forward_time * 1000:.1f}/"
+                    f"{recycle_time * 1000:.1f}"
                 )
                 mean_input_length = sum(input_lengths) / max(len(input_lengths), 1)
                 mean_output_length = sum(output_lengths) / max(len(output_lengths), 1)
@@ -1346,7 +1357,7 @@ class LLM:
             task_type = None
             ts = time.time()
 
-            hungry = counts.value <= self.n_proc * self.min_batch_size
+            hungry = counts.value <= self.n_proc * self.use_spec_min_batch_size
 
             step += 1
             prefill_gap_time = ts - pts
@@ -1423,8 +1434,8 @@ class LLM:
                             break
 
                         # may be subbatch
-                        if req.done == 0 and self.spec_algo == "lookahead" and hungry:
-                            self.spec.update_state(req.input_ids)
+                        # if req.done == 0 and self.spec_algo == "lookahead" and hungry:
+                        #     self.spec.update_state(req.input_ids)
 
                         # may be subbatch
                         n_token = req.input_length - req.done

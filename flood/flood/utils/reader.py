@@ -20,7 +20,6 @@ class Reader:
         tokenizer = AutoTokenizer.from_pretrained(
             tokenizer_path, trust_remote_code=True
         )
-        # tokenizer = Reader.load_tokenizer(tokenizer_path)
 
         lines = []
         for line in open(filename, "r"):
@@ -55,23 +54,33 @@ class Reader:
         return reqs
 
     @staticmethod
-    def read_fix_dataset(
-        tokenizer_path, prompts=None, max_count=1000, output_length=200
+    def read_jsonl_dataset(
+        filename,
+        tokenizer_path,
+        prompt_name="prompt",
+        max_count=1000,
+        output_length=200,
     ):
         tokenizer = AutoTokenizer.from_pretrained(
             tokenizer_path, trust_remote_code=True
         )
-        if prompts is None:
+        if filename is None:
             prompts = [
                 "hello! what is your name?",
                 "tell me a joke!",
                 "中国的首都是哪里？",
                 "杭州在哪里？",
             ]
-        reqs = []
-        for i, prompt in enumerate(prompts[:max_count]):
-            chat = [{"role": "user", "content": prompt}]
+        else:
+            prompts = []
+            for line in open(filename, "r"):
+                prompts.append(json.loads(line.strip("\n"))[prompt_name])
+                if len(prompts) >= max_count:
+                    break
 
+        reqs = []
+        for i, prompt in enumerate(prompts):
+            chat = [{"role": "user", "content": prompt}]
             prompt = tokenizer.apply_chat_template(
                 chat, tokenize=False, add_generation_prompt=True
             )
