@@ -60,14 +60,16 @@ if __name__ == "__main__":
     temperature = [1 + random.random() for x in range(bs)]
     top_k = [1 + int(3 * random.random()) for x in range(bs)]
     top_p = [1 - 0.5 * random.random() for x in range(bs)]
+    min_p = [0.01 + 0.05 * random.random() for x in range(bs)]
     max_top_k = max(top_k)
     temperature = torch.tensor(temperature, dtype=dtype, device=device)
     top_k = torch.tensor(top_k, dtype=torch.int32, device=device)
     top_p = torch.tensor(top_p, dtype=dtype, device=device)
+    min_p = torch.tensor(min_p, dtype=dtype, device=device)
 
     outputs = sample_from_logit(logits, temperature, top_k, top_p, max_top_k)
     # print(outputs)
 
     benchmark_func(torch.argmax, logits)
     benchmark_func(torch.topk, logits, max_top_k, dim=-1, largest=True, sorted=True)
-    benchmark_func(sample_from_logit, logits, temperature, top_k, top_p, max_top_k)
+    benchmark_func(sample_from_logit, logits, temperature, top_k, top_p, min_p, max_top_k)
